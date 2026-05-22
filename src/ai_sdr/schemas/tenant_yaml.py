@@ -11,6 +11,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from ai_sdr.schemas.llm_yaml import LLMDefaults
+
 SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,62}[a-z0-9]$")
 
 
@@ -41,6 +43,7 @@ class TenantConfig(BaseModel):
     timezone: str
     schedule: ScheduleConfig | None = None
     conversation: ConversationConfig | None = None
+    llm: LLMDefaults | None = None
 
     @field_validator("id")
     @classmethod

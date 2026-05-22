@@ -62,3 +62,64 @@ def test_invalid_off_hours_behavior_rejected() -> None:
     }
     with pytest.raises(ValidationError):
         TenantConfig.model_validate(data)
+
+
+def test_tenant_yaml_accepts_llm_block() -> None:
+    data = {
+        "id": "joana-mentora",
+        "display_name": "X",
+        "timezone": "America/Sao_Paulo",
+        "llm": {
+            "default": {
+                "provider": "anthropic",
+                "model": "claude-sonnet-4-6",
+                "temperature": 0.7,
+                "api_key_ref": "secrets/anthropic_key",
+            },
+            "classifier": {
+                "provider": "anthropic",
+                "model": "claude-haiku-4-5",
+                "api_key_ref": "secrets/anthropic_key",
+            },
+        },
+    }
+    cfg = TenantConfig.model_validate(data)
+    assert cfg.llm is not None
+    assert cfg.llm.default.provider == "anthropic"
+    assert cfg.llm.default.model == "claude-sonnet-4-6"
+    assert cfg.llm.classifier is not None
+    assert cfg.llm.classifier.model == "claude-haiku-4-5"
+
+
+def test_llm_provider_must_be_known() -> None:
+    data = {
+        "id": "joana-mentora",
+        "display_name": "X",
+        "timezone": "America/Sao_Paulo",
+        "llm": {
+            "default": {
+                "provider": "bogus_provider",
+                "model": "x",
+                "api_key_ref": "secrets/x",
+            }
+        },
+    }
+    with pytest.raises(ValidationError, match="provider"):
+        TenantConfig.model_validate(data)
+
+
+def test_llm_api_key_ref_must_start_with_secrets_slash() -> None:
+    data = {
+        "id": "joana-mentora",
+        "display_name": "X",
+        "timezone": "America/Sao_Paulo",
+        "llm": {
+            "default": {
+                "provider": "anthropic",
+                "model": "claude-sonnet-4-6",
+                "api_key_ref": "sk-ant-PLAINTEXT-LEAK",
+            }
+        },
+    }
+    with pytest.raises(ValidationError, match="api_key_ref"):
+        TenantConfig.model_validate(data)
