@@ -1,0 +1,14 @@
+id: "example"
+display_name: "Example Tenant"
+timezone: "America/Sao_Paulo"
+
+schedule:
+  mon-fri: "08:00-22:00"
+  sat: "09:00-18:00"
+  sun: "off"
+  off_hours_behavior: "queue"
+
+conversation:
+  debounce_ms: 5000
+  optout_stop_words: ["para", "pare", "parar", "stop", "sair"]
+  optout_action: "end_conversation_silent"
