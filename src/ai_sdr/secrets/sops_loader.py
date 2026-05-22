@@ -28,7 +28,7 @@ class SopsLoader:
         if not path.is_file():
             raise SopsDecryptError(f"secrets file not found at {path}")
         try:
-            result = subprocess.run(  # noqa: S603
+            result = subprocess.run(  # noqa: S603, S607
                 ["sops", "--decrypt", str(path)],
                 capture_output=True,
                 text=True,

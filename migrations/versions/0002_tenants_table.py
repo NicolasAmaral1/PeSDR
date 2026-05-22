@@ -5,8 +5,8 @@ Revises: 0001_extensions
 Create Date: 2026-05-21 00:00:00
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects.postgresql import UUID
 
 revision = "0002_tenants_table"

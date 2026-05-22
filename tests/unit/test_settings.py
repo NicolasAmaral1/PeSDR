@@ -9,7 +9,7 @@ def test_settings_loads_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.setenv("LOG_LEVEL", "DEBUG")
     monkeypatch.setenv("TENANTS_DIR", "tenants")
-    monkeypatch.setenv("SOPS_AGE_KEY_FILE", "/tmp/age.key")
+    monkeypatch.setenv("SOPS_AGE_KEY_FILE", "/tmp/age.key"  # noqa: S108)
 
     s = Settings()
 
@@ -18,7 +18,7 @@ def test_settings_loads_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert s.app_env == "production"
     assert s.log_level == "DEBUG"
     assert s.tenants_dir == "tenants"
-    assert s.sops_age_key_file == "/tmp/age.key"
+    assert s.sops_age_key_file == "/tmp/age.key"  # noqa: S108
 
 
 def test_settings_app_env_validates_value(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -27,7 +27,7 @@ def test_settings_app_env_validates_value(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setenv("APP_ENV", "bogus")
     monkeypatch.setenv("LOG_LEVEL", "INFO")
     monkeypatch.setenv("TENANTS_DIR", "tenants")
-    monkeypatch.setenv("SOPS_AGE_KEY_FILE", "/tmp/age.key")
+    monkeypatch.setenv("SOPS_AGE_KEY_FILE", "/tmp/age.key"  # noqa: S108)
 
     with pytest.raises(ValueError):
         Settings()

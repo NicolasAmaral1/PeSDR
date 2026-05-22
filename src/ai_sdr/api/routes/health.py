@@ -14,8 +14,8 @@ router = APIRouter()
 
 @router.get("/health")
 async def health(
-    db: AsyncSession = Depends(db_session),
-    rds: aioredis.Redis = Depends(redis_client),
+    db: AsyncSession = Depends(db_session),  # noqa: B008
+    rds: aioredis.Redis = Depends(redis_client),  # noqa: B008
 ) -> dict[str, str]:
     try:
         await db.execute(text("SELECT 1"))
@@ -24,7 +24,8 @@ async def health(
         raise HTTPException(status_code=503, detail=f"db unhealthy: {e}") from e
 
     try:
-        pong = await rds.ping()
+        ping_result = rds.ping()
+        pong = await ping_result if hasattr(ping_result, "__await__") else ping_result
         redis_status = "ok" if pong else "fail"
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=503, detail=f"redis unhealthy: {e}") from e
