@@ -1,0 +1,34 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: ai_sdr_postgres
+    environment:
+      POSTGRES_USER: ai_sdr
+      POSTGRES_PASSWORD: ai_sdr_dev
+      POSTGRES_DB: ai_sdr
+    ports:
+      - "15432:5432"          # VPS: 5432 already taken by aios-central-db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ai_sdr -d ai_sdr"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: ai_sdr_redis
+    ports:
+      - "16379:6379"          # VPS: 6379 already in use
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  postgres_data:
+  redis_data:
