@@ -10,6 +10,7 @@ services:
       - "15432:5432"          # VPS: 5432 already taken by aios-central-db
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./db-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ai_sdr -d ai_sdr"]
       interval: 5s
