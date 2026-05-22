@@ -5,6 +5,7 @@ Backed by `simpleeval`, restricted to a small whitelist of AST nodes.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from simpleeval import (
@@ -20,7 +21,7 @@ class ExpressionError(Exception):
     """Raised when an expression is malformed or uses forbidden features."""
 
 
-def _is_set_factory(ctx: dict[str, Any]):
+def _is_set_factory(ctx: dict[str, Any]) -> Callable[[str], bool]:
     def is_set(name: str) -> bool:
         return name in ctx and ctx[name] is not None
 
