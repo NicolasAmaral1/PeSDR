@@ -22,22 +22,21 @@ async def test_rls_blocks_cross_tenant_reads(session: AsyncSession) -> None:
     tenant_a = uuid.uuid4()
     tenant_b = uuid.uuid4()
 
-    # Create ephemeral table with RLS
+    # Create ephemeral table with RLS (asyncpg requires one statement per execute)
     async with session.begin():
         await session.execute(
             text(
-                """
-                CREATE TABLE IF NOT EXISTS _rls_test (
-                    id SERIAL PRIMARY KEY,
-                    tenant_id UUID NOT NULL,
-                    value TEXT
-                );
-                ALTER TABLE _rls_test ENABLE ROW LEVEL SECURITY;
-                ALTER TABLE _rls_test FORCE ROW LEVEL SECURITY;
-                DROP POLICY IF EXISTS tenant_iso ON _rls_test;
-                CREATE POLICY tenant_iso ON _rls_test
-                    USING (tenant_id = current_setting('app.current_tenant', true)::uuid);
-                """
+                "CREATE TABLE IF NOT EXISTS _rls_test ("
+                "id SERIAL PRIMARY KEY, tenant_id UUID NOT NULL, value TEXT)"
+            )
+        )
+        await session.execute(text("ALTER TABLE _rls_test ENABLE ROW LEVEL SECURITY"))
+        await session.execute(text("ALTER TABLE _rls_test FORCE ROW LEVEL SECURITY"))
+        await session.execute(text("DROP POLICY IF EXISTS tenant_iso ON _rls_test"))
+        await session.execute(
+            text(
+                "CREATE POLICY tenant_iso ON _rls_test "
+                "USING (tenant_id = current_setting('app.current_tenant', true)::uuid)"
             )
         )
 
