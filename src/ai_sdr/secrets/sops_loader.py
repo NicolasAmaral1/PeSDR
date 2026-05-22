@@ -28,17 +28,15 @@ class SopsLoader:
         if not path.is_file():
             raise SopsDecryptError(f"secrets file not found at {path}")
         try:
-            result = subprocess.run(  # noqa: S603, S607
-                ["sops", "--decrypt", str(path)],
+            result = subprocess.run(  # noqa: S603
+                ["sops", "--decrypt", str(path)],  # noqa: S607
                 capture_output=True,
                 text=True,
                 check=True,
                 cwd=str(self._project_root),
             )
         except subprocess.CalledProcessError as e:
-            raise SopsDecryptError(
-                f"sops decrypt failed for {path}: {e.stderr.strip()}"
-            ) from e
+            raise SopsDecryptError(f"sops decrypt failed for {path}: {e.stderr.strip()}") from e
         data = yaml.safe_load(result.stdout)
         if not isinstance(data, dict):
             raise SopsDecryptError(f"expected dict in decrypted file, got {type(data)}")

@@ -20,8 +20,10 @@ def loader(tmp_path: Path) -> SopsLoader:
 @pytest.mark.integration
 def test_sops_binary_available() -> None:
     """SOPS must be installed on the host."""
-    result = subprocess.run(  # noqa: S603, S607
-        ["sops", "--version"], capture_output=True, text=True
+    result = subprocess.run(  # noqa: S603
+        ["sops", "--version"],  # noqa: S607
+        capture_output=True,
+        text=True,
     )
     assert result.returncode == 0
 
