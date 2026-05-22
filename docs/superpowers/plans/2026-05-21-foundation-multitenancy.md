@@ -106,6 +106,15 @@ age --version
 sops --version
 ```
 
+### VPS execution notes
+
+This plan executes inside `vps-nova` at `/root/PeSDR`. The VPS already hosts ~40 containers (Vialum, Avelum, etc.) and the standard ports `5432` and `6379` are taken by other services. Therefore:
+
+- Postgres exposed on host port **`15432`** (container port `5432`)
+- Redis exposed on host port **`16379`** (container port `6379`)
+- API will run on host port **`8200`** for dev (moves behind Traefik on `sdr.luminai.ia.br` in a later plan)
+- All commands run on the VPS host via SSH
+
 ---
 
 ## Task 1: Python tooling (uv, ruff, mypy, pre-commit, editorconfig)
@@ -277,11 +286,11 @@ git commit -m "chore: bootstrap python project with uv, ruff, mypy, pre-commit"
 - [ ] **Step 1: Create `.env.example`**
 
 ```bash
-# Database
-DATABASE_URL=postgresql+asyncpg://ai_sdr:ai_sdr_dev@localhost:5432/ai_sdr
+# Database (VPS: host port 15432 to avoid clash with existing postgres on 5432)
+DATABASE_URL=postgresql+asyncpg://ai_sdr:ai_sdr_dev@localhost:15432/ai_sdr
 
-# Redis
-REDIS_URL=redis://localhost:6379/0
+# Redis (VPS: host port 16379 to avoid clash)
+REDIS_URL=redis://localhost:16379/0
 
 # App
 APP_ENV=development
@@ -291,7 +300,7 @@ LOG_LEVEL=INFO
 TENANTS_DIR=tenants
 
 # SOPS age key file (path to private key)
-SOPS_AGE_KEY_FILE=~/.config/sops/age/keys.txt
+SOPS_AGE_KEY_FILE=/root/.config/sops/age/keys.txt
 ```
 
 - [ ] **Step 2: Create `Makefile`**
@@ -386,7 +395,7 @@ services:
       POSTGRES_PASSWORD: ai_sdr_dev
       POSTGRES_DB: ai_sdr
     ports:
-      - "5432:5432"
+      - "15432:5432"          # VPS: 5432 already taken by aios-central-db
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -399,7 +408,7 @@ services:
     image: redis:7-alpine
     container_name: ai_sdr_redis
     ports:
-      - "6379:6379"
+      - "16379:6379"          # VPS: 6379 already in use
     volumes:
       - redis_data:/data
     healthcheck:
@@ -798,7 +807,7 @@ This creates `alembic.ini`, `migrations/env.py`, `migrations/script.py.mako`, `m
 Find `sqlalchemy.url = ...` and replace with:
 
 ```ini
-sqlalchemy.url = postgresql+asyncpg://ai_sdr:ai_sdr_dev@localhost:5432/ai_sdr
+sqlalchemy.url = postgresql+asyncpg://ai_sdr:ai_sdr_dev@localhost:15432/ai_sdr
 ```
 
 (Note: env.py will override this from settings — see next step.)
@@ -1945,7 +1954,7 @@ Expected: PASS.
 Run (in a separate terminal):
 
 ```bash
-uv run uvicorn ai_sdr.main:app --reload
+uv run uvicorn ai_sdr.main:app --host 0.0.0.0 --port 8200 --reload
 ```
 
 Then in your browser or via curl:
@@ -2000,7 +2009,7 @@ age-keygen -o ~/.config/sops/age/keys.txt
 # Add your public key to .sops.yaml
 
 # 5. Run the app
-uv run uvicorn ai_sdr.main:app --reload
+uv run uvicorn ai_sdr.main:app --host 0.0.0.0 --port 8200 --reload
 
 # 6. Hit health endpoint
 curl http://localhost:8000/health
@@ -2128,10 +2137,10 @@ Expected: no errors.
 Run (separate terminal):
 
 ```bash
-uv run uvicorn ai_sdr.main:app
+uv run uvicorn ai_sdr.main:app --host 0.0.0.0 --port 8200
 ```
 
-Then:
+Then (from your laptop, via SSH tunnel: `ssh -L 8200:localhost:8200 vps-nova` in another shell, or directly on the VPS):
 
 ```bash
 curl http://localhost:8000/health
