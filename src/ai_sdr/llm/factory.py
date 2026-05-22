@@ -33,11 +33,11 @@ def build_llm(cfg: LLMConfig, secrets: dict[str, str]) -> BaseChatModel:
     if cfg.provider == "anthropic":
         from langchain_anthropic import ChatAnthropic
 
-        return ChatAnthropic(model=cfg.model, api_key=api_key, **kwargs)  # type: ignore[arg-type,call-arg]
+        return ChatAnthropic(model=cfg.model, api_key=api_key, **kwargs)
 
     if cfg.provider == "openai":
         from langchain_openai import ChatOpenAI
 
-        return ChatOpenAI(model=cfg.model, api_key=api_key, **kwargs)  # type: ignore[arg-type,call-arg]
+        return ChatOpenAI(model=cfg.model, api_key=api_key, **kwargs)
 
     raise UnknownProviderError(f"unsupported provider: {cfg.provider!r}")
