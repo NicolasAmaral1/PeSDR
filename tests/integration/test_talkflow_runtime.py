@@ -58,8 +58,8 @@ nodes:
         target: END
 """
 
-TENANT_YAML = """\
-id: rttest
+TENANT_YAML_TEMPLATE = """\
+id: {slug}
 display_name: RT Test
 timezone: America/Sao_Paulo
 llm:
@@ -70,11 +70,10 @@ llm:
 """
 
 
-@pytest.fixture
-def fake_tenants(tmp_path: Path) -> Path:
-    base = tmp_path / "tenants" / "rttest"
+def _write_tenant_fixture(tmp_path: Path, slug: str) -> Path:
+    base = tmp_path / "tenants" / slug
     (base / "treeflows").mkdir(parents=True)
-    (base / "tenant.yaml").write_text(TENANT_YAML)
+    (base / "tenant.yaml").write_text(TENANT_YAML_TEMPLATE.format(slug=slug))
     (base / "treeflows" / "demo.yaml").write_text(DEMO_YAML)
     return tmp_path / "tenants"
 
@@ -94,8 +93,11 @@ def _stub_factory(per_node_payloads: dict[str, dict[str, Any]]) -> Any:
 
 
 @pytest.mark.integration
-async def test_publish_create_step_end_to_end(fake_tenants: Path) -> None:
+async def test_publish_create_step_end_to_end(tmp_path: Path) -> None:
     await ensure_checkpointer_schema()
+
+    tenant_slug_base = f"rttest-{uuid.uuid4().hex[:6]}"
+    fake_tenants = _write_tenant_fixture(tmp_path, tenant_slug_base)
 
     settings = get_settings()
     engine = create_async_engine(settings.database_url)
@@ -118,7 +120,7 @@ async def test_publish_create_step_end_to_end(fake_tenants: Path) -> None:
 
     async with sm() as session:
         async with session.begin():
-            t = Tenant(slug=f"rttest-{uuid.uuid4().hex[:6]}", display_name="RT")
+            t = Tenant(slug=tenant_slug_base, display_name="RT")
             session.add(t)
             await session.flush()
             await runtime.publish_version(session, t, "demo")
