@@ -12,3 +12,14 @@ conversation:
   debounce_ms: 5000
   optout_stop_words: ["para", "pare", "parar", "stop", "sair"]
   optout_action: "end_conversation_silent"
+
+llm:
+  default:
+    provider: anthropic
+    model: claude-sonnet-4-6
+    temperature: 0.7
+    api_key_ref: secrets/anthropic_key
+  classifier:
+    provider: anthropic
+    model: claude-haiku-4-5
+    api_key_ref: secrets/anthropic_key

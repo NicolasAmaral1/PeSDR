@@ -1,0 +1,49 @@
+id: example
+version: 0.1.0
+display_name: "Funil Exemplo"
+
+entry_node: saudacao
+
+nodes:
+  - id: saudacao
+    prompt: |
+      Você é uma SDR conversando no WhatsApp em PT-BR.
+      Cumprimente o lead em UMA frase curta e diga que vai fazer uma pergunta rápida.
+    exit_condition: { type: all_fields_filled }
+    next_nodes:
+      - condition: "true"
+        target: qualificacao
+
+  - id: qualificacao
+    prompt: |
+      Você é uma SDR. Em UMA pergunta, pergunte qual é o faturamento mensal aproximado da empresa do lead, em reais.
+      Se ele já disse o valor, agradeça em uma frase e siga.
+    collects:
+      - field: faturamento_mensal
+        type: number
+        extraction_hint: "valor mensal em R$, em número (sem 'R$' nem 'mil')"
+        required: true
+    exit_condition:
+      type: rule_expression
+      expression: "faturamento_mensal != None"
+    next_nodes:
+      - condition: "faturamento_mensal >= 30000"
+        target: oferta_premium
+      - condition: "faturamento_mensal < 30000"
+        target: oferta_basica
+
+  - id: oferta_premium
+    prompt: |
+      Apresente a Mentoria (R$ 6000) em UMA frase, e pergunte se ele tem interesse em conversar com um humano.
+    exit_condition: { type: all_fields_filled }
+    next_nodes:
+      - condition: "true"
+        target: END
+
+  - id: oferta_basica
+    prompt: |
+      Apresente a Aceleradora (R$ 1497) em UMA frase, e pergunte se ele tem interesse em conversar com um humano.
+    exit_condition: { type: all_fields_filled }
+    next_nodes:
+      - condition: "true"
+        target: END
