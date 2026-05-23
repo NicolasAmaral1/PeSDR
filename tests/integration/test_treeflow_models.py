@@ -80,6 +80,7 @@ async def test_rls_blocks_cross_tenant_reads_on_talkflows(session: AsyncSession)
                 thread_id=f"{t1.id}:d:L1",
             )
         )
+        await session.flush()  # force INSERT before switching tenant context (RLS WITH CHECK)
 
         await set_tenant_context(session, t2.id)
         v2 = TreeflowVersion(
@@ -99,6 +100,7 @@ async def test_rls_blocks_cross_tenant_reads_on_talkflows(session: AsyncSession)
                 thread_id=f"{t2.id}:d:L2",
             )
         )
+        await session.flush()
 
     # Read as t1 — should see only L1
     async with session.begin():
