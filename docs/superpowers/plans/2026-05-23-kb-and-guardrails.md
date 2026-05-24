@@ -407,6 +407,219 @@ git commit -m "feat(plan3 t2): tenant schema gains guardrails + llm.embeddings +
 
 ---
 
+## Task 2b: Open `LLMConfig.provider` for any LangChain-supported provider
+
+**Files:**
+- Modify: `pyproject.toml`
+- Modify: `src/ai_sdr/schemas/llm_yaml.py`
+- Modify: `src/ai_sdr/llm/factory.py`
+- Modify: `tests/unit/test_llm_factory.py`
+
+**Design:** Open the door to non-Anthropic/OpenAI providers via `langchain.chat_models.init_chat_model("<provider>:<model>", api_key=...)`. Schema changes from `Literal["anthropic", "openai"]` to free-form `str` so tenants can declare any provider whose `langchain-<x>` package is installed. Factory replaces its if/else chain with a single `init_chat_model()` call. Adds three new deps (`langchain-google-genai`, `langchain-deepseek`, `langchain-ollama`) so tenants can pick from {anthropic, openai, google_genai, deepseek, ollama} without installing extras.
+
+**End-to-end validation of each new provider is OUT OF SCOPE here.** Plan 4 will do the validation matrix (live_llm tests per provider + provider-specific tuning + multi-provider embeddings). T2b is the schema/factory opening only — declaration works; runtime correctness for new providers is unverified.
+
+- [ ] **Step 1: Add the three new langchain provider deps**
+
+Edit `pyproject.toml` `dependencies = [...]`. After the existing `"langchain-openai>=0.2.14",` line, add (preserve the order; group the langchain-* entries together):
+
+```toml
+    "langchain-anthropic>=0.3.0",
+    "langchain-openai>=0.2.14",
+    "langchain-google-genai>=2.0.0",
+    "langchain-deepseek>=0.1.0",
+    "langchain-ollama>=0.2.0",
+```
+
+Then:
+
+```
+uv lock && uv sync
+```
+
+Smoke-import each new provider:
+
+```
+uv run python -c "from langchain.chat_models import init_chat_model; print('ok')"
+uv run python -c "import langchain_google_genai, langchain_deepseek, langchain_ollama; print('ok')"
+```
+
+Both should print `ok`.
+
+- [ ] **Step 2: Write the failing test**
+
+Replace (or extend, if it exists already) `tests/unit/test_llm_factory.py` with content that exercises the new dispatch logic. Keep any existing anthropic/openai tests; add cases for the new providers via mocking `init_chat_model`:
+
+```python
+"""Tests for build_llm — provider-agnostic via init_chat_model."""
+
+from __future__ import annotations
+
+from unittest.mock import patch
+
+import pytest
+
+from ai_sdr.llm.factory import build_llm
+from ai_sdr.schemas.llm_yaml import LLMConfig
+
+
+def _cfg(provider: str, model: str = "m", api_key_ref: str = "k") -> LLMConfig:
+    return LLMConfig(
+        provider=provider, model=model, api_key_ref=api_key_ref, temperature=0.5
+    )
+
+
+def test_anthropic_dispatched_via_init_chat_model() -> None:
+    with patch("ai_sdr.llm.factory.init_chat_model") as fake:
+        build_llm(_cfg("anthropic", "claude-sonnet-4-6", "anthropic_key"),
+                  secrets={"anthropic_key": "sk-fake"})
+    fake.assert_called_once()
+    args, kwargs = fake.call_args
+    assert args[0] == "anthropic:claude-sonnet-4-6"
+    assert kwargs["api_key"] == "sk-fake"
+    assert kwargs["temperature"] == 0.5
+
+
+def test_openai_dispatched_via_init_chat_model() -> None:
+    with patch("ai_sdr.llm.factory.init_chat_model") as fake:
+        build_llm(_cfg("openai", "gpt-4o", "openai_key"),
+                  secrets={"openai_key": "sk-openai-fake"})
+    args, kwargs = fake.call_args
+    assert args[0] == "openai:gpt-4o"
+    assert kwargs["api_key"] == "sk-openai-fake"
+
+
+def test_google_genai_dispatched() -> None:
+    with patch("ai_sdr.llm.factory.init_chat_model") as fake:
+        build_llm(_cfg("google_genai", "gemini-2.0-flash", "google_key"),
+                  secrets={"google_key": "AIza-fake"})
+    args, kwargs = fake.call_args
+    assert args[0] == "google_genai:gemini-2.0-flash"
+    assert kwargs["api_key"] == "AIza-fake"
+
+
+def test_deepseek_dispatched() -> None:
+    with patch("ai_sdr.llm.factory.init_chat_model") as fake:
+        build_llm(_cfg("deepseek", "deepseek-chat", "deepseek_key"),
+                  secrets={"deepseek_key": "sk-ds-fake"})
+    args, kwargs = fake.call_args
+    assert args[0] == "deepseek:deepseek-chat"
+    assert kwargs["api_key"] == "sk-ds-fake"
+
+
+def test_ollama_dispatched_without_api_key() -> None:
+    """Ollama is local — no api_key. Factory should still work."""
+    with patch("ai_sdr.llm.factory.init_chat_model") as fake:
+        build_llm(_cfg("ollama", "llama3.2", "ollama_key"),
+                  secrets={"ollama_key": ""})  # empty / unused
+    args, kwargs = fake.call_args
+    assert args[0] == "ollama:llama3.2"
+
+
+def test_missing_api_key_in_secrets_raises_keyerror() -> None:
+    with pytest.raises(KeyError, match="anthropic_key"):
+        build_llm(_cfg("anthropic"), secrets={})
+
+
+def test_arbitrary_provider_string_accepted_by_schema() -> None:
+    """Schema is free-form now; factory delegates to init_chat_model."""
+    with patch("ai_sdr.llm.factory.init_chat_model") as fake:
+        build_llm(_cfg("brand_new_provider", "some-model", "x"),
+                  secrets={"x": "y"})
+    args, _ = fake.call_args
+    assert args[0] == "brand_new_provider:some-model"
+```
+
+- [ ] **Step 3: Run (expect fail)**
+
+Run: `uv run pytest tests/unit/test_llm_factory.py -v`
+
+Expected: FAIL (current factory uses if/else, not `init_chat_model`).
+
+- [ ] **Step 4: Widen `LLMConfig.provider` to `str`**
+
+In `src/ai_sdr/schemas/llm_yaml.py`, change `LLMConfig.provider` from `Literal["anthropic", "openai"]` to `str`. Document the trade-off:
+
+```python
+class LLMConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Free-form string — dispatched via langchain.chat_models.init_chat_model.
+    # Common values: "anthropic", "openai", "google_genai", "deepseek", "ollama",
+    # "bedrock_converse", "vertexai", "mistralai". Whichever langchain-<x> package
+    # is installed will work. Validation that the runtime actually supports the
+    # chosen provider happens lazily inside build_llm() / init_chat_model().
+    provider: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    api_key_ref: str = Field(min_length=1)
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+```
+
+(Keep any other existing fields on LLMConfig as-is.)
+
+- [ ] **Step 5: Refactor `src/ai_sdr/llm/factory.py`**
+
+Replace the existing factory body. Final shape:
+
+```python
+"""LLM factory — provider-agnostic dispatch via langchain.chat_models.init_chat_model.
+
+Plan 3 T2b opened this from a 2-provider if/else (anthropic, openai) to free-form.
+Supported providers are whichever langchain-<x> packages are installed; the
+factory does not validate the provider name (init_chat_model raises if it can't
+resolve the package).
+
+End-to-end validation of providers beyond anthropic + openai is Plan 4's job.
+"""
+
+from __future__ import annotations
+
+from langchain.chat_models import init_chat_model
+from langchain_core.language_models import BaseChatModel
+
+from ai_sdr.schemas.llm_yaml import LLMConfig
+
+
+def build_llm(cfg: LLMConfig, secrets: dict[str, str]) -> BaseChatModel:
+    """Build a chat model. Caller passes the secrets dict; we resolve api_key_ref."""
+    api_key = secrets[cfg.api_key_ref]  # KeyError surfaces explicitly
+    kwargs: dict = {"api_key": api_key}
+    if cfg.temperature is not None:
+        kwargs["temperature"] = cfg.temperature
+    return init_chat_model(f"{cfg.provider}:{cfg.model}", **kwargs)
+```
+
+(Note: `init_chat_model` accepts `api_key` for most providers; Ollama ignores it. Passing it unconditionally is safe.)
+
+- [ ] **Step 6: Run tests**
+
+Run: `uv run pytest tests/unit/test_llm_factory.py -v`
+
+Expected: all PASS.
+
+- [ ] **Step 7: Run full unit suite (catch regressions)**
+
+Run: `make test-unit`
+
+Expected: all green. If `tests/unit/test_extractor.py` or others depend on `LLMConfig.provider` being a `Literal`, they shouldn't — string values like `"anthropic"` are still valid under `str`.
+
+- [ ] **Step 8: Spot-check existing integration tests still pass**
+
+Run: `uv run pytest tests/integration/test_talkflow_runtime.py -v -m integration` (the live LLM round-trip test from Plan 2).
+
+Expected: PASS (uses anthropic provider, which still works).
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add pyproject.toml uv.lock src/ai_sdr/schemas/llm_yaml.py src/ai_sdr/llm/factory.py tests/unit/test_llm_factory.py
+git commit -m "feat(plan3 t2b): widen LLMConfig.provider via init_chat_model (gemini/deepseek/ollama deps added)"
+```
+
+**Plan 4 note:** any tenant can now declare `provider: "google_genai"` (or others) in `tenant.yaml` and the schema accepts it; whether the runtime turn actually succeeds requires the API key in secrets + that provider's quirks (rate limits, function-calling shape, prompt caching availability) being compatible with our pipeline. Plan 4 will set up the validation matrix.
+
+---
+
 ## Task 3: TreeFlow schema — typed `KBRef`
 
 **Files:**
