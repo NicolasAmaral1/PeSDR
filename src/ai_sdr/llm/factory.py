@@ -1,43 +1,31 @@
-"""Build a `BaseChatModel` from an `LLMConfig` + tenant secrets."""
+"""LLM factory — provider-agnostic dispatch via langchain.chat_models.init_chat_model.
+
+Plan 3 T2b opened this from a 2-provider if/else (anthropic, openai) to free-form.
+Supported providers are whichever langchain-<x> packages are installed; the
+factory does not validate the provider name (init_chat_model raises if it can't
+resolve the package).
+
+End-to-end validation of providers beyond anthropic + openai is Plan 4's job.
+"""
 
 from __future__ import annotations
 
+from typing import Any, cast
+
+from langchain.chat_models import init_chat_model
 from langchain_core.language_models import BaseChatModel
 
 from ai_sdr.schemas.llm_yaml import LLMConfig
 
 
-class LLMSecretNotFoundError(KeyError):
-    """The secret referenced by `api_key_ref` is not in the secrets dict."""
-
-
-class UnknownProviderError(ValueError):
-    """The provider in LLMConfig is not registered."""
-
-
-def resolve_api_key(cfg: LLMConfig, secrets: dict[str, str]) -> str:
-    """`api_key_ref` is 'secrets/<name>'; return secrets[<name>]."""
-    name = cfg.api_key_ref.removeprefix("secrets/")
-    if name not in secrets:
-        raise LLMSecretNotFoundError(name)
-    return secrets[name]
-
-
 def build_llm(cfg: LLMConfig, secrets: dict[str, str]) -> BaseChatModel:
-    """Instantiate a LangChain chat model based on `cfg.provider`."""
-    api_key = resolve_api_key(cfg, secrets)
-    kwargs: dict[str, object] = {"temperature": cfg.temperature}
-    if cfg.max_tokens is not None:
-        kwargs["max_tokens"] = cfg.max_tokens
+    """Build a chat model. Caller passes the secrets dict; we resolve api_key_ref.
 
-    if cfg.provider == "anthropic":
-        from langchain_anthropic import ChatAnthropic
-
-        return ChatAnthropic(model=cfg.model, api_key=api_key, **kwargs)
-
-    if cfg.provider == "openai":
-        from langchain_openai import ChatOpenAI
-
-        return ChatOpenAI(model=cfg.model, api_key=api_key, **kwargs)
-
-    raise UnknownProviderError(f"unsupported provider: {cfg.provider!r}")
+    The `api_key_ref` value is used directly as the lookup key into `secrets`
+    (e.g. `"secrets/anthropic_key"`). A missing key raises `KeyError`.
+    """
+    api_key = secrets[cfg.api_key_ref]
+    kwargs: dict[str, Any] = {"api_key": api_key}
+    if cfg.temperature is not None:
+        kwargs["temperature"] = cfg.temperature
+    return cast(BaseChatModel, init_chat_model(f"{cfg.provider}:{cfg.model}", **kwargs))

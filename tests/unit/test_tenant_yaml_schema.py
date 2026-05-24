@@ -91,14 +91,33 @@ def test_tenant_yaml_accepts_llm_block() -> None:
     assert cfg.llm.classifier.model == "claude-haiku-4-5"
 
 
-def test_llm_provider_must_be_known() -> None:
+def test_llm_provider_accepts_arbitrary_string() -> None:
+    """Plan 3 T2b: provider is free-form `str`; init_chat_model dispatches lazily."""
     data = {
         "id": "joana-mentora",
         "display_name": "X",
         "timezone": "America/Sao_Paulo",
         "llm": {
             "default": {
-                "provider": "bogus_provider",
+                "provider": "google_genai",
+                "model": "gemini-2.0-flash",
+                "api_key_ref": "secrets/google_key",
+            }
+        },
+    }
+    cfg = TenantConfig.model_validate(data)
+    assert cfg.llm is not None
+    assert cfg.llm.default.provider == "google_genai"
+
+
+def test_llm_provider_rejects_empty_string() -> None:
+    data = {
+        "id": "joana-mentora",
+        "display_name": "X",
+        "timezone": "America/Sao_Paulo",
+        "llm": {
+            "default": {
+                "provider": "",
                 "model": "x",
                 "api_key_ref": "secrets/x",
             }

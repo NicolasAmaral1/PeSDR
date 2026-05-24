@@ -6,8 +6,6 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-ProviderName = Literal["anthropic", "openai"]
-
 
 def _validate_api_key_ref(v: str) -> str:
     """Enforce the SOPS-secret-ref invariant: api_key_ref must start with 'secrets/'.
@@ -27,7 +25,13 @@ class LLMConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    provider: ProviderName
+    # Free-form string — dispatched via langchain.chat_models.init_chat_model.
+    # Common values: "anthropic", "openai", "google_genai", "deepseek", "ollama",
+    # "bedrock_converse", "vertexai", "mistralai". Whichever langchain-<x> package
+    # is installed will work. Trade-off: we lose Literal's compile-time guarantee
+    # of provider validity; validation that the runtime actually supports the
+    # chosen provider happens lazily inside build_llm() / init_chat_model().
+    provider: str = Field(min_length=1)
     model: str = Field(min_length=1)
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     max_tokens: int | None = Field(default=None, gt=0, le=64_000)
