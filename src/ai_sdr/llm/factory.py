@@ -21,10 +21,12 @@ from ai_sdr.schemas.llm_yaml import LLMConfig
 def build_llm(cfg: LLMConfig, secrets: dict[str, str]) -> BaseChatModel:
     """Build a chat model. Caller passes the secrets dict; we resolve api_key_ref.
 
-    The `api_key_ref` value is used directly as the lookup key into `secrets`
-    (e.g. `"secrets/anthropic_key"`). A missing key raises `KeyError`.
+    The `secrets/` prefix on `api_key_ref` is a documentation convention
+    ("this is a SOPS secret reference, not a plaintext key"); the actual lookup
+    key in the secrets dict is the bare name (e.g. `"anthropic_key"`), which is
+    how `SopsLoader` shapes its output. A missing key raises `KeyError`.
     """
-    api_key = secrets[cfg.api_key_ref]
+    api_key = secrets[cfg.api_key_ref.removeprefix("secrets/")]
     kwargs: dict[str, Any] = {"api_key": api_key}
     if cfg.temperature is not None:
         kwargs["temperature"] = cfg.temperature
