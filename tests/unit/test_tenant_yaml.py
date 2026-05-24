@@ -5,8 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from ai_sdr.schemas.llm_yaml import EmbeddingsConfig, LLMConfig, LLMDefaults
-from ai_sdr.schemas.tenant_yaml import GuardrailsConfig, TenantConfig
+from ai_sdr.schemas.tenant_yaml import TenantConfig
 
 
 def _minimal_tenant_data() -> dict:
@@ -83,6 +82,19 @@ def test_guardrails_full_block() -> None:
     assert cfg.guardrails.max_retries == 2
 
 
+def test_guardrails_enabled_with_only_products_passes() -> None:
+    data = _minimal_tenant_data()
+    data["guardrails"] = {
+        "enabled": True,
+        "allowed_prices": [],
+        "allowed_products": ["Mentoria"],
+        "fallback_text": "Confirmo já já, ok?",
+    }
+    cfg = TenantConfig.model_validate(data)
+    assert cfg.guardrails is not None
+    assert cfg.guardrails.allowed_products == ["Mentoria"]
+
+
 def test_llm_defaults_cache_enabled_default_true() -> None:
     cfg = TenantConfig.model_validate(_minimal_tenant_data())
     assert cfg.llm.cache_enabled is True
@@ -107,7 +119,7 @@ def test_llm_embeddings_defaults() -> None:
     assert cfg.llm.embeddings is not None
     assert cfg.llm.embeddings.provider == "openai"
     assert cfg.llm.embeddings.model == "text-embedding-3-small"
-    assert cfg.llm.embeddings.api_key_ref == "openai_key"
+    assert cfg.llm.embeddings.api_key_ref == "secrets/openai_key"
 
 
 def test_llm_embeddings_explicit_values() -> None:
@@ -115,9 +127,9 @@ def test_llm_embeddings_explicit_values() -> None:
     data["llm"]["embeddings"] = {
         "provider": "openai",
         "model": "text-embedding-3-large",
-        "api_key_ref": "openai_key_alt",
+        "api_key_ref": "secrets/openai_key_alt",
     }
     cfg = TenantConfig.model_validate(data)
     assert cfg.llm.embeddings is not None
     assert cfg.llm.embeddings.model == "text-embedding-3-large"
-    assert cfg.llm.embeddings.api_key_ref == "openai_key_alt"
+    assert cfg.llm.embeddings.api_key_ref == "secrets/openai_key_alt"

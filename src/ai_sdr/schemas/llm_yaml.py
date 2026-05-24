@@ -9,6 +9,19 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 ProviderName = Literal["anthropic", "openai"]
 
 
+def _validate_api_key_ref(v: str) -> str:
+    """Enforce the SOPS-secret-ref invariant: api_key_ref must start with 'secrets/'.
+
+    Prevents plaintext keys from being embedded directly in tenant.yaml.
+    """
+    if not v.startswith("secrets/"):
+        raise ValueError(
+            "api_key_ref must reference a SOPS secret (e.g. 'secrets/anthropic_key'); "
+            "never embed the key directly"
+        )
+    return v
+
+
 class LLMConfig(BaseModel):
     """A single LLM call configuration."""
 
@@ -23,12 +36,7 @@ class LLMConfig(BaseModel):
     @field_validator("api_key_ref")
     @classmethod
     def _api_key_ref_is_a_secret_ref(cls, v: str) -> str:
-        if not v.startswith("secrets/"):
-            raise ValueError(
-                "api_key_ref must reference a SOPS secret (e.g. 'secrets/anthropic_key'); "
-                "never embed the key directly"
-            )
-        return v
+        return _validate_api_key_ref(v)
 
 
 class EmbeddingsConfig(BaseModel):
@@ -38,7 +46,12 @@ class EmbeddingsConfig(BaseModel):
 
     provider: Literal["openai"] = "openai"
     model: str = "text-embedding-3-small"
-    api_key_ref: str = "openai_key"
+    api_key_ref: str = "secrets/openai_key"
+
+    @field_validator("api_key_ref")
+    @classmethod
+    def _api_key_ref_is_a_secret_ref(cls, v: str) -> str:
+        return _validate_api_key_ref(v)
 
 
 class LLMDefaults(BaseModel):

@@ -7,10 +7,9 @@ Later plans extend with crm, messaging, llm, media, guardrails, treeflows.
 from __future__ import annotations
 
 import re
-from typing import Literal
+from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from typing_extensions import Self
 
 from ai_sdr.schemas.llm_yaml import LLMDefaults
 
