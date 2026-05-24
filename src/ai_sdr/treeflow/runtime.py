@@ -40,6 +40,11 @@ SecretsResolver = Callable[[str], dict[str, str]]
 """(tenant_slug) -> {secret_name: value}. Default: SopsLoader.load."""
 
 
+async def _session_factory(session: AsyncSession) -> AsyncSession:
+    """Returns the same session — runtime owns one DB session per step."""
+    return session
+
+
 class TalkFlowRuntime:
     def __init__(
         self,
@@ -186,7 +191,10 @@ class TalkFlowRuntime:
                 tf,
                 tenant_llm=llm_defaults,
                 secrets=secrets,
+                guardrails=tenant_cfg.guardrails,
+                tenant_id=tenant.id,
                 llm_factory=self._llm_factory,
+                kb_session_factory=lambda: _session_factory(session),
                 checkpointer=saver,
             )
             cfg: RunnableConfig = {"configurable": {"thread_id": talkflow.thread_id}}

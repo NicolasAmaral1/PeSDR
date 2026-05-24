@@ -1,17 +1,24 @@
-"""Compile a `TreeFlow` into a LangGraph `CompiledStateGraph`."""
+"""Compile a `TreeFlow` into a LangGraph `CompiledStateGraph` with KB + guardrails."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import uuid
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import END, START, StateGraph
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from ai_sdr.llm.extractor import RESPONSE_FIELD, build_structured_model, extract
+from ai_sdr.guardrails.runner import GuardrailsRunResult, run_with_guardrails
+from ai_sdr.kb.embeddings import Embedder, build_embedder
+from ai_sdr.kb.retriever import RetrievedChunk, retrieve
+from ai_sdr.llm.extractor import build_structured_model, extract
 from ai_sdr.llm.factory import build_llm as _default_build_llm
+from ai_sdr.llm.messages import build_system_messages
 from ai_sdr.schemas.llm_yaml import LLMConfig, LLMDefaults
+from ai_sdr.schemas.tenant_yaml import GuardrailsConfig
 from ai_sdr.schemas.treeflow_yaml import NodeSpec, TreeFlow
 from ai_sdr.treeflow.expressions import eval_bool
 from ai_sdr.treeflow.state import Message, TalkFlowState
@@ -21,9 +28,19 @@ LLMFactory = Callable[[LLMConfig, dict[str, str], str], BaseChatModel]
 
 The `current_node_id` arg is purely for test stubs; the production factory ignores it."""
 
+EmbedderFactory = Callable[[dict[str, str], Any], Awaitable[Embedder]]
+"""(secrets, embeddings_cfg) -> Embedder."""
 
-def _default_factory(cfg: LLMConfig, secrets: dict[str, str], _node_id: str) -> BaseChatModel:
+KbSessionFactory = Callable[[], Awaitable[AsyncSession]]
+"""() -> AsyncSession. Runtime owns one DB session per step; tests can inject any."""
+
+
+def _default_llm_factory(cfg: LLMConfig, secrets: dict[str, str], _node_id: str) -> BaseChatModel:
     return _default_build_llm(cfg, secrets)
+
+
+async def _default_embedder_factory(secrets: dict[str, str], cfg: Any) -> Embedder:
+    return build_embedder(secrets, cfg)
 
 
 def _exit_satisfied(node: NodeSpec, collected: dict[str, Any]) -> bool:
@@ -61,46 +78,118 @@ def _route(node: NodeSpec, collected: dict[str, Any]) -> tuple[str, bool]:
     return (node.id, False)
 
 
+def _render_kb_block(chunks: list[RetrievedChunk]) -> str:
+    parts = []
+    for i, c in enumerate(chunks, 1):
+        header = f"[{i}] {c.heading_path or '(sem heading)'} (score {c.score:.2f}) [{c.kb_id}]"
+        parts.append(f"{header}\n{c.content}")
+    return "<knowledge_base>\n" + "\n\n".join(parts) + "\n</knowledge_base>"
+
+
 def compile_treeflow(
     tf: TreeFlow,
     tenant_llm: LLMDefaults,
     secrets: dict[str, str],
+    *,
+    guardrails: GuardrailsConfig | None = None,
+    tenant_id: uuid.UUID | None = None,
     llm_factory: LLMFactory | None = None,
+    embedder_factory: EmbedderFactory | None = None,
+    kb_session_factory: KbSessionFactory | None = None,
     checkpointer: Any = None,
 ) -> Any:
     """Compile a TreeFlow into a LangGraph StateGraph.
 
-    Pass `checkpointer` to enable per-thread state persistence.
+    Keyword-only args:
+      guardrails: tenant.guardrails block; when None the runner is a passthrough.
+      tenant_id, embedder_factory, kb_session_factory: required when any node has
+        a non-empty `knowledge_base`; raise ValueError at compile time if missing.
+      checkpointer: pass to enable per-thread state persistence.
     """
-    factory: LLMFactory = llm_factory or _default_factory
+    llm_fn: LLMFactory = llm_factory or _default_llm_factory
+    emb_fn: EmbedderFactory = embedder_factory or _default_embedder_factory
+
+    any_node_has_kb = any(n.knowledge_base for n in tf.nodes)
+    if any_node_has_kb:
+        if tenant_id is None or kb_session_factory is None:
+            raise ValueError(
+                "compile_treeflow: tenant_id + kb_session_factory are required "
+                "when any node has knowledge_base"
+            )
+        if tenant_llm.embeddings is None:
+            raise ValueError(
+                "compile_treeflow: tenant_llm.embeddings is required when any "
+                "node has knowledge_base"
+            )
+
     by_id = {n.id: n for n in tf.nodes}
 
     def _make_node_fn(node: NodeSpec) -> Callable[[TalkFlowState], Any]:
         async def node_fn(state: TalkFlowState) -> dict[str, Any]:
             llm_cfg = node.llm or tenant_llm.default
-            llm = factory(llm_cfg, secrets, node.id)
+            llm = llm_fn(llm_cfg, secrets, node.id)
 
-            messages: list[Any] = [SystemMessage(content=node.prompt)]
+            user_input = state.get("last_user_input", "")
+
+            # 1) Retrieve KB chunks (only when node declares KB AND we have input)
+            kb_chunks: list[RetrievedChunk] = []
+            if node.knowledge_base and user_input:
+                assert tenant_id is not None and kb_session_factory is not None
+                assert tenant_llm.embeddings is not None
+                embedder = await emb_fn(secrets, tenant_llm.embeddings)
+                kb_session = await kb_session_factory()
+                kb_chunks = await retrieve(
+                    kb_session,
+                    tenant_id=tenant_id,
+                    kb_refs=node.knowledge_base,
+                    query=user_input,
+                    embedder=embedder,
+                )
+
+            dynamic_blocks: list[str] = []
+            if kb_chunks:
+                dynamic_blocks.append(_render_kb_block(kb_chunks))
+
+            # 2) Build messages with cache control
+            system_msgs = build_system_messages(
+                static_prompt=node.prompt,
+                dynamic_blocks=dynamic_blocks,
+                provider=llm_cfg.provider,
+                cache_enabled=tenant_llm.cache_enabled,
+            )
+            history_msgs: list[Any] = []
             for m in state.get("messages", []):
                 if m["role"] == "user":
-                    messages.append(HumanMessage(content=m["content"]))
+                    history_msgs.append(HumanMessage(content=m["content"]))
                 elif m["role"] == "assistant":
-                    messages.append(AIMessage(content=m["content"]))
-            user_input = state.get("last_user_input", "")
+                    history_msgs.append(AIMessage(content=m["content"]))
+
+            base_messages: list[Any] = list(system_msgs) + history_msgs
             if user_input:
-                messages.append(HumanMessage(content=user_input))
+                base_messages.append(HumanMessage(content=user_input))
 
-            model = build_structured_model(node.collects)
-            result = await extract(llm, model, messages)
+            # 3) Build structured model + inner caller
+            model = build_structured_model(node.collects, guardrails=guardrails)
 
-            extracted: dict[str, Any] = {}
-            for c in node.collects:
-                val = getattr(result, c.field, None)
-                if val is not None:
-                    extracted[c.field] = val
-            collected_after = {**state.get("collected", {}), **extracted}
-            response_text: str = getattr(result, RESPONSE_FIELD)
+            async def _invoke_inner(msgs: list[Any]) -> Any:
+                return await extract(llm, model, msgs)
 
+            # 4) Run with guardrails (passthrough when guardrails is None)
+            recent_history: list[Message] = state.get("messages", [])[-4:]
+            result: GuardrailsRunResult = await run_with_guardrails(
+                inner=_invoke_inner,
+                base_messages=base_messages,
+                guardrails=guardrails,
+                critical=node.critical,
+                kb_chunks=kb_chunks,
+                recent_history=recent_history,
+                tenant_llm=tenant_llm,
+                secrets=secrets,
+                llm_factory=llm_fn,
+            )
+
+            collected_after = {**state.get("collected", {}), **result.collected}
+            response_text = result.response_text
             next_node, completed = _route(node, collected_after)
 
             new_msgs: list[Message] = []
@@ -119,9 +208,7 @@ def compile_treeflow(
 
         return node_fn
 
-    # Build graph: START → router → <picked node> → END
     sg: StateGraph[Any, Any, Any, Any] = StateGraph(TalkFlowState)
-
     for n in tf.nodes:
         sg.add_node(n.id, _make_node_fn(n))  # type: ignore[call-overload]
 
