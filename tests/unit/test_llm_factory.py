@@ -83,8 +83,13 @@ def test_missing_api_key_in_secrets_raises_keyerror() -> None:
         )
 
 
-def test_arbitrary_provider_string_accepted_by_schema() -> None:
-    """Schema is free-form now; factory delegates to init_chat_model."""
+def test_factory_passes_arbitrary_provider_through_unchanged() -> None:
+    """Factory forwards the provider string verbatim to init_chat_model.
+
+    Schema-level acceptance of arbitrary providers is covered in
+    test_tenant_yaml_schema.test_llm_provider_accepts_arbitrary_string; this
+    test asserts the factory does not mangle/validate the provider name.
+    """
     with patch("ai_sdr.llm.factory.init_chat_model") as fake:
         build_llm(
             _cfg("brand_new_provider", "some-model", "secrets/x"),
@@ -103,3 +108,31 @@ def test_removeprefix_is_safe_on_bare_keys() -> None:
         build_llm(cfg, secrets={"bare_key": "sk-fake"})
     _, kwargs = fake.call_args
     assert kwargs["api_key"] == "sk-fake"
+
+
+def test_max_tokens_forwarded_when_set() -> None:
+    cfg = LLMConfig(
+        provider="anthropic",
+        model="claude-sonnet-4-6",
+        api_key_ref="secrets/anthropic_key",
+        temperature=0.5,
+        max_tokens=4096,
+    )
+    with patch("ai_sdr.llm.factory.init_chat_model") as fake:
+        build_llm(cfg, secrets={"anthropic_key": "sk-fake"})
+    _, kwargs = fake.call_args
+    assert kwargs["max_tokens"] == 4096
+
+
+def test_max_tokens_omitted_when_none() -> None:
+    cfg = LLMConfig(
+        provider="anthropic",
+        model="claude-sonnet-4-6",
+        api_key_ref="secrets/anthropic_key",
+        temperature=0.5,
+        # max_tokens not set — defaults to None
+    )
+    with patch("ai_sdr.llm.factory.init_chat_model") as fake:
+        build_llm(cfg, secrets={"anthropic_key": "sk-fake"})
+    _, kwargs = fake.call_args
+    assert "max_tokens" not in kwargs

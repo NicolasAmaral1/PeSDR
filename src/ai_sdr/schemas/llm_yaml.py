@@ -33,7 +33,10 @@ class LLMConfig(BaseModel):
     # chosen provider happens lazily inside build_llm() / init_chat_model().
     provider: str = Field(min_length=1)
     model: str = Field(min_length=1)
-    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    # None means "use the provider's default" — factory omits the kwarg entirely.
+    # Avoids us picking 0.7 for providers whose own defaults differ (Anthropic 1.0,
+    # OpenAI 1.0, etc.) and makes the factory's `is not None` guard honest.
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     max_tokens: int | None = Field(default=None, gt=0, le=64_000)
     api_key_ref: str
 

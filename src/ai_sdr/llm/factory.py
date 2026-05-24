@@ -30,4 +30,6 @@ def build_llm(cfg: LLMConfig, secrets: dict[str, str]) -> BaseChatModel:
     kwargs: dict[str, Any] = {"api_key": api_key}
     if cfg.temperature is not None:
         kwargs["temperature"] = cfg.temperature
+    if cfg.max_tokens is not None:
+        kwargs["max_tokens"] = cfg.max_tokens
     return cast(BaseChatModel, init_chat_model(f"{cfg.provider}:{cfg.model}", **kwargs))
