@@ -3,11 +3,11 @@
 A TreeFlow is the static definition of a conversation funnel. It is compiled
 into a LangGraph StateGraph at runtime (see ai_sdr.treeflow.compiler).
 
-Fields scoped out of plan 2 are accepted as forward-compatible opaque blobs:
-- knowledge_base (Plan 3 — KB)
+Plan 3 adds typed ``KBRef`` for ``NodeSpec.knowledge_base`` (spec §5.2).
+
+Fields scoped out of plan 2 still accepted as forward-compatible opaque blobs:
 - handles_objections (Plan 4 — classifier)
 - sync_to_crm (Plan 5 — CRM)
-- critical (Plan 3 — guardrails)
 """
 
 from __future__ import annotations
@@ -79,6 +79,16 @@ class GlobalObjection(BaseModel):
     kb: str = Field(min_length=1)
 
 
+class KBRef(BaseModel):
+    """Reference to a KB used by a Node (Plan 3, spec §5.2)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1)
+    top_k: int = Field(default=3, ge=1, le=20)
+    min_score: float = Field(default=0.7, ge=0.0, le=1.0)
+
+
 class NodeSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -89,8 +99,9 @@ class NodeSpec(BaseModel):
     exit_condition: ExitCondition
     next_nodes: list[Transition] = Field(min_length=1)
 
+    knowledge_base: list[KBRef] | None = None
+
     # forward-compat — accepted but unused in plan 2
-    knowledge_base: list[dict[str, Any]] | None = None
     handles_objections: list[dict[str, Any]] | None = None
     sync_to_crm: str | None = None
     critical: bool = False

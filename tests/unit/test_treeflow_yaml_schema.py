@@ -4,6 +4,7 @@ from pydantic import ValidationError
 from ai_sdr.schemas.treeflow_yaml import (
     CollectField,
     ExitCondition,
+    KBRef,
     NodeSpec,
     TreeFlow,
 )
@@ -205,3 +206,98 @@ def test_node_id_must_be_slug() -> None:
                 "next_nodes": [{"condition": "true", "target": "END"}],
             }
         )
+
+
+# ---------- KBRef typing (Plan 3) ----------
+
+
+def test_node_with_typed_knowledge_base() -> None:
+    data = {
+        "id": "x",
+        "version": "0.1.0",
+        "display_name": "X",
+        "entry_node": "na",
+        "nodes": [
+            {
+                "id": "na",
+                "prompt": "p",
+                "knowledge_base": [
+                    {"id": "kb_oferta", "top_k": 5, "min_score": 0.6},
+                    {"id": "kb_obj"},
+                ],
+                "exit_condition": {"type": "all_fields_filled"},
+                "next_nodes": [{"condition": "true", "target": "END"}],
+            }
+        ],
+    }
+    tf = TreeFlow.model_validate(data)
+    kbs = tf.nodes[0].knowledge_base
+    assert kbs is not None and len(kbs) == 2
+    assert isinstance(kbs[0], KBRef)
+    assert kbs[0].id == "kb_oferta"
+    assert kbs[0].top_k == 5
+    assert kbs[0].min_score == 0.6
+    # defaults
+    assert kbs[1].id == "kb_obj"
+    assert kbs[1].top_k == 3
+    assert kbs[1].min_score == 0.7
+
+
+def test_kbref_top_k_out_of_range_rejected() -> None:
+    data = {
+        "id": "x",
+        "version": "0.1.0",
+        "display_name": "X",
+        "entry_node": "na",
+        "nodes": [
+            {
+                "id": "na",
+                "prompt": "p",
+                "knowledge_base": [{"id": "kb", "top_k": 0}],
+                "exit_condition": {"type": "all_fields_filled"},
+                "next_nodes": [{"condition": "true", "target": "END"}],
+            }
+        ],
+    }
+    with pytest.raises(ValidationError, match="top_k"):
+        TreeFlow.model_validate(data)
+
+
+def test_kbref_min_score_out_of_range_rejected() -> None:
+    data = {
+        "id": "x",
+        "version": "0.1.0",
+        "display_name": "X",
+        "entry_node": "na",
+        "nodes": [
+            {
+                "id": "na",
+                "prompt": "p",
+                "knowledge_base": [{"id": "kb", "min_score": 1.5}],
+                "exit_condition": {"type": "all_fields_filled"},
+                "next_nodes": [{"condition": "true", "target": "END"}],
+            }
+        ],
+    }
+    with pytest.raises(ValidationError, match="min_score"):
+        TreeFlow.model_validate(data)
+
+
+def test_kbref_extra_field_rejected() -> None:
+    data = {
+        "id": "x",
+        "version": "0.1.0",
+        "display_name": "X",
+        "entry_node": "na",
+        "nodes": [
+            {
+                "id": "na",
+                "prompt": "p",
+                "knowledge_base": [{"id": "kb", "weight": 0.5}],
+                "exit_condition": {"type": "all_fields_filled"},
+                "next_nodes": [{"condition": "true", "target": "END"}],
+            }
+        ],
+    }
+    with pytest.raises(ValidationError, match="weight"):
+        TreeFlow.model_validate(data)
