@@ -24,6 +24,7 @@ dependencies = [
     { name = "simpleeval" },
     { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "structlog" },
+    { name = "tiktoken" },
     { name = "typer" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -60,6 +61,7 @@ requires-dist = [
     { name = "simpleeval", specifier = ">=1.0.3" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.36" },
     { name = "structlog", specifier = ">=24.4" },
+    { name = "tiktoken", specifier = ">=0.8" },
     { name = "typer", specifier = ">=0.15" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
 ]
