@@ -98,6 +98,38 @@ uv run ai-sdr simulate --tenant example --treeflow example --lead test-1 --show-
 # Enter na 1ª prompt → agente cumprimenta. /quit sai, /restart apaga e reinicia.
 ```
 
+## KB (Plan 3)
+
+- Files: `kb/<tenant>/<kb_id>/*.md`. Each `## heading` is a chunk; chunks > 600 tok split by paragraph (or sentence as a fallback). Encoder: tiktoken `cl100k_base`.
+- Reindex: `uv run ai-sdr reindex-kb --tenant <slug> [--kb <id>] [--prune] [--kb-root path]`. Idempotent via sha256(content) — only changed docs re-embed. Default `--kb-root` is `kb/` relative to CWD.
+- Embedding: OpenAI `text-embedding-3-small` (1536d). Config in `tenant.yaml > llm.embeddings`. Requires `openai_key` in `secrets.enc.yaml`.
+- Retrieval: per-Node `knowledge_base: [{id, top_k, min_score}]`. Multiple refs aggregate into one SQL with `kb_id = ANY(...)`. Filtering by `min_score` happens in Python after the SQL `ORDER BY embedding <=> $q LIMIT max(top_k)`.
+- pgvector index: IVFFlat `lists=100` (good for <10k chunks). To rebuild after large KB growth: `REINDEX INDEX ix_kb_chunks_embedding;` (or drop + recreate with larger `lists`).
+- Cross-tenant isolation: RLS via `tenant_id` (FORCE) — same pattern as `talkflows`. Always set via `set_tenant_context(session, tenant.id)`.
+- Indexer commit policy: `reindex_tenant_kb` does NOT commit — callers must wrap in `async with session.begin():`.
+
+## Guardrails (Plan 3)
+
+- Config: `tenant.yaml > guardrails` block — `enabled`, `allowed_prices: list[int]`, `allowed_products: list[str]`, `critic_enabled`, `fallback_text` (≥10 chars), `max_retries` (1–5, default 2). If `enabled=true` you MUST set at least one allowlist; validator rejects empty.
+- Pipeline (post-LLM): `validate_whitelist` → if `node.critical=True` and `critic_enabled=True`, `critic_pass` (Haiku via `tenant.llm.classifier`). On Verdict fail: prepend `SystemMessage(suggested_fix)`, retry. After `max_retries`, fallback text emitted; `collected={}` (conversation stays on the same node).
+- LLM is asked to emit `prices_mentioned: list[int]` + `products_mentioned: list[str]` as part of its structured output — the validator compares those lists, NOT regex on `response_text`. Field instructions tell the LLM to enumerate everything it mentioned textually.
+- Kill switch: `tenant.guardrails.enabled=false` makes the runner a passthrough (whitelist and critic both no-op).
+- HITL future: `guardrails/runner.py:_handle_exhausted()` is the single hook to swap when Plan-N adds human-in-the-loop. Its current body (return fallback text) becomes `await persist_pending_review(...); raise GraphInterrupt()`.
+
+## Prompt caching (Anthropic, Plan 3)
+
+- `tenant.llm.cache_enabled: bool` (default `true`). Applies to Anthropic only — OpenAI auto-caches prefixes ≥1024 tok and exposes no disable.
+- Structure per turn: `SystemMessage(content=[{static_prompt, cache_control: ephemeral}, {kb_block}])`. The static block caches; the KB block doesn't (it's dynamic per turn).
+- Tools (the structured-output schema) are part of the cacheable prefix automatically.
+- Min cacheable: ~1024 tok. Below that, `cache_control` is silently ignored by the provider — `TreeFlowLoader` warns at load time via `treeflow.cache_below_threshold`.
+
+## Multi-provider LLM (Plan 3 T2b architectural opening)
+
+- `tenant.llm.default.provider` is now free-form `str` (was `Literal["anthropic", "openai"]`). `build_llm` dispatches via `langchain.chat_models.init_chat_model("<provider>:<model>", api_key=..., temperature=..., max_tokens=...)`.
+- Installed provider deps (after T2b): `langchain-anthropic`, `langchain-openai`, `langchain-google-genai`, `langchain-deepseek`, `langchain-ollama`. To add another (Bedrock/VertexAI/Mistral/etc.), add the package + nothing else — `init_chat_model` will resolve it.
+- End-to-end validation per provider (live tests, prompt caching tuning, error shape handling) is Plan 4.
+- `secrets/` prefix convention: tenant.yaml's `api_key_ref` must start with `secrets/` (enforced by validator). At lookup time, factory strips the prefix and does `secrets[bare_name]`. SopsLoader returns secrets keyed by bare names.
+
 ## Checkpointer notes
 
 - Tabelas do LangGraph (`checkpoints`, `checkpoint_writes`, `checkpoint_blobs`, `checkpoint_migrations`) são criadas pelo `ensure_checkpointer_schema()` no startup (chamado no lifespan da FastAPI e no `ai-sdr simulate`). Migration 0004 é só um stamp documental — NÃO cria as tabelas (a lib usa psycopg3, alembic env usa asyncpg).
