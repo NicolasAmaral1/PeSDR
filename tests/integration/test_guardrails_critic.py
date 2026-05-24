@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from langchain_core.runnables import RunnableLambda
 
 from ai_sdr.guardrails.critic import critic_pass
@@ -10,6 +11,8 @@ from ai_sdr.kb.retriever import RetrievedChunk
 from ai_sdr.schemas.llm_yaml import LLMConfig, LLMDefaults
 from ai_sdr.schemas.tenant_yaml import GuardrailsConfig
 from ai_sdr.treeflow.state import Message
+
+pytestmark = pytest.mark.integration
 
 
 class _FakeLLM:
@@ -142,7 +145,6 @@ async def test_critic_raises_if_no_classifier_configured() -> None:
             api_key_ref="secrets/anthropic_key",
         )
     )  # no classifier
-    import pytest
 
     with pytest.raises(ValueError, match="classifier"):
         await critic_pass(
