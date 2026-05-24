@@ -6,6 +6,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableLambda
 
 from ai_sdr.llm.extractor import build_structured_model, extract
+from ai_sdr.schemas.tenant_yaml import GuardrailsConfig
 from ai_sdr.schemas.treeflow_yaml import CollectField
 
 
@@ -62,3 +63,50 @@ async def test_extract_smoke_with_fake_list_chat_model_does_not_crash() -> None:
     """Guards that FakeListChatModel has with_structured_output bound."""
     fake = FakeListChatModel(responses=["irrelevant"])
     assert hasattr(fake, "with_structured_output")
+
+
+# ---------- guardrails extension (Plan 3) ----------
+
+
+def _gr(enabled: bool = True) -> GuardrailsConfig:
+    return GuardrailsConfig(
+        enabled=enabled,
+        allowed_prices=[247],
+        allowed_products=["Mentoria"],
+        fallback_text="Confirmo já já, ok?",
+    )
+
+
+def test_build_model_without_guardrails_omits_mention_fields() -> None:
+    collects = [CollectField(field="faturamento", type="number")]
+    Model = build_structured_model(collects)
+    fields = set(Model.model_fields.keys())
+    assert "prices_mentioned" not in fields
+    assert "products_mentioned" not in fields
+
+
+def test_build_model_with_disabled_guardrails_omits_mention_fields() -> None:
+    collects = [CollectField(field="faturamento", type="number")]
+    Model = build_structured_model(collects, guardrails=_gr(enabled=False))
+    fields = set(Model.model_fields.keys())
+    assert "prices_mentioned" not in fields
+    assert "products_mentioned" not in fields
+
+
+def test_build_model_with_enabled_guardrails_adds_mention_fields() -> None:
+    collects = [CollectField(field="faturamento", type="number")]
+    Model = build_structured_model(collects, guardrails=_gr(enabled=True))
+    fields = set(Model.model_fields.keys())
+    assert "prices_mentioned" in fields
+    assert "products_mentioned" in fields
+
+    instance = Model(response_text="oi")
+    assert instance.prices_mentioned == []
+    assert instance.products_mentioned == []
+
+
+def test_build_model_collect_name_clash_with_mention_field_rejected() -> None:
+    """Author can't pick a collect field that would shadow the mention fields."""
+    collects = [CollectField(field="prices_mentioned", type="text")]
+    with pytest.raises(ValueError, match="reserved"):
+        build_structured_model(collects, guardrails=_gr(enabled=True))
