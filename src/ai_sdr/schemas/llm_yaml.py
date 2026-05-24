@@ -31,6 +31,16 @@ class LLMConfig(BaseModel):
         return v
 
 
+class EmbeddingsConfig(BaseModel):
+    """OpenAI embeddings config (used by KB indexer + retriever)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: Literal["openai"] = "openai"
+    model: str = "text-embedding-3-small"
+    api_key_ref: str = "openai_key"
+
+
 class LLMDefaults(BaseModel):
     """Tenant-level LLM defaults — Nodes inherit `default` unless they override."""
 
@@ -38,3 +48,5 @@ class LLMDefaults(BaseModel):
 
     default: LLMConfig
     classifier: LLMConfig | None = None
+    embeddings: EmbeddingsConfig | None = None
+    cache_enabled: bool = True
