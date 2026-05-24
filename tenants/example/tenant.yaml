@@ -23,3 +23,16 @@ llm:
     provider: anthropic
     model: claude-haiku-4-5
     api_key_ref: secrets/anthropic_key
+  embeddings:
+    provider: openai
+    model: text-embedding-3-small
+    api_key_ref: secrets/openai_key
+  cache_enabled: true
+
+guardrails:
+  enabled: true
+  allowed_prices: [247, 1497, 1997, 2000, 6000]
+  allowed_products: ["Mentoria", "Aceleradora", "Downsell", "Curso Express"]
+  critic_enabled: true
+  fallback_text: "Deixa eu confirmar esse valor com a equipe e já te respondo, ok?"
+  max_retries: 2
