@@ -72,6 +72,8 @@ async def reindex_tenant_kb(
     """Reindex one tenant's KB tree. Idempotent via content_hash.
 
     If ``kb_id`` is given, only that KB is touched (and pruning is scoped to it).
+
+    Callers must own the transaction — wrap calls in ``async with session.begin():``.
     """
     result = IndexResult()
     await set_tenant_context(session, tenant.id)
@@ -178,5 +180,4 @@ async def reindex_tenant_kb(
                 result.pruned.append(d.doc_path)
         await session.flush()
 
-    await session.commit()
     return result

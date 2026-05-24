@@ -70,9 +70,10 @@ async def test_indexer_creates_documents_and_chunks(session: AsyncSession, kb_ro
         "## Preços\n\nMentoria custa R$ 6000.\n\n## Garantia\n\n7 dias.",
     )
 
-    result = await reindex_tenant_kb(
-        session, t, kb_root, embedder=_FakeEmbedder(), chunker=MarkdownChunker()
-    )
+    async with session.begin():
+        result = await reindex_tenant_kb(
+            session, t, kb_root, embedder=_FakeEmbedder(), chunker=MarkdownChunker()
+        )
 
     assert isinstance(result, IndexResult)
     assert len(result.indexed) == 1
@@ -97,10 +98,12 @@ async def test_indexer_is_idempotent_when_content_unchanged(
     _write_md(kb_root, t.slug, "kb_x", "a.md", "## A\n\nbody")
 
     embedder = _FakeEmbedder()
-    first = await reindex_tenant_kb(session, t, kb_root, embedder, MarkdownChunker())
+    async with session.begin():
+        first = await reindex_tenant_kb(session, t, kb_root, embedder, MarkdownChunker())
     assert len(first.indexed) == 1 and embedder.calls == 1
 
-    second = await reindex_tenant_kb(session, t, kb_root, embedder, MarkdownChunker())
+    async with session.begin():
+        second = await reindex_tenant_kb(session, t, kb_root, embedder, MarkdownChunker())
     assert second.indexed == [] and len(second.skipped) == 1
     assert embedder.calls == 1  # no re-embedding
 
@@ -112,10 +115,12 @@ async def test_indexer_reindexes_when_content_changes(session: AsyncSession, kb_
         session.add(t)
         await session.flush()
     p = _write_md(kb_root, t.slug, "kb_x", "a.md", "## A\n\nold body")
-    await reindex_tenant_kb(session, t, kb_root, _FakeEmbedder(), MarkdownChunker())
+    async with session.begin():
+        await reindex_tenant_kb(session, t, kb_root, _FakeEmbedder(), MarkdownChunker())
 
     p.write_text("## A\n\nNEW body with more content for chunking", encoding="utf-8")
-    second = await reindex_tenant_kb(session, t, kb_root, _FakeEmbedder(), MarkdownChunker())
+    async with session.begin():
+        second = await reindex_tenant_kb(session, t, kb_root, _FakeEmbedder(), MarkdownChunker())
     assert len(second.indexed) == 1
 
     async with session.begin():
@@ -133,12 +138,14 @@ async def test_indexer_prune_removes_deleted_docs(session: AsyncSession, kb_root
         await session.flush()
     _write_md(kb_root, t.slug, "kb_x", "a.md", "## A\n\nbody1")
     p2 = _write_md(kb_root, t.slug, "kb_x", "b.md", "## B\n\nbody2")
-    await reindex_tenant_kb(session, t, kb_root, _FakeEmbedder(), MarkdownChunker())
+    async with session.begin():
+        await reindex_tenant_kb(session, t, kb_root, _FakeEmbedder(), MarkdownChunker())
 
     p2.unlink()
-    result = await reindex_tenant_kb(
-        session, t, kb_root, _FakeEmbedder(), MarkdownChunker(), prune=True
-    )
+    async with session.begin():
+        result = await reindex_tenant_kb(
+            session, t, kb_root, _FakeEmbedder(), MarkdownChunker(), prune=True
+        )
     assert any("b.md" in path for path in result.pruned)
 
     async with session.begin():
@@ -157,9 +164,10 @@ async def test_indexer_kb_id_filter(session: AsyncSession, kb_root: Path) -> Non
     _write_md(kb_root, t.slug, "kb_a", "x.md", "## X\n\nA")
     _write_md(kb_root, t.slug, "kb_b", "y.md", "## Y\n\nB")
 
-    result = await reindex_tenant_kb(
-        session, t, kb_root, _FakeEmbedder(), MarkdownChunker(), kb_id="kb_a"
-    )
+    async with session.begin():
+        result = await reindex_tenant_kb(
+            session, t, kb_root, _FakeEmbedder(), MarkdownChunker(), kb_id="kb_a"
+        )
     assert len(result.indexed) == 1
     assert "kb_a" in result.indexed[0]
 
@@ -181,6 +189,7 @@ async def test_indexer_skips_invalid_utf8(session: AsyncSession, kb_root: Path) 
     p.write_bytes(b"\xff\xfe\x00\x00not utf-8")
     _write_md(kb_root, t.slug, "kb_x", "good.md", "## G\n\nok")
 
-    result = await reindex_tenant_kb(session, t, kb_root, _FakeEmbedder(), MarkdownChunker())
+    async with session.begin():
+        result = await reindex_tenant_kb(session, t, kb_root, _FakeEmbedder(), MarkdownChunker())
     assert any("bad.md" in path for path, _ in result.failed)
     assert any("good.md" in path for path in result.indexed)
