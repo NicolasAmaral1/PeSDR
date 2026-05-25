@@ -20,6 +20,13 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # 0. Temporarily disable FORCE RLS on talkflows so the migration's DML
+    #    (which runs as ai_sdr_app without a tenant_id set) can see + write
+    #    all rows. Re-enabled at the end. Without this, RLS filters every
+    #    statement to the empty set, the UPDATE matches 0 rows, and step 7
+    #    (ALTER ... SET NOT NULL) finds NULLs from the freshly-added column.
+    op.execute("ALTER TABLE talkflows NO FORCE ROW LEVEL SECURITY")
+
     # 1. Backfill: insert one Lead row per distinct (tenant_id, lead_id) in talkflows.
     #    ON CONFLICT DO NOTHING in case multiple talkflows share a label
     #    (the unique constraint uq_leads_tenant_label catches it).
@@ -80,6 +87,9 @@ def upgrade() -> None:
         "talkflows",
         ["tenant_id", "lead_id"],
     )
+
+    # 8. Restore FORCE RLS on talkflows.
+    op.execute("ALTER TABLE talkflows FORCE ROW LEVEL SECURITY")
 
 
 def downgrade() -> None:
