@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator
 import pytest
 from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from ai_sdr.main import create_app
 from ai_sdr.settings import get_settings
@@ -19,7 +20,9 @@ async def db_session() -> AsyncIterator[AsyncSession]:
     Each test gets a fresh session that rolls back at the end so tests are
     isolated. Use `await db_session.commit()` inside the test only when you
     need cross-session visibility (e.g., the FastAPI app sees committed data)."""
-    engine = create_async_engine(get_settings().database_url, future=True)
+    # NullPool avoids dangling asyncpg connections that race per-test event
+    # loop teardown ("Event loop is closed" during engine.dispose()).
+    engine = create_async_engine(get_settings().database_url, future=True, poolclass=NullPool)
     sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
     async with sessionmaker() as session:
         yield session
