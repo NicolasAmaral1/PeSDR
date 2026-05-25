@@ -15,6 +15,7 @@ dependencies = [
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
     "structlog>=24.4",
+    "tenacity>=8",
     "pyyaml>=6.0",
     "redis>=5.2",
     "langgraph>=0.2.60",
@@ -29,7 +30,6 @@ dependencies = [
     "langchain-ollama>=0.2.0",
     "simpleeval>=1.0.3",
     "tiktoken>=0.8",
-    "tenacity>=8",
     "typer>=0.15",
 ]
 
