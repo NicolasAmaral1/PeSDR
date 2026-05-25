@@ -6,10 +6,12 @@ import typer
 
 from ai_sdr.cli.reindex_kb import reindex_kb_app
 from ai_sdr.cli.simulate import simulate
+from ai_sdr.cli.worker import worker
 
 app = typer.Typer(help="AI SDR developer CLI")
 app.command(name="simulate")(simulate)
 app.add_typer(reindex_kb_app, name="reindex-kb")
+app.command(name="worker")(worker)
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -17,3 +17,8 @@ def create_engine() -> AsyncEngine:
         pool_size=10,
         max_overflow=10,
     )
+
+
+def build_engine(url: str) -> AsyncEngine:
+    """Create an async engine from an explicit URL (used by the worker process)."""
+    return create_async_engine(url, future=True, pool_pre_ping=True)
