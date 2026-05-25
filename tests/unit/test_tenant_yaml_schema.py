@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from ai_sdr.schemas.tenant_yaml import TenantConfig
+from ai_sdr.schemas.tenant_yaml import ObjectionsConfig, TenantConfig
 
 
 def test_minimal_tenant_yaml_validates() -> None:
@@ -125,6 +125,49 @@ def test_llm_provider_rejects_empty_string() -> None:
     }
     with pytest.raises(ValidationError, match="provider"):
         TenantConfig.model_validate(data)
+
+
+def test_objections_config_defaults() -> None:
+    cfg = ObjectionsConfig()
+    assert cfg.enabled is True
+    assert cfg.min_confidence == 0.6
+    assert cfg.max_handled_per_lead == 10
+    assert cfg.history_window == 4
+
+
+def test_objections_config_min_confidence_bounds() -> None:
+    with pytest.raises(ValidationError):
+        ObjectionsConfig(min_confidence=-0.1)
+    with pytest.raises(ValidationError):
+        ObjectionsConfig(min_confidence=1.5)
+
+
+def test_objections_config_history_window_positive() -> None:
+    with pytest.raises(ValidationError):
+        ObjectionsConfig(history_window=0)
+    with pytest.raises(ValidationError):
+        ObjectionsConfig(history_window=25)
+
+
+def test_objections_config_max_handled_positive() -> None:
+    with pytest.raises(ValidationError):
+        ObjectionsConfig(max_handled_per_lead=0)
+
+
+def test_tenant_config_objections_optional() -> None:
+    cfg = TenantConfig(id="example", display_name="Ex", timezone="America/Sao_Paulo")
+    assert cfg.objections is None
+
+
+def test_tenant_config_objections_loaded() -> None:
+    cfg = TenantConfig(
+        id="example",
+        display_name="Ex",
+        timezone="America/Sao_Paulo",
+        objections={"enabled": True, "min_confidence": 0.7},
+    )
+    assert cfg.objections is not None
+    assert cfg.objections.min_confidence == 0.7
 
 
 def test_llm_api_key_ref_must_start_with_secrets_slash() -> None:

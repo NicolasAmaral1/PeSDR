@@ -57,6 +57,17 @@ class GuardrailsConfig(BaseModel):
         return self
 
 
+class ObjectionsConfig(BaseModel):
+    """Tenant-level objection classifier configuration (Plan 4a, spec §4.4)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    min_confidence: float = Field(default=0.6, ge=0.0, le=1.0)
+    max_handled_per_lead: int = Field(default=10, ge=1, le=100)
+    history_window: int = Field(default=4, ge=1, le=20)
+
+
 class TenantConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -67,6 +78,7 @@ class TenantConfig(BaseModel):
     conversation: ConversationConfig | None = None
     llm: LLMDefaults | None = None
     guardrails: GuardrailsConfig | None = None
+    objections: ObjectionsConfig | None = None  # Plan 4a
 
     @field_validator("id")
     @classmethod
