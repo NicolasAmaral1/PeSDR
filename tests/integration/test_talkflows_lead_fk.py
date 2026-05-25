@@ -19,6 +19,8 @@ async def test_talkflow_lead_id_is_uuid_fk(db_session) -> None:
     tenant = Tenant(slug=f"t_{uuid.uuid4().hex[:6]}", display_name="T")
     db_session.add(tenant)
     await db_session.flush()
+    # treeflow_versions has RLS — set tenant context before inserting.
+    await set_tenant_context(db_session, tenant.id)
 
     # Create a treeflow version (TalkFlow needs it as FK target)
     tv = TreeflowVersion(
@@ -31,6 +33,7 @@ async def test_talkflow_lead_id_is_uuid_fk(db_session) -> None:
     db_session.add(tv)
     await db_session.commit()
 
+    # Re-set after commit (transaction-local).
     await set_tenant_context(db_session, tenant.id)
     lead = Lead(tenant_id=tenant.id, external_label="x", status="active")
     db_session.add(lead)
