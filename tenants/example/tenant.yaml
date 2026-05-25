@@ -36,3 +36,16 @@ guardrails:
   critic_enabled: true
   fallback_text: "Deixa eu confirmar esse valor com a equipe e já te respondo, ok?"
   max_retries: 2
+
+messaging:
+  provider: fake
+  # When switching this tenant to live WhatsApp, change provider to
+  # 'whatsapp_cloud' and uncomment + populate the *_ref fields. The
+  # referenced secret names must exist in tenants/example/secrets.enc.yaml.
+  #
+  # provider: whatsapp_cloud
+  # phone_number_id_ref: secrets/wa_phone_id
+  # access_token_ref: secrets/wa_token
+  # webhook_verify_token_ref: secrets/wa_verify
+  # app_secret_ref: secrets/wa_app_secret
+  # api_version: v21.0
