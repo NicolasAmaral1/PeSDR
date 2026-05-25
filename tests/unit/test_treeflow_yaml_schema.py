@@ -4,7 +4,9 @@ from pydantic import ValidationError
 from ai_sdr.schemas.treeflow_yaml import (
     CollectField,
     ExitCondition,
+    GlobalObjection,
     KBRef,
+    NodeObjection,
     NodeSpec,
     TreeFlow,
 )
@@ -100,8 +102,16 @@ def test_treeflow_with_followup_and_global_objections() -> None:
             ],
         },
         "global_objections": [
-            {"id": "preciso_pensar", "kb": "kb_obj_pensar"},
-            {"id": "falta_tempo", "kb": "kb_obj_tempo"},
+            {
+                "id": "preciso_pensar",
+                "kb": "kb_obj_pensar",
+                "description": "Lead diz que precisa pensar antes de decidir",
+            },
+            {
+                "id": "falta_tempo",
+                "kb": "kb_obj_tempo",
+                "description": "Lead alega que não tem tempo suficiente para o programa",
+            },
         ],
         "entry_node": "node_a",
         "nodes": [
@@ -301,3 +311,68 @@ def test_kbref_extra_field_rejected() -> None:
     }
     with pytest.raises(ValidationError, match="weight"):
         TreeFlow.model_validate(data)
+
+
+# ---------- NodeObjection + GlobalObjection (Plan 4a Task 1) ----------
+
+
+def test_node_objection_requires_description():
+    with pytest.raises(ValidationError) as exc:
+        NodeObjection(id="preco", kb="kb_obj_preco")
+    assert "description" in str(exc.value)
+
+
+def test_node_objection_description_min_length():
+    with pytest.raises(ValidationError):
+        NodeObjection(id="preco", kb="kb_obj_preco", description="curto")
+
+
+def test_node_objection_accepts_as_subnode_optional():
+    obj = NodeObjection(
+        id="preco",
+        kb="kb_obj_preco",
+        description="Lead questiona o valor do investimento ou compara com alternativas baratas",
+    )
+    assert obj.as_subnode is None
+
+    obj2 = NodeObjection(
+        id="preco",
+        kb="kb_obj_preco",
+        description="Lead questiona o valor do investimento ou compara com alternativas baratas",
+        as_subnode="obj_preco_node",
+    )
+    assert obj2.as_subnode == "obj_preco_node"
+
+
+def test_global_objection_requires_description():
+    with pytest.raises(ValidationError) as exc:
+        GlobalObjection(id="preco", kb="kb_obj_preco")
+    assert "description" in str(exc.value)
+
+
+def test_node_spec_handles_objections_typed():
+    node = NodeSpec(
+        id="qualif",
+        prompt="x",
+        exit_condition={"type": "all_fields_filled"},
+        next_nodes=[{"condition": "true", "target": "END"}],
+        handles_objections=[
+            {
+                "id": "preco",
+                "kb": "kb_obj_preco",
+                "description": "Lead acha que está muito caro ou compara com concorrentes",
+            }
+        ],
+    )
+    assert isinstance(node.handles_objections[0], NodeObjection)
+    assert node.handles_objections[0].id == "preco"
+
+
+def test_node_spec_handles_objections_defaults_empty_list():
+    node = NodeSpec(
+        id="qualif",
+        prompt="x",
+        exit_condition={"type": "all_fields_filled"},
+        next_nodes=[{"condition": "true", "target": "END"}],
+    )
+    assert node.handles_objections == []

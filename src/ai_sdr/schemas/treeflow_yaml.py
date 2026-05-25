@@ -6,7 +6,7 @@ into a LangGraph StateGraph at runtime (see ai_sdr.treeflow.compiler).
 Plan 3 adds typed ``KBRef`` for ``NodeSpec.knowledge_base`` (spec §5.2).
 
 Fields scoped out of plan 2 still accepted as forward-compatible opaque blobs:
-- handles_objections (Plan 4 — classifier)
+- handles_objections is fully implemented in Plan 4a (objection classifier).
 - sync_to_crm (Plan 5 — CRM)
 """
 
@@ -73,10 +73,25 @@ class FollowUpConfig(BaseModel):
 
 
 class GlobalObjection(BaseModel):
+    """TreeFlow-level objection (matches by id against classifier output)."""
+
     model_config = ConfigDict(extra="forbid")
 
     id: str = Field(min_length=1)
     kb: str = Field(min_length=1)
+    description: str = Field(min_length=10, max_length=300)
+    as_subnode: str | None = None  # node_id in same TreeFlow
+
+
+class NodeObjection(BaseModel):
+    """Per-Node objection ref. Replaces the dict[str, Any] forward-compat blob."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1)
+    kb: str = Field(min_length=1)
+    description: str = Field(min_length=10, max_length=300)
+    as_subnode: str | None = None  # node_id in same TreeFlow
 
 
 class KBRef(BaseModel):
@@ -101,8 +116,7 @@ class NodeSpec(BaseModel):
 
     knowledge_base: list[KBRef] | None = None
 
-    # forward-compat — accepted but unused in plan 2
-    handles_objections: list[dict[str, Any]] | None = None
+    handles_objections: list[NodeObjection] = Field(default_factory=list)
     sync_to_crm: str | None = None
     critical: bool = False
 
