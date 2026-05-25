@@ -4,7 +4,7 @@ from langchain_core.runnables import RunnableLambda
 from pydantic import BaseModel
 
 from ai_sdr.schemas.llm_yaml import LLMConfig, LLMDefaults
-from ai_sdr.schemas.treeflow_yaml import TreeFlow
+from ai_sdr.schemas.treeflow_yaml import ExitCondition, NodeSpec, Transition, TreeFlow
 from ai_sdr.treeflow.compiler import compile_treeflow
 from ai_sdr.treeflow.state import TalkFlowState
 
@@ -184,3 +184,34 @@ async def test_stays_on_node_when_exit_condition_not_met() -> None:
     s2 = await graph.ainvoke(s1)
     assert s2["current_node"] == "qualificacao"  # did NOT advance
     assert s2["completed"] is False
+
+
+def test_start_router_routes_to_classifier_synthetic_node() -> None:
+    """After Plan 4a, current_node='na' must route to 'na:classifier'
+    in the compiled graph, not directly to 'na'."""
+    tf = TreeFlow(
+        id="tf",
+        version="1.0.0",
+        display_name="x",
+        entry_node="na",
+        nodes=[
+            NodeSpec(
+                id="na",
+                prompt="x",
+                exit_condition=ExitCondition(type="all_fields_filled"),
+                next_nodes=[Transition(condition="true", target="END")],
+            ),
+        ],
+    )
+    tenant_llm = LLMDefaults(
+        default=LLMConfig(
+            provider="anthropic",
+            model="claude-sonnet-4-6",
+            api_key_ref="secrets/anthropic_key",
+        )
+    )
+    graph = compile_treeflow(tf, tenant_llm, secrets={"anthropic_key": "x"})
+    # The compiled graph should know about the synthetic classifier node.
+    node_names = set(graph.get_graph().nodes.keys())
+    assert "na__classifier" in node_names
+    assert "na" in node_names  # main node still exists

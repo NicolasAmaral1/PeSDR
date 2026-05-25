@@ -9,6 +9,7 @@ from typing import Any
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import Command
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_sdr.guardrails.runner import GuardrailsRunResult, run_with_guardrails
@@ -22,6 +23,9 @@ from ai_sdr.schemas.tenant_yaml import GuardrailsConfig
 from ai_sdr.schemas.treeflow_yaml import NodeSpec, TreeFlow
 from ai_sdr.treeflow.expressions import eval_bool
 from ai_sdr.treeflow.state import Message, TalkFlowState
+
+CLASSIFIER_SUFFIX = "__classifier"
+INLINE_SUFFIX = "__inline"
 
 LLMFactory = Callable[[LLMConfig, dict[str, str], str], BaseChatModel]
 """(node_llm_cfg, secrets, current_node_id) -> BaseChatModel.
@@ -208,9 +212,16 @@ def compile_treeflow(
 
         return node_fn
 
+    def _make_passthrough_classifier(node: NodeSpec) -> Callable[[TalkFlowState], Any]:
+        async def classifier_fn(state: TalkFlowState) -> Command[str]:  # noqa: ARG001
+            return Command(goto=node.id)
+
+        return classifier_fn
+
     sg: StateGraph[Any, Any, Any, Any] = StateGraph(TalkFlowState)
     for n in tf.nodes:
         sg.add_node(n.id, _make_node_fn(n))  # type: ignore[call-overload]
+        sg.add_node(n.id + CLASSIFIER_SUFFIX, _make_passthrough_classifier(n))  # type: ignore[call-overload]
 
     def _start_router(state: TalkFlowState) -> str:
         nid = state.get("current_node") or tf.entry_node
@@ -218,12 +229,12 @@ def compile_treeflow(
             return END
         if nid not in by_id:
             raise ValueError(f"state.current_node={nid!r} not in TreeFlow")
-        return nid
+        return nid + CLASSIFIER_SUFFIX
 
     sg.add_conditional_edges(
         START,
         _start_router,
-        {**{n.id: n.id for n in tf.nodes}, END: END},
+        {**{n.id + CLASSIFIER_SUFFIX: n.id + CLASSIFIER_SUFFIX for n in tf.nodes}, END: END},
     )
     for n in tf.nodes:
         sg.add_edge(n.id, END)
