@@ -496,3 +496,130 @@ async def test_classifier_dispatches_to_inline_on_detection_above_threshold() ->
 
     # Inline never marks the turn as completed — main may, but inline never does.
     assert final.get("completed") is False
+
+
+# ---------------------------------------------------------------------------
+# Plan 4a Task 10 — BACK_TO_ORIGIN resolution in _route
+# ---------------------------------------------------------------------------
+
+
+async def test_back_to_origin_resolves_via_origin_node_id() -> None:
+    """Sub-node transitions BACK_TO_ORIGIN: current_node = origin id, _origin_node_id cleared."""
+    tf = TreeFlow(
+        id="tf",
+        version="1.0.0",
+        display_name="x",
+        entry_node="qualif",
+        nodes=[
+            NodeSpec(
+                id="qualif",
+                prompt="x",
+                exit_condition=ExitCondition(type="all_fields_filled"),
+                next_nodes=[Transition(condition="true", target="END")],
+                handles_objections=[
+                    NodeObjection(
+                        id="preco",
+                        kb="kb_obj_preco",
+                        description="Lead questiona o valor do investimento sempre",
+                        as_subnode="obj_preco_node",
+                    )
+                ],
+            ),
+            NodeSpec(
+                id="obj_preco_node",
+                prompt="x",
+                exit_condition=ExitCondition(type="all_fields_filled"),
+                next_nodes=[Transition(condition="true", target="BACK_TO_ORIGIN")],
+            ),
+        ],
+    )
+
+    async def fake_classify(**kwargs: Any) -> ClassifierResult:
+        return ClassifierResult(objection_id="preco", confidence=0.9, quote="tá caro")
+
+    graph = compile_treeflow(
+        tf,
+        tenant_llm=_tenant_llm_with_classifier(),
+        secrets={"anthropic_key": "x"},
+        objections=ObjectionsConfig(enabled=True),
+        classify_fn=fake_classify,
+        llm_factory=_stub_llm_factory(
+            {
+                "qualif": {"response_text": "qualif answer"},
+                "obj_preco_node": {"response_text": "subnode answer"},
+            }
+        ),
+    )
+
+    # Turn 1: classifier detects preco → goto obj_preco_node__classifier
+    # → passthrough (obj_preco_node has no objections in scope: it inherits NO globals
+    #    because tf.global_objections is empty) → obj_preco_node main
+    # → run, exit_condition true → transition BACK_TO_ORIGIN
+    # → _route resolves to "qualif", clears _origin_node_id
+    state: TalkFlowState = {
+        "tenant_id": "t",
+        "lead_id": "l",
+        "treeflow_id": "tf",
+        "treeflow_version": "1.0.0",
+        "current_node": "qualif",
+        "collected": {},
+        "messages": [],
+        "last_user_input": "tá caro",
+        "last_agent_response": "",
+        "completed": False,
+    }
+    final = await graph.ainvoke(state)
+    assert final["current_node"] == "qualif"
+    assert final.get("_origin_node_id") is None
+    handled = final.get("objections_handled", [])
+    assert len(handled) == 1
+    assert handled[0]["objection_id"] == "preco"
+    # Agent response is from the subnode (BACK_TO_ORIGIN is the last action of the subnode's turn)
+    assert final["last_agent_response"] == "subnode answer"
+
+
+async def test_back_to_origin_orphan_falls_back_to_entry_node() -> None:
+    """BACK_TO_ORIGIN with _origin_node_id=None falls back to entry_node and warns."""
+    import warnings as _warnings
+
+    # TreeFlow validator emits UserWarning for orphan BACK_TO_ORIGIN.
+    # Suppress it here — we're testing runtime behaviour, not schema validation.
+    with _warnings.catch_warnings():
+        _warnings.simplefilter("ignore", UserWarning)
+        tf = TreeFlow(
+            id="tf",
+            version="1.0.0",
+            display_name="x",
+            entry_node="na",
+            nodes=[
+                NodeSpec(
+                    id="na",
+                    prompt="x",
+                    exit_condition=ExitCondition(type="all_fields_filled"),
+                    next_nodes=[Transition(condition="true", target="BACK_TO_ORIGIN")],
+                ),
+            ],
+        )
+
+    graph = compile_treeflow(
+        tf,
+        _tenant_llm_with_classifier(),
+        secrets={"anthropic_key": "x"},
+        llm_factory=_stub_llm_factory({"na": {"response_text": "ok"}}),
+    )
+    state: TalkFlowState = {
+        "tenant_id": "t",
+        "lead_id": "l",
+        "treeflow_id": "tf",
+        "treeflow_version": "1.0.0",
+        "current_node": "na",
+        "collected": {},
+        "messages": [],
+        "last_user_input": "oi",
+        "last_agent_response": "",
+        "completed": False,
+        # _origin_node_id intentionally absent
+    }
+    final = await graph.ainvoke(state)
+    # entry_node is "na" → resolution fallback is "na"
+    assert final["current_node"] == "na"

@@ -21,7 +21,15 @@ from ai_sdr.llm.factory import build_llm as _default_build_llm
 from ai_sdr.llm.messages import build_system_messages
 from ai_sdr.schemas.llm_yaml import LLMConfig, LLMDefaults
 from ai_sdr.schemas.tenant_yaml import GuardrailsConfig, ObjectionsConfig
-from ai_sdr.schemas.treeflow_yaml import GlobalObjection, KBRef, NodeObjection, NodeSpec, TreeFlow
+from ai_sdr.schemas.treeflow_yaml import (
+    BACK_TO_ORIGIN_SENTINEL,
+    END_SENTINEL,
+    GlobalObjection,
+    KBRef,
+    NodeObjection,
+    NodeSpec,
+    TreeFlow,
+)
 from ai_sdr.treeflow.classifier import ClassifierResult
 from ai_sdr.treeflow.classifier import classify as default_classify
 from ai_sdr.treeflow.expressions import eval_bool
@@ -78,17 +86,42 @@ def _exit_satisfied(node: NodeSpec, collected: dict[str, Any]) -> bool:
     return False
 
 
-def _route(node: NodeSpec, collected: dict[str, Any]) -> tuple[str, bool]:
-    """Return (next_current_node, completed)."""
+def _route(
+    node: NodeSpec,
+    collected: dict[str, Any],
+    state: TalkFlowState,
+    entry_node: str,
+) -> tuple[str, bool, dict[str, Any]]:
+    """Return (next_current_node, completed, extra_state_update).
+
+    extra_state_update may carry {'_origin_node_id': None} when we resolve BACK_TO_ORIGIN.
+    """
     if not _exit_satisfied(node, collected):
-        return (node.id, False)
+        return (node.id, False, {})
     for tr in node.next_nodes:
         if eval_bool(tr.condition, collected):
-            if tr.target == "END":
-                return ("END", True)
-            return (tr.target, False)
+            target = tr.target
+            if target == END_SENTINEL:
+                return (END_SENTINEL, True, {})
+            if target == BACK_TO_ORIGIN_SENTINEL:
+                origin = state.get("_origin_node_id")
+                if origin is None:
+                    logger.warning(
+                        "objection.subnode.orphan_return",
+                        node_id=node.id,
+                        fallback_target=entry_node,
+                    )
+                    return (entry_node, False, {})
+                logger.info(
+                    "objection.subnode.exited",
+                    node_id=node.id,
+                    subnode_id=node.id,
+                    returned_to_node_id=origin,
+                )
+                return (origin, False, {"_origin_node_id": None})
+            return (target, False, {})
     # nothing matched — stay (operator pebcak, but don't crash)
-    return (node.id, False)
+    return (node.id, False, {})
 
 
 def _render_kb_block(chunks: list[RetrievedChunk]) -> str:
@@ -208,14 +241,14 @@ def compile_treeflow(
 
             collected_after = {**state.get("collected", {}), **result.collected}
             response_text = result.response_text
-            next_node, completed = _route(node, collected_after)
+            next_node, completed, extra = _route(node, collected_after, state, tf.entry_node)
 
             new_msgs: list[Message] = []
             if user_input:
                 new_msgs.append({"role": "user", "content": user_input})
             new_msgs.append({"role": "assistant", "content": response_text})
 
-            return {
+            update: dict[str, Any] = {
                 "collected": collected_after,
                 "messages": new_msgs,
                 "last_agent_response": response_text,
@@ -223,6 +256,8 @@ def compile_treeflow(
                 "current_node": next_node,
                 "completed": completed,
             }
+            update.update(extra)
+            return update
 
         return node_fn
 
