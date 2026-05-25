@@ -4,7 +4,7 @@
 
 **Goal:** Add the Objection Classifier described in spec §4.4 — before each main LLM call in a TreeFlow Node, run a cheap Haiku classifier that detects whether the lead message raised one of the declared objections (`handles_objections` per Node + `global_objections` per TreeFlow). If detected, deflect to either an inline response (default — reuses Node persona + objection KB + "don't advance" instruction) or to a referenced sub-node (opt-in via `as_subnode`). After responding, the conversation returns to the original Node without mutating `collects`/`exit_condition` for that turn.
 
-**Architecture:** Classifier-as-edge-router. Each TreeFlow `NodeSpec` N compiles into up to 3 LangGraph nodes: `N:classifier` (always emitted, passthrough when no applicable objections or `tenant.objections.enabled=false`), `N:inline` (emitted when N has any inline objections), and `N` (the existing Plan 2/3 main node, unchanged). `_start_router` routes `state.current_node` → `f"{current_node}:classifier"`. Sub-node mode uses sentinel `BACK_TO_ORIGIN` in the sub-node's transitions, resolved inside `_route` via `state._origin_node_id`.
+**Architecture:** Classifier-as-edge-router. Each TreeFlow `NodeSpec` N compiles into up to 3 LangGraph nodes: `N__classifier` (always emitted, passthrough when no applicable objections or `tenant.objections.enabled=false`), `N__inline` (emitted when N has any inline objections), and `N` (the existing Plan 2/3 main node, unchanged). `_start_router` routes `state.current_node` → `f"{current_node}__classifier"`. Sub-node mode uses sentinel `BACK_TO_ORIGIN` in the sub-node's transitions, resolved inside `_route` via `state._origin_node_id`.
 
 **Tech Stack:** Python 3.12, FastAPI, SQLAlchemy 2 async, Postgres + pgvector (no schema change), LangGraph + langgraph-checkpoint-postgres, LangChain (Anthropic Haiku via `tenant.llm.classifier`), structlog, pytest.
 
@@ -27,7 +27,7 @@
 - `src/ai_sdr/schemas/treeflow_yaml.py` — `NodeObjection` (replaces `dict[str, Any]` opaque), `GlobalObjection` gets `description` + `as_subnode`, graph validator recognizes `BACK_TO_ORIGIN` sentinel and `as_subnode` references.
 - `src/ai_sdr/schemas/tenant_yaml.py` — adds `ObjectionsConfig` + `TenantConfig.objections` field.
 - `src/ai_sdr/treeflow/state.py` — adds `ObjectionRecord` TypedDict + 4 new fields on `TalkFlowState`.
-- `src/ai_sdr/treeflow/compiler.py` — entry-point routing change; emits `:classifier` and `:inline` synthetic LangGraph nodes; `BACK_TO_ORIGIN` resolution inside `_route`.
+- `src/ai_sdr/treeflow/compiler.py` — entry-point routing change; emits `__classifier` and `__inline` synthetic LangGraph nodes; `BACK_TO_ORIGIN` resolution inside `_route`.
 - `src/ai_sdr/cli/simulate.py` — `--no-classifier` flag; include classifier result in `--show-extracted` output.
 - `tenants/example/treeflows/example.yaml` — adds `global_objections` + `handles_objections` in `qualificacao` node.
 - `tenants/example/tenant.yaml` — adds `objections:` block.
@@ -46,7 +46,9 @@ Existing test files extended (not new): `tests/unit/test_treeflow_yaml_schema.py
 
 ## Synthetic node-name convention
 
-`f"{node_id}:classifier"` and `f"{node_id}:inline"`. Colon is forbidden by `NODE_ID_RE`, so collision with user-defined node ids is impossible. `state.current_node` always holds a real TreeFlow node id (never the synthetic names) — synthetic names are LangGraph internals only.
+`f"{node_id}__classifier"` and `f"{node_id}__inline"`. Double-underscore separator avoids the reserved characters `:` (NS_END) and `|` (NS_SEP) that LangGraph rejects in `add_node`. A tenant author who literally names a node `qualif__classifier` would collide with the synthetic name for node `qualif` — low risk and a documented authoring convention.
+
+Downstream tasks MUST import `CLASSIFIER_SUFFIX` and `INLINE_SUFFIX` from `ai_sdr.treeflow.compiler` rather than hardcoding the string. The constants are the source of truth.
 
 ---
 
@@ -58,9 +60,9 @@ Existing test files extended (not new): `tests/unit/test_treeflow_yaml_schema.py
 - T4: State — `ObjectionRecord` + new TalkFlowState fields
 - T5: Classifier module — `ClassifierResult` + `classify()`
 - T6: Objection response builder — `build_inline_objection_messages`
-- T7: Compiler — entry-point routing to `:classifier`
-- T8: Compiler — emit `:classifier` synthetic node with skip + classify + dispatch
-- T9: Compiler — emit `:inline` synthetic node
+- T7: Compiler — entry-point routing to `__classifier`
+- T8: Compiler — emit `__classifier` synthetic node with skip + classify + dispatch
+- T9: Compiler — emit `__inline` synthetic node
 - T10: Compiler — `BACK_TO_ORIGIN` resolution in `_route`
 - T11: Integration test — full turn cycle with mocked classifier
 - T12: Integration test — sub-node mode
@@ -1173,9 +1175,9 @@ Plan 4a Task 6"
 
 ---
 
-## Task 7: Compiler — entry-point routing to `:classifier`
+## Task 7: Compiler — entry-point routing to `__classifier`
 
-The compiler currently registers each TreeFlow node as `sg.add_node(n.id, ...)` and `_start_router` returns the node id. After Plan 4a, every TreeFlow node ALSO gets a synthetic `:classifier` and (when applicable) `:inline` registered as separate LangGraph nodes. `_start_router` routes to `f"{current_node}:classifier"`.
+The compiler currently registers each TreeFlow node as `sg.add_node(n.id, ...)` and `_start_router` returns the node id. After Plan 4a, every TreeFlow node ALSO gets a synthetic `__classifier` and (when applicable) `__inline` registered as separate LangGraph nodes. `_start_router` routes to `f"{current_node}__classifier"`.
 
 This task does the minimum to make this work: register a passthrough classifier that always forwards to the main node. The actual classifier logic comes in T8. The point of splitting here is to keep the diff small and let existing tests still pass.
 
@@ -1197,7 +1199,7 @@ Add to `tests/unit/test_treeflow_compiler.py`:
 
 ```python
 def test_start_router_routes_to_classifier_synthetic_node():
-    """After Plan 4a, current_node='qualif' must route to 'qualif:classifier'
+    """After Plan 4a, current_node='qualif' must route to 'qualif__classifier'
     in the compiled graph, not directly to 'qualif'."""
     # Build a minimal TreeFlow with no objections — classifier is passthrough.
     tf = TreeFlow(
@@ -1219,7 +1221,7 @@ def test_start_router_routes_to_classifier_synthetic_node():
     # The compiled graph should know about the synthetic node.
     # langgraph exposes nodes via .nodes (dict-like)
     node_names = set(graph.get_graph().nodes.keys())
-    assert "a:classifier" in node_names
+    assert "a" + CLASSIFIER_SUFFIX in node_names
     assert "a" in node_names  # main node still exists
 ```
 
@@ -1231,15 +1233,15 @@ def test_start_router_routes_to_classifier_synthetic_node():
 uv run pytest tests/unit/test_treeflow_compiler.py::test_start_router_routes_to_classifier_synthetic_node -v
 ```
 
-Expected: FAIL — `a:classifier` not in graph.
+Expected: FAIL — `a__classifier` not in graph.
 
 - [ ] **Step 4: Edit `src/ai_sdr/treeflow/compiler.py`** — minimal patch
 
 Add a constant near the top of the file:
 
 ```python
-CLASSIFIER_SUFFIX = ":classifier"
-INLINE_SUFFIX = ":inline"
+CLASSIFIER_SUFFIX = "__classifier"
+INLINE_SUFFIX = "__inline"
 ```
 
 Modify `compile_treeflow` (near the existing `sg.add_node(n.id, _make_node_fn(n))` block) to also register a passthrough classifier per node:
@@ -1304,16 +1306,16 @@ Expected: PASS. (If these need `make up`, run `make up` first.)
 
 ```bash
 git add src/ai_sdr/treeflow/compiler.py tests/unit/test_treeflow_compiler.py
-git commit -m "feat(plan4a t7): compiler entry-routing patch — current_node → :classifier (passthrough for now)
+git commit -m "feat(plan4a t7): compiler entry-routing patch — current_node → __classifier (passthrough for now)
 
 Plan 4a Task 7"
 ```
 
 ---
 
-## Task 8: Compiler — emit `:classifier` synthetic node with skip + classify + dispatch
+## Task 8: Compiler — emit `__classifier` synthetic node with skip + classify + dispatch
 
-Replace the passthrough with real logic: merge `global_objections + node.handles_objections`, skip when empty or `tenant.objections.enabled=false`, call `classify()`, apply confidence threshold, dispatch to `N:inline` (inline mode) or to `{as_subnode}:classifier` (sub-node mode) with the proper state updates.
+Replace the passthrough with real logic: merge `global_objections + node.handles_objections`, skip when empty or `tenant.objections.enabled=false`, call `classify()`, apply confidence threshold, dispatch to `N__inline` (inline mode) or to `{as_subnode}__classifier` (sub-node mode) with the proper state updates.
 
 **Files:**
 - Modify: `src/ai_sdr/treeflow/compiler.py`
@@ -1440,7 +1442,7 @@ async def test_classifier_dispatches_to_inline_on_detection_above_threshold():
     async def fake_classify(**kwargs: Any) -> ClassifierResult:
         return ClassifierResult(objection_id="preco", confidence=0.8, quote="tá caro")
 
-    # We don't have N:inline implemented yet — until T9, the test just verifies
+    # We don't have N__inline implemented yet — until T9, the test just verifies
     # the classifier wrote _active_objection to the state delta. We'll use a
     # capture sink for state mutations.
     # Simpler: directly invoke the classifier node function via the graph
@@ -1454,7 +1456,7 @@ async def test_classifier_dispatches_to_inline_on_detection_above_threshold():
         objections=ObjectionsConfig(enabled=True, min_confidence=0.6),
         classify_fn=fake_classify,
     )
-    # We expect the test to FAIL at this point because N:inline doesn't exist.
+    # We expect the test to FAIL at this point because N__inline doesn't exist.
     # That's OK — we re-enable it in T9.
     state: TalkFlowState = {  # type: ignore[typeddict-item]
         "current_node": "qualif",
@@ -1705,7 +1707,7 @@ Now replace the passthrough with the real classifier factory. The classifier nee
                 )
 
             if detected.as_subnode is None:
-                # Inline mode — hand off to N:inline (T9 will implement the node)
+                # Inline mode — hand off to N__inline (T9 will implement the node)
                 return Command(
                     goto=node.id + INLINE_SUFFIX,
                     update={
@@ -1752,7 +1754,7 @@ Replace the existing registration loop:
         sg.add_node(n.id + CLASSIFIER_SUFFIX, _make_classifier(n))  # type: ignore[call-overload]
 ```
 
-(The START conditional edges already point at `:classifier` after T7. `Command(goto=X)` returned by the classifier node is resolved by LangGraph directly to any registered node — no edges-map update required here.)
+(The START conditional edges already point at `__classifier` after T7. `Command(goto=X)` returned by the classifier node is resolved by LangGraph directly to any registered node — no edges-map update required here.)
 
 - [ ] **Step 4: Run the classifier tests**
 
@@ -1760,7 +1762,7 @@ Replace the existing registration loop:
 uv run pytest tests/unit/test_treeflow_compiler.py -v -k "classifier"
 ```
 
-Expected: PASS for skip + threshold + exception tests. The `test_classifier_dispatches_to_inline_on_detection_above_threshold` test should still FAIL (with a "node N:inline not found" error) — that's intentional, T9 fixes it.
+Expected: PASS for skip + threshold + exception tests. The `test_classifier_dispatches_to_inline_on_detection_above_threshold` test should still FAIL (with a "node N__inline not found" error) — that's intentional, T9 fixes it.
 
 - [ ] **Step 5: Lint + type**
 
@@ -1772,16 +1774,16 @@ make lint && make type
 
 ```bash
 git add src/ai_sdr/treeflow/compiler.py tests/unit/test_treeflow_compiler.py
-git commit -m "feat(plan4a t8): compiler emits real :classifier node — merge globals, threshold, dispatch, fail-safe to main
+git commit -m "feat(plan4a t8): compiler emits real __classifier node — merge globals, threshold, dispatch, fail-safe to main
 
 Plan 4a Task 8"
 ```
 
 ---
 
-## Task 9: Compiler — emit `:inline` synthetic node
+## Task 9: Compiler — emit `__inline` synthetic node
 
-When the classifier dispatches to `N:inline`, run the inline-response LLM call (persona of N + objection prefix + KB, wrapped in `run_with_guardrails`), append `ObjectionRecord`, and end the turn at END.
+When the classifier dispatches to `N__inline`, run the inline-response LLM call (persona of N + objection prefix + KB, wrapped in `run_with_guardrails`), append `ObjectionRecord`, and end the turn at END.
 
 **Files:**
 - Modify: `src/ai_sdr/treeflow/compiler.py`
@@ -1878,7 +1880,7 @@ def _make_stub_llm_returning(response_text: str, captured: list[str]) -> Any:
 uv run pytest tests/unit/test_treeflow_compiler.py::test_classifier_dispatches_to_inline_on_detection_above_threshold -v
 ```
 
-Expected: FAIL — N:inline node not registered.
+Expected: FAIL — N__inline node not registered.
 
 - [ ] **Step 3: Edit `src/ai_sdr/treeflow/compiler.py`** — add the inline factory
 
@@ -1998,7 +2000,7 @@ Add the `_make_inline_response` factory near `_make_classifier`:
                 "messages": new_msgs,
                 "last_agent_response": result.response_text,
                 "last_user_input": "",
-                # current_node UNCHANGED — next turn re-enters N:classifier
+                # current_node UNCHANGED — next turn re-enters N__classifier
                 "objections_handled": [record],
                 # clear intra-turn fields
                 "_active_objection": None,
@@ -2016,7 +2018,7 @@ Add registration in the node-registration loop:
     for n in tf.nodes:
         sg.add_node(n.id, _make_node_fn(n))  # type: ignore[call-overload]
         sg.add_node(n.id + CLASSIFIER_SUFFIX, _make_classifier(n))  # type: ignore[call-overload]
-        # Only register :inline when N has at least one inline-mode objection
+        # Only register __inline when N has at least one inline-mode objection
         node_inline_objs = [o for o in n.handles_objections if o.as_subnode is None]
         has_inline_globals = any(g.as_subnode is None for g in tf.global_objections)
         if node_inline_objs or has_inline_globals:
@@ -2050,7 +2052,7 @@ make lint && make type
 
 ```bash
 git add src/ai_sdr/treeflow/compiler.py tests/unit/test_treeflow_compiler.py
-git commit -m "feat(plan4a t9): compiler emits :inline node — KB retrieve + run_with_guardrails + appends ObjectionRecord
+git commit -m "feat(plan4a t9): compiler emits __inline node — KB retrieve + run_with_guardrails + appends ObjectionRecord
 
 Plan 4a Task 9"
 ```
@@ -2119,7 +2121,7 @@ async def test_back_to_origin_resolves_via_origin_node_id():
         llm_factory=stub_llm_factory,
     )
 
-    # Turn 1: classifier detects preco → goto obj_preco_node:classifier
+    # Turn 1: classifier detects preco → goto obj_preco_node__classifier
     # → passthrough (obj_preco_node has no objections) → obj_preco_node main
     # → run, exit_condition true → transition BACK_TO_ORIGIN
     # → _route resolves to "qualif", clears _origin_node_id
@@ -2321,7 +2323,7 @@ Create `tests/integration/test_objection_runtime.py`:
 """Integration test: full turn cycle with mocked classifier (Plan 4a).
 
 Uses the real Postgres checkpointer; mocks the classifier LLM. Verifies that:
-1. Detection above threshold deflects to :inline, appends ObjectionRecord,
+1. Detection above threshold deflects to __inline, appends ObjectionRecord,
    keeps current_node unchanged.
 2. The next turn re-enters the classifier (because current_node stayed).
 3. max_handled_per_lead emits the warning event when exceeded.
@@ -2558,7 +2560,7 @@ async def test_subnode_mode_routes_through_subnode_and_returns_to_origin(
     tenant_llm_with_classifier,
     secrets,
 ):
-    """as_subnode mode: classifier → subnode:classifier → subnode (main) → BACK_TO_ORIGIN."""
+    """as_subnode mode: classifier → subnode__classifier → subnode (main) → BACK_TO_ORIGIN."""
     tf = TreeFlow(
         id="tf",
         version="1.0.0",
@@ -3242,8 +3244,8 @@ Add after the existing "Guardrails (Plan 3)" section in `CLAUDE.md`:
 - Tenant config: `tenant.yaml > objections` block — `enabled`, `min_confidence` (default 0.6), `max_handled_per_lead` (default 10), `history_window` (default 4 messages).
 - Schema: every `NodeObjection` / `GlobalObjection` requires `id`, `kb`, `description` (10-300 chars). The description is what the classifier sees — be specific in PT-BR. `as_subnode: <node_id>` is optional; when set, the classifier dispatches to the referenced full Node (which must declare a transition to `BACK_TO_ORIGIN`).
 - Reuses `tenant.llm.classifier` (Haiku) — no new LLM config needed.
-- Topology: compiler emits `{node_id}:classifier` and (when N has inline objections) `{node_id}:inline` as synthetic LangGraph nodes. `state.current_node` stays as the TreeFlow node id (never the synthetic names).
-- Kill switch: `tenant.objections.enabled=false` makes every `:classifier` a passthrough (zero Haiku call).
+- Topology: compiler emits `{node_id}__classifier` and (when N has inline objections) `{node_id}__inline` as synthetic LangGraph nodes. `state.current_node` stays as the TreeFlow node id (never the synthetic names).
+- Kill switch: `tenant.objections.enabled=false` makes every `__classifier` a passthrough (zero Haiku call).
 - CLI: `ai-sdr simulate ... --no-classifier` to disable for a single run; `--show-extracted` prints `objections_handled`.
 - Failure modes (all degrade to "no match → main", never block the turn): Haiku raise, structured-output validation error, hallucinated objection_id, KB empty, KB missing, BACK_TO_ORIGIN with no origin (falls back to entry_node).
 - Events emitted (structlog): `objection.classifier.{skipped,detected,no_match,error,invalid_output,hallucinated_id}`, `objection.inline.responded`, `objection.subnode.{entered,exited,orphan_return}`, `objection.kb.{empty,missing}`, `objection.threshold.exceeded`.

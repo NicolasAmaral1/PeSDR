@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from ai_sdr.schemas.llm_yaml import LLMConfig, LLMDefaults
 from ai_sdr.schemas.treeflow_yaml import ExitCondition, NodeSpec, Transition, TreeFlow
-from ai_sdr.treeflow.compiler import compile_treeflow
+from ai_sdr.treeflow.compiler import CLASSIFIER_SUFFIX, compile_treeflow
 from ai_sdr.treeflow.state import TalkFlowState
 
 DEMO_YAML = {
@@ -187,7 +187,7 @@ async def test_stays_on_node_when_exit_condition_not_met() -> None:
 
 
 def test_start_router_routes_to_classifier_synthetic_node() -> None:
-    """After Plan 4a, current_node='na' must route to 'na:classifier'
+    """After Plan 4a, current_node='na' must route to 'na__classifier'
     in the compiled graph, not directly to 'na'."""
     tf = TreeFlow(
         id="tf",
@@ -213,5 +213,5 @@ def test_start_router_routes_to_classifier_synthetic_node() -> None:
     graph = compile_treeflow(tf, tenant_llm, secrets={"anthropic_key": "x"})
     # The compiled graph should know about the synthetic classifier node.
     node_names = set(graph.get_graph().nodes.keys())
-    assert "na__classifier" in node_names
+    assert "na" + CLASSIFIER_SUFFIX in node_names
     assert "na" in node_names  # main node still exists
