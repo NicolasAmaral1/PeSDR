@@ -50,6 +50,8 @@ async def test_find_or_create_returns_existing_lead(db_session) -> None:
     )
     await db_session.commit()
 
+    # Tenant context is transaction-local; re-set after commit.
+    await set_tenant_context(db_session, tenant.id)
     second = await find_or_create_lead_by_address(
         db_session, tenant.id, "whatsapp_cloud", "+5511999999999"
     )
@@ -73,10 +75,13 @@ async def test_ingest_inbound_inserts_then_dedupes(db_session) -> None:
     await db_session.commit()
     assert r1.status == "queued"
 
+    # Tenant context is transaction-local; re-set after commit.
+    await set_tenant_context(db_session, tenant.id)
     r2 = await ingest_inbound_message(db_session, tenant, "whatsapp_cloud", msg)
     await db_session.commit()
     assert r2.status == "skipped_dedupe"
     assert r2.lead_id == r1.lead_id
 
+    await set_tenant_context(db_session, tenant.id)
     rows = (await db_session.execute(select(InboundMessageRow))).scalars().all()
     assert len(rows) == 1
