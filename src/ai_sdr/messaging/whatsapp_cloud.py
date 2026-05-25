@@ -16,15 +16,64 @@ import hashlib
 import hmac
 import json
 from collections.abc import Mapping
+from datetime import datetime
+
+import httpx
+import structlog
+import tenacity
 
 from ai_sdr.messaging.base import (
     InboundMessage,
     MessagingAdapter,
     SendResult,
 )
-from ai_sdr.messaging.errors import SignatureError
+from ai_sdr.messaging.errors import (
+    AuthError,
+    PolicyError,
+    RateLimitError,
+    RecipientUnreachable,
+    SignatureError,
+    TransientError,
+    WindowExpiredError,
+)
 from ai_sdr.messaging.factory import register_provider
 from ai_sdr.schemas.tenant_yaml import MessagingConfig
+
+log = structlog.get_logger(__name__)
+
+# Tenacity wait strategy is exposed at module level so tests can monkeypatch
+# it to zero. Production wait is exponential 1s, 2s, 4s.
+_WAIT_STRATEGY = tenacity.wait_exponential(multiplier=1, min=1, max=4)
+_MAX_ATTEMPTS = 3
+
+
+def _build_http_client() -> httpx.AsyncClient:
+    """Factory hook — tests patch this to inject a mock transport."""
+    return httpx.AsyncClient(timeout=15.0)
+
+
+def _classify_error(
+    status: int, error: dict[str, object] | None, retry_after_s: int | None
+) -> Exception:
+    """Map a (status, error body) pair to one of our typed exceptions."""
+    code = (error or {}).get("code")
+
+    if status in (401, 403) or code == 190:
+        return AuthError(f"WhatsApp auth error: {error!r}")
+    if status == 400:
+        if code == 131026 or code == 131051:
+            return RecipientUnreachable(f"recipient unreachable: {error!r}")
+        if code == 131047:
+            return WindowExpiredError(f"24h window expired: {error!r}")
+        if code in (131048, 131049):
+            return PolicyError(f"policy violation: {error!r}")
+        # Conservative catch-all for unknown 4xx — alert ops.
+        return PolicyError(f"unknown 4xx: status={status} body={error!r}")
+    if status == 429:
+        return RateLimitError(retry_after_s=retry_after_s or 60)
+    if 500 <= status < 600:
+        return TransientError(f"5xx from WhatsApp: status={status} body={error!r}")
+    return TransientError(f"unexpected status {status}: {error!r}")
 
 
 class WhatsAppCloudAPIAdapter(MessagingAdapter):
@@ -97,7 +146,59 @@ class WhatsAppCloudAPIAdapter(MessagingAdapter):
         return out
 
     async def send_text(self, to: str, text: str) -> SendResult:
-        raise NotImplementedError("Lands in Plano 5 Task 15")
+        url = f"https://graph.facebook.com/{self._api_version}/{self._phone_number_id}/messages"
+        body = {
+            "messaging_product": "whatsapp",
+            "to": to.lstrip("+"),
+            "type": "text",
+            "text": {"body": text},
+        }
+        request_headers = {"Authorization": f"Bearer {self._access_token}"}
+
+        retryer = tenacity.AsyncRetrying(
+            stop=tenacity.stop_after_attempt(_MAX_ATTEMPTS),
+            wait=_WAIT_STRATEGY,
+            retry=tenacity.retry_if_exception_type(TransientError),
+            reraise=True,
+        )
+
+        log.info("wa.send.start", to=to, attempts_max=_MAX_ATTEMPTS)
+        async for attempt in retryer:
+            with attempt:
+                async with _build_http_client() as client:
+                    response = await client.post(url, json=body, headers=request_headers)
+                if response.status_code == 200:
+                    data = response.json()
+                    out_id = data["messages"][0]["id"]
+                    log.info(
+                        "wa.send.success",
+                        to=to,
+                        external_id=out_id,
+                        attempt=attempt.retry_state.attempt_number,
+                    )
+                    return SendResult(
+                        external_id=out_id,
+                        sent_at_iso=datetime.now(dt.UTC).isoformat(),
+                    )
+                # Non-200: classify, raise (tenacity decides retry vs terminal).
+                try:
+                    err_body = response.json().get("error")
+                except Exception:
+                    err_body = None
+                retry_after_hdr = response.headers.get("Retry-After")
+                retry_after_s = int(retry_after_hdr) if retry_after_hdr else None
+                exc = _classify_error(response.status_code, err_body, retry_after_s)
+                log.warning(
+                    "wa.send.error",
+                    to=to,
+                    status=response.status_code,
+                    err_type=type(exc).__name__,
+                    err=str(exc),
+                    attempt=attempt.retry_state.attempt_number,
+                )
+                raise exc
+
+        raise RuntimeError("unreachable: tenacity exhausted without raising")
 
 
 # Replace the placeholder builder registered in Task 12.
