@@ -115,7 +115,6 @@ def _route(
                 logger.info(
                     "objection.subnode.exited",
                     node_id=node.id,
-                    subnode_id=node.id,
                     returned_to_node_id=origin,
                 )
                 return (origin, False, {"_origin_node_id": None})
