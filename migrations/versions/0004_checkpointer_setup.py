@@ -5,7 +5,6 @@ Revises: 0003_treeflow_tables
 Create Date: 2026-05-22 00:00:00
 """
 
-
 revision = "0004_checkpointer_setup"
 down_revision = "0003_treeflow_tables"
 branch_labels = None

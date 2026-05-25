@@ -31,9 +31,7 @@ def simulate(
     lead: Annotated[
         str, typer.Option("--lead", help="Lead identifier (free-form; per-tenant unique)")
     ],
-    show_extracted: Annotated[
-        bool, typer.Option("--show-extracted/--no-show-extracted")
-    ] = False,
+    show_extracted: Annotated[bool, typer.Option("--show-extracted/--no-show-extracted")] = False,
     tenants_dir: Annotated[Path, typer.Option("--tenants-dir")] = Path("tenants"),
 ) -> None:
     """Run a TalkFlow in the terminal — real Postgres, real LLM, no WhatsApp/CRM."""
@@ -76,9 +74,7 @@ async def _run(
         tf_id = tf.id
         tenant_slug_final = t.slug
 
-    typer.secho(
-        f"[talkflow:{tf_id}] type a message, /quit to exit.\n", fg=typer.colors.GREEN
-    )
+    typer.secho(f"[talkflow:{tf_id}] type a message, /quit to exit.\n", fg=typer.colors.GREEN)
 
     user_msg = ""
     while True:
@@ -88,9 +84,7 @@ async def _run(
             ).scalar_one()
             result = await runtime.step(session, t, tf_id, user_input=user_msg)
 
-        typer.secho(
-            f"[node:{result.current_node}] > {result.response_text}", fg=typer.colors.CYAN
-        )
+        typer.secho(f"[node:{result.current_node}] > {result.response_text}", fg=typer.colors.CYAN)
         if show_extracted and result.collected:
             typer.secho(f"  collected: {result.collected}", fg=typer.colors.BRIGHT_BLACK)
         if result.completed:

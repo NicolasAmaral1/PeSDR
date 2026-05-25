@@ -50,9 +50,7 @@ nodes:
 """
 
 
-def _make_fixture(
-    tmp_path: Path, slug: str, provider: str, model: str, secret_name: str
-) -> Path:
+def _make_fixture(tmp_path: Path, slug: str, provider: str, model: str, secret_name: str) -> Path:
     base = tmp_path / "tenants" / slug
     (base / "treeflows").mkdir(parents=True)
     (base / "tenant.yaml").write_text(
@@ -115,9 +113,7 @@ async def test_live_anthropic(tmp_path: Path) -> None:
     if not key:
         pytest.skip("ANTHROPIC_API_KEY not set")
     slug = f"livetest-{uuid.uuid4().hex[:6]}"
-    tenants_dir = _make_fixture(
-        tmp_path, slug, "anthropic", "claude-haiku-4-5", "anthropic_key"
-    )
+    tenants_dir = _make_fixture(tmp_path, slug, "anthropic", "claude-haiku-4-5", "anthropic_key")
     await _run_e2e(tenants_dir, slug, "anthropic_key", key)
 
 

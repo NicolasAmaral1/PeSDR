@@ -17,9 +17,7 @@ TalkFlowStatus = Literal["active", "completed", "cold"]
 
 class TalkFlow(Base):
     __tablename__ = "talkflows"
-    __table_args__ = (
-        UniqueConstraint("tenant_id", "lead_id", name="uq_talkflows_tenant_lead"),
-    )
+    __table_args__ = (UniqueConstraint("tenant_id", "lead_id", name="uq_talkflows_tenant_lead"),)
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, server_default=func.uuid_generate_v4()

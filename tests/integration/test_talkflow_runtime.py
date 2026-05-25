@@ -129,27 +129,21 @@ async def test_publish_create_step_end_to_end(tmp_path: Path) -> None:
         tenant_slug = t.slug
 
     async with sm() as session:
-        t = (
-            await session.execute(select(Tenant).where(Tenant.slug == tenant_slug))
-        ).scalar_one()
+        t = (await session.execute(select(Tenant).where(Tenant.slug == tenant_slug))).scalar_one()
         r1 = await runtime.step(session, t, tf_id, user_input="")
         assert r1.response_text == "Oi!"
         assert r1.current_node == "qualificacao"
         assert r1.completed is False
 
     async with sm() as session:
-        t = (
-            await session.execute(select(Tenant).where(Tenant.slug == tenant_slug))
-        ).scalar_one()
+        t = (await session.execute(select(Tenant).where(Tenant.slug == tenant_slug))).scalar_one()
         r2 = await runtime.step(session, t, tf_id, user_input="faturo 50k")
         assert "anotado" in r2.response_text.lower() or "50k" in r2.response_text.lower()
         assert r2.collected.get("faturamento") == 50000
         assert r2.current_node == "premium"
 
     async with sm() as session:
-        t = (
-            await session.execute(select(Tenant).where(Tenant.slug == tenant_slug))
-        ).scalar_one()
+        t = (await session.execute(select(Tenant).where(Tenant.slug == tenant_slug))).scalar_one()
         r3 = await runtime.step(session, t, tf_id, user_input="manda")
         assert r3.completed is True
         assert r3.current_node == "END"
