@@ -457,7 +457,8 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE POLICY leads_tenant_isolation ON leads
-        USING (tenant_id = current_setting('app.tenant_id', true)::uuid)
+        USING (tenant_id = current_setting('app.current_tenant', true)::uuid)
+        WITH CHECK (tenant_id = current_setting('app.current_tenant', true)::uuid)
         """
     )
 
@@ -758,7 +759,8 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE POLICY inbound_messages_tenant_isolation ON inbound_messages
-        USING (tenant_id = current_setting('app.tenant_id', true)::uuid)
+        USING (tenant_id = current_setting('app.current_tenant', true)::uuid)
+        WITH CHECK (tenant_id = current_setting('app.current_tenant', true)::uuid)
         """
     )
 
