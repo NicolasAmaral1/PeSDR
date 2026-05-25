@@ -4,7 +4,16 @@ from langchain_core.runnables import RunnableLambda
 from pydantic import BaseModel
 
 from ai_sdr.schemas.llm_yaml import LLMConfig, LLMDefaults
-from ai_sdr.schemas.treeflow_yaml import ExitCondition, NodeSpec, Transition, TreeFlow
+from ai_sdr.schemas.tenant_yaml import ObjectionsConfig
+from ai_sdr.schemas.treeflow_yaml import (
+    ExitCondition,
+    GlobalObjection,
+    NodeObjection,
+    NodeSpec,
+    Transition,
+    TreeFlow,
+)
+from ai_sdr.treeflow.classifier import ClassifierResult
 from ai_sdr.treeflow.compiler import CLASSIFIER_SUFFIX, compile_treeflow
 from ai_sdr.treeflow.state import TalkFlowState
 
@@ -215,3 +224,260 @@ def test_start_router_routes_to_classifier_synthetic_node() -> None:
     node_names = set(graph.get_graph().nodes.keys())
     assert "na" + CLASSIFIER_SUFFIX in node_names
     assert "na" in node_names  # main node still exists
+
+
+# ---------------------------------------------------------------------------
+# Plan 4a Task 8 — real classifier logic tests
+# ---------------------------------------------------------------------------
+
+
+def _tenant_llm_with_classifier() -> LLMDefaults:
+    return LLMDefaults(
+        default=LLMConfig(
+            provider="anthropic",
+            model="claude-sonnet-4-6",
+            api_key_ref="secrets/anthropic_key",
+        ),
+        classifier=LLMConfig(
+            provider="anthropic",
+            model="claude-haiku-4-5",
+            api_key_ref="secrets/anthropic_key",
+        ),
+    )
+
+
+def _tf_with_objection() -> TreeFlow:
+    return TreeFlow(
+        id="tf",
+        version="1.0.0",
+        display_name="x",
+        entry_node="qualif",
+        global_objections=[
+            GlobalObjection(
+                id="preco",
+                kb="kb_obj_preco",
+                description="Lead questiona o valor do investimento sempre nessa conversa",
+            )
+        ],
+        nodes=[
+            NodeSpec(
+                id="qualif",
+                prompt="responda curto",
+                exit_condition=ExitCondition(type="all_fields_filled"),
+                next_nodes=[Transition(condition="true", target="END")],
+                handles_objections=[
+                    NodeObjection(
+                        id="local_x",
+                        kb="kb_local",
+                        description="Objeção local que aparece só neste node, descrita bem",
+                    )
+                ],
+            ),
+        ],
+    )
+
+
+async def test_classifier_skips_when_no_objections_and_no_globals() -> None:
+    tf = TreeFlow(
+        id="tf",
+        version="1.0.0",
+        display_name="x",
+        entry_node="na",
+        nodes=[
+            NodeSpec(
+                id="na",
+                prompt="x",
+                exit_condition=ExitCondition(type="all_fields_filled"),
+                next_nodes=[Transition(condition="true", target="END")],
+            )
+        ],
+    )
+    classify_calls: list[Any] = []
+
+    async def fake_classify(**kwargs: Any) -> ClassifierResult:
+        classify_calls.append(kwargs)
+        return ClassifierResult(objection_id=None, confidence=0.0)
+
+    graph = compile_treeflow(
+        tf,
+        tenant_llm=_tenant_llm_with_classifier(),
+        secrets={"anthropic_key": "x"},
+        objections=ObjectionsConfig(enabled=True),
+        classify_fn=fake_classify,
+        llm_factory=_stub_llm_factory({"na": {"response_text": "ok"}}),
+    )
+    state: TalkFlowState = {
+        "tenant_id": "t",
+        "lead_id": "l",
+        "treeflow_id": "tf",
+        "treeflow_version": "1.0.0",
+        "current_node": "na",
+        "collected": {},
+        "messages": [],
+        "last_user_input": "tá caro",
+        "last_agent_response": "",
+        "completed": False,
+    }
+    await graph.ainvoke(state)
+    assert classify_calls == []  # classifier never called — no objections
+
+
+async def test_classifier_skips_when_disabled_in_tenant_config() -> None:
+    tf = _tf_with_objection()
+    classify_calls: list[Any] = []
+
+    async def fake_classify(**kwargs: Any) -> ClassifierResult:
+        classify_calls.append(kwargs)
+        return ClassifierResult(objection_id="preco", confidence=0.9, quote="x")
+
+    graph = compile_treeflow(
+        tf,
+        tenant_llm=_tenant_llm_with_classifier(),
+        secrets={"anthropic_key": "x"},
+        objections=ObjectionsConfig(enabled=False),
+        classify_fn=fake_classify,
+        llm_factory=_stub_llm_factory({"qualif": {"response_text": "ok"}}),
+    )
+    state: TalkFlowState = {
+        "tenant_id": "t",
+        "lead_id": "l",
+        "treeflow_id": "tf",
+        "treeflow_version": "1.0.0",
+        "current_node": "qualif",
+        "collected": {},
+        "messages": [],
+        "last_user_input": "tá caro",
+        "last_agent_response": "",
+        "completed": False,
+    }
+    await graph.ainvoke(state)
+    assert classify_calls == []  # kill switch
+
+
+async def test_classifier_below_threshold_goes_to_main() -> None:
+    tf = _tf_with_objection()
+
+    async def fake_classify(**kwargs: Any) -> ClassifierResult:
+        return ClassifierResult(objection_id="preco", confidence=0.4, quote="x")
+
+    graph = compile_treeflow(
+        tf,
+        tenant_llm=_tenant_llm_with_classifier(),
+        secrets={"anthropic_key": "x"},
+        objections=ObjectionsConfig(enabled=True, min_confidence=0.6),
+        classify_fn=fake_classify,
+        llm_factory=_stub_llm_factory({"qualif": {"response_text": "ok"}}),
+    )
+    state: TalkFlowState = {
+        "tenant_id": "t",
+        "lead_id": "l",
+        "treeflow_id": "tf",
+        "treeflow_version": "1.0.0",
+        "current_node": "qualif",
+        "collected": {},
+        "messages": [],
+        "last_user_input": "tá caro",
+        "last_agent_response": "",
+        "completed": False,
+    }
+    final = await graph.ainvoke(state)
+    assert final.get("objections_handled", []) == []  # no deflect → main ran
+
+
+async def test_classifier_exception_falls_through_to_main() -> None:
+    tf = _tf_with_objection()
+
+    async def fake_classify(**kwargs: Any) -> ClassifierResult:
+        raise RuntimeError("haiku rate limit")
+
+    graph = compile_treeflow(
+        tf,
+        tenant_llm=_tenant_llm_with_classifier(),
+        secrets={"anthropic_key": "x"},
+        objections=ObjectionsConfig(enabled=True),
+        classify_fn=fake_classify,
+        llm_factory=_stub_llm_factory({"qualif": {"response_text": "ok"}}),
+    )
+    state: TalkFlowState = {
+        "tenant_id": "t",
+        "lead_id": "l",
+        "treeflow_id": "tf",
+        "treeflow_version": "1.0.0",
+        "current_node": "qualif",
+        "collected": {},
+        "messages": [],
+        "last_user_input": "tá caro",
+        "last_agent_response": "",
+        "completed": False,
+    }
+    final = await graph.ainvoke(state)
+    assert final.get("objections_handled", []) == []  # exception → no deflect
+
+
+async def test_classifier_hallucinated_id_falls_through_to_main() -> None:
+    tf = _tf_with_objection()
+
+    async def fake_classify(**kwargs: Any) -> ClassifierResult:
+        return ClassifierResult(objection_id="nao_existe", confidence=0.9, quote="x")
+
+    graph = compile_treeflow(
+        tf,
+        tenant_llm=_tenant_llm_with_classifier(),
+        secrets={"anthropic_key": "x"},
+        objections=ObjectionsConfig(enabled=True),
+        classify_fn=fake_classify,
+        llm_factory=_stub_llm_factory({"qualif": {"response_text": "ok"}}),
+    )
+    state: TalkFlowState = {
+        "tenant_id": "t",
+        "lead_id": "l",
+        "treeflow_id": "tf",
+        "treeflow_version": "1.0.0",
+        "current_node": "qualif",
+        "collected": {},
+        "messages": [],
+        "last_user_input": "tá caro",
+        "last_agent_response": "",
+        "completed": False,
+    }
+    final = await graph.ainvoke(state)
+    assert final.get("objections_handled", []) == []  # hallucinated → fall through
+
+
+async def test_classifier_dispatches_to_inline_on_detection_above_threshold() -> None:
+    """Above threshold + as_subnode is None → classifier emits goto N__inline.
+    N__inline isn't registered yet (T9 will register it). LangGraph silently
+    ignores the unknown destination but still applies the state update, so we
+    can assert that _active_objection was populated — proving the classifier
+    chose the inline path."""
+    tf = _tf_with_objection()  # "preco" global has as_subnode=None → inline path
+
+    async def fake_classify(**kwargs: Any) -> ClassifierResult:
+        return ClassifierResult(objection_id="preco", confidence=0.85, quote="tá caro")
+
+    graph = compile_treeflow(
+        tf,
+        tenant_llm=_tenant_llm_with_classifier(),
+        secrets={"anthropic_key": "x"},
+        objections=ObjectionsConfig(enabled=True, min_confidence=0.6),
+        classify_fn=fake_classify,
+        llm_factory=_stub_llm_factory({"qualif": {"response_text": "ok"}}),
+    )
+    state: TalkFlowState = {
+        "tenant_id": "t",
+        "lead_id": "l",
+        "treeflow_id": "tf",
+        "treeflow_version": "1.0.0",
+        "current_node": "qualif",
+        "collected": {},
+        "messages": [],
+        "last_user_input": "tá caro",
+        "last_agent_response": "",
+        "completed": False,
+    }
+    final = await graph.ainvoke(state)
+    # The classifier emitted Command(goto=qualif__inline, update={_active_objection: ...}).
+    # LangGraph silently drops the unknown goto but applies the state update —
+    # so _active_objection is set, proving the inline dispatch path was taken.
+    assert final.get("_active_objection") is not None
+    assert final["_active_objection"]["id"] == "preco"  # type: ignore[index]

@@ -6,6 +6,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+import structlog
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import END, START, StateGraph
@@ -19,10 +20,14 @@ from ai_sdr.llm.extractor import build_structured_model, extract
 from ai_sdr.llm.factory import build_llm as _default_build_llm
 from ai_sdr.llm.messages import build_system_messages
 from ai_sdr.schemas.llm_yaml import LLMConfig, LLMDefaults
-from ai_sdr.schemas.tenant_yaml import GuardrailsConfig
-from ai_sdr.schemas.treeflow_yaml import NodeSpec, TreeFlow
+from ai_sdr.schemas.tenant_yaml import GuardrailsConfig, ObjectionsConfig
+from ai_sdr.schemas.treeflow_yaml import GlobalObjection, NodeObjection, NodeSpec, TreeFlow
+from ai_sdr.treeflow.classifier import ClassifierResult
+from ai_sdr.treeflow.classifier import classify as default_classify
 from ai_sdr.treeflow.expressions import eval_bool
-from ai_sdr.treeflow.state import Message, TalkFlowState
+from ai_sdr.treeflow.state import Message, ObjectionRecord, TalkFlowState
+
+logger = structlog.get_logger(__name__)
 
 CLASSIFIER_SUFFIX = "__classifier"
 INLINE_SUFFIX = "__inline"
@@ -37,6 +42,9 @@ EmbedderFactory = Callable[[dict[str, str], Any], Awaitable[Embedder]]
 
 KbSessionFactory = Callable[[], Awaitable[AsyncSession]]
 """() -> AsyncSession. Runtime owns one DB session per step; tests can inject any."""
+
+ClassifyFn = Callable[..., Awaitable[ClassifierResult]]
+"""Test seam — production passes ai_sdr.treeflow.classifier.classify."""
 
 
 def _default_llm_factory(cfg: LLMConfig, secrets: dict[str, str], _node_id: str) -> BaseChatModel:
@@ -96,18 +104,23 @@ def compile_treeflow(
     secrets: dict[str, str],
     *,
     guardrails: GuardrailsConfig | None = None,
+    objections: ObjectionsConfig | None = None,
     tenant_id: uuid.UUID | None = None,
     llm_factory: LLMFactory | None = None,
     embedder_factory: EmbedderFactory | None = None,
     kb_session_factory: KbSessionFactory | None = None,
+    classify_fn: ClassifyFn | None = None,
     checkpointer: Any = None,
 ) -> Any:
     """Compile a TreeFlow into a LangGraph StateGraph.
 
     Keyword-only args:
       guardrails: tenant.guardrails block; when None the runner is a passthrough.
+      objections: tenant.objections block; when None defaults are used (enabled=True).
       tenant_id, embedder_factory, kb_session_factory: required when any node has
         a non-empty `knowledge_base`; raise ValueError at compile time if missing.
+      classify_fn: test seam for the objection classifier; defaults to
+        ai_sdr.treeflow.classifier.classify in production.
       checkpointer: pass to enable per-thread state persistence.
     """
     llm_fn: LLMFactory = llm_factory or _default_llm_factory
@@ -212,16 +225,155 @@ def compile_treeflow(
 
         return node_fn
 
-    def _make_passthrough_classifier(node: NodeSpec) -> Callable[[TalkFlowState], Any]:
-        async def classifier_fn(state: TalkFlowState) -> Command[str]:  # noqa: ARG001
-            return Command(goto=node.id)
+    classify_impl: ClassifyFn = classify_fn or default_classify
+    objections_cfg = objections or ObjectionsConfig()  # defaults preserve enabled=true
+
+    def _applicable_objections(
+        node: NodeSpec,
+    ) -> list[NodeObjection | GlobalObjection]:
+        merged: dict[str, NodeObjection | GlobalObjection] = {}
+        for g in tf.global_objections:
+            merged[g.id] = g
+        for o in node.handles_objections:
+            merged[o.id] = o  # node-local wins
+        return list(merged.values())
+
+    def _make_classifier(node: NodeSpec) -> Callable[[TalkFlowState], Any]:
+        applicable = _applicable_objections(node)
+
+        async def classifier_fn(state: TalkFlowState) -> Command[str]:
+            tenant_id_for_log = str(tenant_id) if tenant_id is not None else None
+            # Skip if no objections in scope OR kill switch
+            if not applicable or not objections_cfg.enabled:
+                logger.info(
+                    "objection.classifier.skipped",
+                    tenant_id=tenant_id_for_log,
+                    node_id=node.id,
+                    reason="no_objections" if not applicable else "disabled",
+                )
+                return Command(goto=node.id)
+
+            # Build the conversation (messages + last user input as HumanMessage)
+            conversation: list[Any] = []
+            for m in state.get("messages", []):
+                if m["role"] == "user":
+                    conversation.append(HumanMessage(content=m["content"]))
+                elif m["role"] == "assistant":
+                    conversation.append(AIMessage(content=m["content"]))
+            user_input = state.get("last_user_input", "")
+            if user_input:
+                conversation.append(HumanMessage(content=user_input))
+
+            # Build the classifier LLM
+            classifier_cfg = tenant_llm.classifier or tenant_llm.default
+            classifier_llm = llm_fn(classifier_cfg, secrets, node.id)
+
+            previously_handled = [
+                r["objection_id"] for r in state.get("objections_handled", []) or []
+            ]
+
+            try:
+                result = await classify_impl(
+                    llm=classifier_llm,
+                    objections=applicable,
+                    conversation=conversation,
+                    previously_handled=previously_handled,
+                    history_window=objections_cfg.history_window,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "objection.classifier.error",
+                    tenant_id=tenant_id_for_log,
+                    node_id=node.id,
+                    error_type=type(exc).__name__,
+                    error_message=str(exc),
+                )
+                return Command(goto=node.id)
+
+            allowed_ids = {o.id for o in applicable}
+            if result.objection_id is not None and result.objection_id not in allowed_ids:
+                logger.warning(
+                    "objection.classifier.hallucinated_id",
+                    tenant_id=tenant_id_for_log,
+                    node_id=node.id,
+                    returned_id=result.objection_id,
+                    allowed_ids=sorted(allowed_ids),
+                )
+                return Command(goto=node.id)
+
+            if result.objection_id is None or result.confidence < objections_cfg.min_confidence:
+                logger.info(
+                    "objection.classifier.no_match",
+                    tenant_id=tenant_id_for_log,
+                    node_id=node.id,
+                    max_confidence_seen=result.confidence,
+                )
+                return Command(goto=node.id)
+
+            # Detection above threshold
+            detected = next(o for o in applicable if o.id == result.objection_id)
+            scope = (
+                "local" if any(o.id == detected.id for o in node.handles_objections) else "global"
+            )
+            logger.info(
+                "objection.classifier.detected",
+                tenant_id=tenant_id_for_log,
+                node_id=node.id,
+                objection_id=detected.id,
+                confidence=result.confidence,
+                quote=result.quote,
+                scope=scope,
+            )
+
+            handled_count = len(state.get("objections_handled", []) or []) + 1
+            if handled_count > objections_cfg.max_handled_per_lead:
+                logger.warning(
+                    "objection.threshold.exceeded",
+                    tenant_id=tenant_id_for_log,
+                    node_id=node.id,
+                    count=handled_count,
+                    threshold=objections_cfg.max_handled_per_lead,
+                )
+
+            if detected.as_subnode is None:
+                # Inline mode — hand off to N__inline (T9 will implement the node)
+                return Command(
+                    goto=node.id + INLINE_SUFFIX,
+                    update={
+                        "_active_objection": detected.model_dump(),
+                        "_classifier_result": result.model_dump(),
+                    },
+                )
+            # Sub-node mode — append record now (we know we're entering the subnode),
+            # set _origin_node_id, route to subnode's classifier.
+            record: ObjectionRecord = {
+                "objection_id": detected.id,
+                "detected_at_node": node.id,
+                "turn_index": len(state.get("messages", []) or []) // 2,
+                "quote": result.quote,
+            }
+            logger.info(
+                "objection.subnode.entered",
+                tenant_id=tenant_id_for_log,
+                node_id=node.id,
+                objection_id=detected.id,
+                subnode_id=detected.as_subnode,
+                origin_node_id=node.id,
+            )
+            return Command(
+                goto=detected.as_subnode + CLASSIFIER_SUFFIX,
+                update={
+                    "_origin_node_id": node.id,
+                    "objections_handled": [record],
+                },
+            )
 
         return classifier_fn
 
     sg: StateGraph[Any, Any, Any, Any] = StateGraph(TalkFlowState)
     for n in tf.nodes:
         sg.add_node(n.id, _make_node_fn(n))  # type: ignore[call-overload]
-        sg.add_node(n.id + CLASSIFIER_SUFFIX, _make_passthrough_classifier(n))  # type: ignore[call-overload]
+        sg.add_node(n.id + CLASSIFIER_SUFFIX, _make_classifier(n))  # type: ignore[call-overload]
 
     def _start_router(state: TalkFlowState) -> str:
         nid = state.get("current_node") or tf.entry_node
