@@ -473,7 +473,7 @@ def test_as_subnode_must_reference_existing_node():
 
 
 def test_global_objection_as_subnode_must_reference_existing_node():
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError) as exc:
         TreeFlow(
             id="tf",
             version="1.0.0",
@@ -496,6 +496,9 @@ def test_global_objection_as_subnode_must_reference_existing_node():
                 ),
             ],
         )
+    msg = str(exc.value)
+    assert "nonexistent" in msg
+    assert "as_subnode" in msg
 
 
 def test_back_to_origin_accepted_as_transition_target():
@@ -561,6 +564,90 @@ def test_objection_ids_unique_per_scope():
                     prompt="x",
                     exit_condition={"type": "all_fields_filled"},
                     next_nodes=[{"condition": "true", "target": "END"}],
+                ),
+            ],
+        )
+
+
+def test_node_local_objection_as_subnode_rejects_self_reference():
+    with pytest.raises(ValidationError) as exc:
+        TreeFlow(
+            id="tf",
+            version="1.0.0",
+            display_name="x",
+            entry_node="na",
+            nodes=[
+                NodeSpec(
+                    id="na",
+                    prompt="x",
+                    exit_condition={"type": "all_fields_filled"},
+                    next_nodes=[{"condition": "true", "target": "END"}],
+                    handles_objections=[
+                        {
+                            "id": "preco",
+                            "kb": "k",
+                            "description": "Lead questiona o valor do investimento sempre",
+                            "as_subnode": "na",  # points to itself
+                        }
+                    ],
+                ),
+            ],
+        )
+    msg = str(exc.value)
+    assert "pointing to itself" in msg
+    assert "na" in msg
+
+
+def test_orphan_back_to_origin_emits_warning():
+    """A node uses BACK_TO_ORIGIN but isn't referenced by any as_subnode."""
+    with pytest.warns(UserWarning, match="BACK_TO_ORIGIN"):
+        TreeFlow(
+            id="tf",
+            version="1.0.0",
+            display_name="x",
+            entry_node="na",
+            nodes=[
+                NodeSpec(
+                    id="na",
+                    prompt="x",
+                    exit_condition={"type": "all_fields_filled"},
+                    next_nodes=[{"condition": "true", "target": "BACK_TO_ORIGIN"}],
+                ),
+            ],
+        )
+
+
+def test_back_to_origin_referenced_by_subnode_no_warning():
+    """A node that IS referenced by some as_subnode using BACK_TO_ORIGIN — no warning."""
+    import warnings as _warnings
+
+    with _warnings.catch_warnings():
+        _warnings.simplefilter("error")  # turn any warning into an error
+        TreeFlow(
+            id="tf",
+            version="1.0.0",
+            display_name="x",
+            entry_node="na",
+            nodes=[
+                NodeSpec(
+                    id="na",
+                    prompt="x",
+                    exit_condition={"type": "all_fields_filled"},
+                    next_nodes=[{"condition": "true", "target": "obj_node"}],
+                    handles_objections=[
+                        {
+                            "id": "preco",
+                            "kb": "k",
+                            "description": "Lead questiona o valor do investimento sempre",
+                            "as_subnode": "obj_node",
+                        }
+                    ],
+                ),
+                NodeSpec(
+                    id="obj_node",
+                    prompt="x",
+                    exit_condition={"type": "all_fields_filled"},
+                    next_nodes=[{"condition": "true", "target": "BACK_TO_ORIGIN"}],
                 ),
             ],
         )

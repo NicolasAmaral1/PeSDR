@@ -13,6 +13,8 @@ Fields scoped out of plan 2 still accepted as forward-compatible opaque blobs:
 from __future__ import annotations
 
 import re
+import warnings
+from collections import Counter
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -134,7 +136,7 @@ class NodeSpec(BaseModel):
     @model_validator(mode="after")
     def _validate_objection_ids_unique(self) -> NodeSpec:
         ids = [o.id for o in self.handles_objections]
-        dupes = {x for x in ids if ids.count(x) > 1}
+        dupes = {x for x, n in Counter(ids).items() if n > 1}
         if dupes:
             raise ValueError(
                 f"node {self.id!r} has duplicate handles_objections ids: {sorted(dupes)}"
@@ -156,7 +158,7 @@ class TreeFlow(BaseModel):
     @model_validator(mode="after")
     def _validate_graph_consistency(self) -> TreeFlow:
         ids = [n.id for n in self.nodes]
-        dupes = {x for x in ids if ids.count(x) > 1}
+        dupes = {x for x, n in Counter(ids).items() if n > 1}
         if dupes:
             raise ValueError(f"duplicate node ids: {sorted(dupes)}")
 
@@ -175,22 +177,46 @@ class TreeFlow(BaseModel):
 
         # uniqueness of global_objections ids
         global_ids = [o.id for o in self.global_objections]
-        global_dupes = {x for x in global_ids if global_ids.count(x) > 1}
+        global_dupes = {x for x, n in Counter(global_ids).items() if n > 1}
         if global_dupes:
             raise ValueError(f"duplicate global_objections ids: {sorted(global_dupes)}")
 
-        # as_subnode references must point at existing nodes
-        all_objections: list[tuple[str, str | None]] = [
-            (o.id, o.as_subnode) for o in self.global_objections
+        # as_subnode references must point at existing nodes; also reject self-references
+        all_objections: list[tuple[str, str | None, str | None]] = [
+            (o.id, o.as_subnode, None) for o in self.global_objections
         ]
         for node in self.nodes:
             for o in node.handles_objections:
-                all_objections.append((o.id, o.as_subnode))
+                all_objections.append((o.id, o.as_subnode, node.id))
         node_id_set = set(ids)
-        for obj_id, subnode in all_objections:
-            if subnode is not None and subnode not in node_id_set:
+        for obj_id, subnode, declaring_node in all_objections:
+            if subnode is None:
+                continue
+            if subnode not in node_id_set:
                 raise ValueError(
                     f"objection {obj_id!r} as_subnode={subnode!r} is not declared "
-                    f"in nodes (declared: {ids})"
+                    f"in nodes (declared: {sorted(node_id_set)})"
                 )
+            if declaring_node is not None and subnode == declaring_node:
+                raise ValueError(
+                    f"objection {obj_id!r} in node {declaring_node!r} has as_subnode "
+                    f"pointing to itself (would loop)"
+                )
+
+        # Warn when a node uses BACK_TO_ORIGIN but no objection references it via as_subnode.
+        # Plan 4a: warning-only (the node may be referenced in a future version).
+        subnode_targets = {sn for _, sn, _ in all_objections if sn is not None}
+        for node in self.nodes:
+            uses_back_to_origin = any(
+                tr.target == BACK_TO_ORIGIN_SENTINEL for tr in node.next_nodes
+            )
+            if uses_back_to_origin and node.id not in subnode_targets:
+                warnings.warn(
+                    f"node {node.id!r} uses BACK_TO_ORIGIN in transitions but is not "
+                    f"referenced by any objection's as_subnode — _origin_node_id will "
+                    f"never be set, fallback to entry_node at runtime",
+                    UserWarning,
+                    stacklevel=2,
+                )
+
         return self
