@@ -108,20 +108,28 @@ async def test_end_to_end_webhook_assign_worker_reply(
     assert r.status_code == 200
 
     # --- 3. The lead is now pending; the worker job should no-op on it ---
+    # Capture IDs as plain strings BEFORE expire_all, since expire makes
+    # subsequent .id access trigger a sync attribute refresh that breaks
+    # outside an async greenlet context.
+    tenant_id_str = str(tenant.id)
+    tenant_slug = tenant.slug
     await set_tenant_context(db_session, tenant.id)
     db_session.expire_all()
     lead = (await db_session.execute(select(Lead))).scalar_one()
     assert lead.status == "pending_assignment"
+    lead_id_str = str(lead.id)
 
     engine = build_engine(get_settings().database_url)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
-    registry = MagicMock(); registry.get.return_value = hybrid
+    registry = MagicMock()
+    registry.get.return_value = hybrid
     runtime = MagicMock()
     runtime.step = MagicMock(side_effect=AssertionError("must not step on pending lead"))
 
     await process_lead_inbox(
         {"session_factory": session_factory, "adapter_registry": registry, "runtime": runtime},
-        str(tenant.id), str(lead.id),
+        tenant_id_str,
+        lead_id_str,
     )
     assert fake_for_send.sent_messages == []
 
@@ -130,7 +138,7 @@ async def test_end_to_end_webhook_assign_worker_reply(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
         r = await client.post(
-            f"/tenants/{tenant.slug}/leads/{lead.id}/assign",
+            f"/tenants/{tenant_slug}/leads/{lead_id_str}/assign",
             json={"treeflow_id": "mentoria"},
         )
     assert r.status_code == 202
@@ -138,6 +146,7 @@ async def test_end_to_end_webhook_assign_worker_reply(
     # --- 5. Worker runs again (now lead is active) and replies ---
     async def runtime_step_stub(session, t, talkflow_id, user_input):
         return MagicMock(response_text="Olá! Recebi sua mensagem.")
+
     runtime_alive = MagicMock()
     runtime_alive.step = runtime_step_stub
 
@@ -147,7 +156,8 @@ async def test_end_to_end_webhook_assign_worker_reply(
             "adapter_registry": registry,
             "runtime": runtime_alive,
         },
-        str(tenant.id), str(lead.id),
+        tenant_id_str,
+        lead_id_str,
     )
     assert fake_for_send.sent_messages == [
         ("+5511988887777", "Olá! Recebi sua mensagem."),
