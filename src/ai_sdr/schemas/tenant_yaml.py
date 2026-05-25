@@ -57,6 +57,44 @@ class GuardrailsConfig(BaseModel):
         return self
 
 
+class MessagingConfig(BaseModel):
+    """Messaging provider config. provider is free-form; factory dispatches.
+
+    For provider='whatsapp_cloud', the four *_ref fields are required and
+    must use the 'secrets/' prefix (resolved by SopsLoader at runtime).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str
+    phone_number_id_ref: str | None = None
+    access_token_ref: str | None = None
+    webhook_verify_token_ref: str | None = None
+    app_secret_ref: str | None = None
+    api_version: str = "v21.0"
+
+    @model_validator(mode="after")
+    def _check_provider_fields(self) -> Self:
+        if self.provider == "whatsapp_cloud":
+            required = (
+                "phone_number_id_ref",
+                "access_token_ref",
+                "webhook_verify_token_ref",
+                "app_secret_ref",
+            )
+            for f in required:
+                v = getattr(self, f)
+                if not v:
+                    raise ValueError(
+                        f"messaging.whatsapp_cloud requires {f}"
+                    )
+                if not v.startswith("secrets/"):
+                    raise ValueError(
+                        f"messaging.{f} must start with 'secrets/' (got {v!r})"
+                    )
+        return self
+
+
 class TenantConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -66,6 +104,7 @@ class TenantConfig(BaseModel):
     schedule: ScheduleConfig | None = None
     conversation: ConversationConfig | None = None
     llm: LLMDefaults | None = None
+    messaging: MessagingConfig | None = None
     guardrails: GuardrailsConfig | None = None
 
     @field_validator("id")
