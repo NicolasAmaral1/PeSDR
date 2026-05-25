@@ -21,6 +21,7 @@ from ai_sdr.schemas.llm_yaml import LLMConfig
 
 NODE_ID_RE = re.compile(r"^[a-z][a-z0-9_]{0,62}[a-z0-9]$")
 END_SENTINEL = "END"
+BACK_TO_ORIGIN_SENTINEL = "BACK_TO_ORIGIN"
 
 CollectType = Literal["text", "number", "boolean", "email", "phone"]
 ExitConditionType = Literal["all_fields_filled", "rule_expression", "combined"]
@@ -130,6 +131,16 @@ class NodeSpec(BaseModel):
             )
         return v
 
+    @model_validator(mode="after")
+    def _validate_objection_ids_unique(self) -> NodeSpec:
+        ids = [o.id for o in self.handles_objections]
+        dupes = {x for x in ids if ids.count(x) > 1}
+        if dupes:
+            raise ValueError(
+                f"node {self.id!r} has duplicate handles_objections ids: {sorted(dupes)}"
+            )
+        return self
+
 
 class TreeFlow(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -149,7 +160,7 @@ class TreeFlow(BaseModel):
         if dupes:
             raise ValueError(f"duplicate node ids: {sorted(dupes)}")
 
-        valid_targets = set(ids) | {END_SENTINEL}
+        valid_targets = set(ids) | {END_SENTINEL, BACK_TO_ORIGIN_SENTINEL}
         if self.entry_node not in ids:
             raise ValueError(
                 f"entry_node={self.entry_node!r} is not declared in nodes (declared: {ids})"
@@ -161,4 +172,25 @@ class TreeFlow(BaseModel):
                         f"node {node.id!r} transitions to unknown target {tr.target!r} "
                         f"(must be one of: {sorted(valid_targets)})"
                     )
+
+        # uniqueness of global_objections ids
+        global_ids = [o.id for o in self.global_objections]
+        global_dupes = {x for x in global_ids if global_ids.count(x) > 1}
+        if global_dupes:
+            raise ValueError(f"duplicate global_objections ids: {sorted(global_dupes)}")
+
+        # as_subnode references must point at existing nodes
+        all_objections: list[tuple[str, str | None]] = [
+            (o.id, o.as_subnode) for o in self.global_objections
+        ]
+        for node in self.nodes:
+            for o in node.handles_objections:
+                all_objections.append((o.id, o.as_subnode))
+        node_id_set = set(ids)
+        for obj_id, subnode in all_objections:
+            if subnode is not None and subnode not in node_id_set:
+                raise ValueError(
+                    f"objection {obj_id!r} as_subnode={subnode!r} is not declared "
+                    f"in nodes (declared: {ids})"
+                )
         return self

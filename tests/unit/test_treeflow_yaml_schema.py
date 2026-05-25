@@ -439,3 +439,128 @@ def test_node_objection_as_subnode_rejects_empty_string():
             description="Lead questiona o valor do investimento ou compara com alternativas",
             as_subnode="",
         )
+
+
+# ---------- Task 2: as_subnode refs + BACK_TO_ORIGIN + objection id uniqueness ----------
+
+
+def test_as_subnode_must_reference_existing_node():
+    with pytest.raises(ValidationError) as exc:
+        TreeFlow(
+            id="tf",
+            version="1.0.0",
+            display_name="x",
+            entry_node="na",
+            nodes=[
+                NodeSpec(
+                    id="na",
+                    prompt="x",
+                    exit_condition={"type": "all_fields_filled"},
+                    next_nodes=[{"condition": "true", "target": "END"}],
+                    handles_objections=[
+                        {
+                            "id": "preco",
+                            "kb": "k",
+                            "description": "Lead questiona o valor do investimento sempre",
+                            "as_subnode": "nonexistent_node",
+                        }
+                    ],
+                ),
+            ],
+        )
+    assert "nonexistent_node" in str(exc.value)
+    assert "as_subnode" in str(exc.value)
+
+
+def test_global_objection_as_subnode_must_reference_existing_node():
+    with pytest.raises(ValidationError):
+        TreeFlow(
+            id="tf",
+            version="1.0.0",
+            display_name="x",
+            entry_node="na",
+            global_objections=[
+                {
+                    "id": "preco",
+                    "kb": "k",
+                    "description": "Lead questiona o valor do investimento sempre",
+                    "as_subnode": "nonexistent",
+                }
+            ],
+            nodes=[
+                NodeSpec(
+                    id="na",
+                    prompt="x",
+                    exit_condition={"type": "all_fields_filled"},
+                    next_nodes=[{"condition": "true", "target": "END"}],
+                ),
+            ],
+        )
+
+
+def test_back_to_origin_accepted_as_transition_target():
+    """BACK_TO_ORIGIN is a valid transition target (resolved at runtime)."""
+    tf = TreeFlow(
+        id="tf",
+        version="1.0.0",
+        display_name="x",
+        entry_node="na",
+        nodes=[
+            NodeSpec(
+                id="na",
+                prompt="x",
+                exit_condition={"type": "all_fields_filled"},
+                next_nodes=[{"condition": "true", "target": "obj_node"}],
+                handles_objections=[
+                    {
+                        "id": "preco",
+                        "kb": "k",
+                        "description": "Lead questiona o valor do investimento sempre",
+                        "as_subnode": "obj_node",
+                    }
+                ],
+            ),
+            NodeSpec(
+                id="obj_node",
+                prompt="x",
+                exit_condition={"type": "all_fields_filled"},
+                next_nodes=[{"condition": "true", "target": "BACK_TO_ORIGIN"}],
+            ),
+        ],
+    )
+    assert tf.nodes[1].next_nodes[0].target == "BACK_TO_ORIGIN"
+
+
+def test_objection_ids_unique_per_scope():
+    """Global and node-local can collide (node-local wins); within a scope they cannot."""
+    with pytest.raises(ValidationError):
+        NodeSpec(
+            id="na",
+            prompt="x",
+            exit_condition={"type": "all_fields_filled"},
+            next_nodes=[{"condition": "true", "target": "END"}],
+            handles_objections=[
+                {"id": "preco", "kb": "k1", "description": "first dup description here"},
+                {"id": "preco", "kb": "k2", "description": "second dup description here"},
+            ],
+        )
+
+    with pytest.raises(ValidationError):
+        TreeFlow(
+            id="tf",
+            version="1.0.0",
+            display_name="x",
+            entry_node="na",
+            global_objections=[
+                {"id": "preco", "kb": "k1", "description": "first dup description here"},
+                {"id": "preco", "kb": "k2", "description": "second dup description here"},
+            ],
+            nodes=[
+                NodeSpec(
+                    id="na",
+                    prompt="x",
+                    exit_condition={"type": "all_fields_filled"},
+                    next_nodes=[{"condition": "true", "target": "END"}],
+                ),
+            ],
+        )
