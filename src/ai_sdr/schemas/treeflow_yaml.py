@@ -80,7 +80,7 @@ class GlobalObjection(BaseModel):
     id: str = Field(min_length=1)
     kb: str = Field(min_length=1)
     description: str = Field(min_length=10, max_length=300)
-    as_subnode: str | None = None  # node_id in same TreeFlow
+    as_subnode: str | None = Field(default=None, min_length=1)  # node_id in same TreeFlow
 
 
 class NodeObjection(BaseModel):
@@ -91,7 +91,7 @@ class NodeObjection(BaseModel):
     id: str = Field(min_length=1)
     kb: str = Field(min_length=1)
     description: str = Field(min_length=10, max_length=300)
-    as_subnode: str | None = None  # node_id in same TreeFlow
+    as_subnode: str | None = Field(default=None, min_length=1)  # node_id in same TreeFlow
 
 
 class KBRef(BaseModel):

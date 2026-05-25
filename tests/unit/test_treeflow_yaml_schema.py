@@ -376,3 +376,66 @@ def test_node_spec_handles_objections_defaults_empty_list():
         next_nodes=[{"condition": "true", "target": "END"}],
     )
     assert node.handles_objections == []
+
+
+# ---------- description boundary tests (Fix 2) ----------
+
+
+def test_node_objection_description_boundary_9_chars_fails():
+    with pytest.raises(ValidationError):
+        NodeObjection(id="x", kb="k", description="1" * 9)
+
+
+def test_node_objection_description_boundary_10_chars_ok():
+    obj = NodeObjection(id="x", kb="k", description="1" * 10)
+    assert len(obj.description) == 10
+
+
+def test_node_objection_description_boundary_300_chars_ok():
+    obj = NodeObjection(id="x", kb="k", description="a" * 300)
+    assert len(obj.description) == 300
+
+
+def test_node_objection_description_boundary_301_chars_fails():
+    with pytest.raises(ValidationError):
+        NodeObjection(id="x", kb="k", description="a" * 301)
+
+
+# ---------- as_subnode symmetric tests (Fix 3) ----------
+
+
+def test_global_objection_accepts_as_subnode_optional():
+    obj = GlobalObjection(
+        id="preco",
+        kb="kb_obj_preco",
+        description="Lead questiona o valor do investimento ou compara com alternativas",
+    )
+    assert obj.as_subnode is None
+
+    obj2 = GlobalObjection(
+        id="preco",
+        kb="kb_obj_preco",
+        description="Lead questiona o valor do investimento ou compara com alternativas",
+        as_subnode="obj_preco_node",
+    )
+    assert obj2.as_subnode == "obj_preco_node"
+
+
+def test_global_objection_as_subnode_rejects_empty_string():
+    with pytest.raises(ValidationError):
+        GlobalObjection(
+            id="preco",
+            kb="kb_obj_preco",
+            description="Lead questiona o valor do investimento ou compara com alternativas",
+            as_subnode="",
+        )
+
+
+def test_node_objection_as_subnode_rejects_empty_string():
+    with pytest.raises(ValidationError):
+        NodeObjection(
+            id="preco",
+            kb="kb_obj_preco",
+            description="Lead questiona o valor do investimento ou compara com alternativas",
+            as_subnode="",
+        )
