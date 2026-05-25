@@ -445,23 +445,25 @@ async def test_classifier_hallucinated_id_falls_through_to_main() -> None:
 
 
 async def test_classifier_dispatches_to_inline_on_detection_above_threshold() -> None:
-    """Above threshold + as_subnode is None → classifier emits goto N__inline.
-    N__inline isn't registered yet (T9 will register it). LangGraph silently
-    ignores the unknown destination but still applies the state update, so we
-    can assert that _active_objection was populated — proving the classifier
-    chose the inline path."""
-    tf = _tf_with_objection()  # "preco" global has as_subnode=None → inline path
+    """After T9: detection above threshold → __inline runs → response emitted, record appended,
+    current_node unchanged, collected untouched."""
+    tf = _tf_with_objection()  # 'preco' global has as_subnode=None → inline path
 
     async def fake_classify(**kwargs: Any) -> ClassifierResult:
         return ClassifierResult(objection_id="preco", confidence=0.85, quote="tá caro")
 
+    # Stub LLM factory must respond when called for the qualif node (inline reuses N's prompt/LLM).
     graph = compile_treeflow(
         tf,
         tenant_llm=_tenant_llm_with_classifier(),
         secrets={"anthropic_key": "x"},
         objections=ObjectionsConfig(enabled=True, min_confidence=0.6),
         classify_fn=fake_classify,
-        llm_factory=_stub_llm_factory({"qualif": {"response_text": "ok"}}),
+        llm_factory=_stub_llm_factory(
+            {
+                "qualif": {"response_text": "ok, deixa eu explicar o valor"},
+            }
+        ),
     )
     state: TalkFlowState = {
         "tenant_id": "t",
@@ -476,8 +478,18 @@ async def test_classifier_dispatches_to_inline_on_detection_above_threshold() ->
         "completed": False,
     }
     final = await graph.ainvoke(state)
-    # The classifier emitted Command(goto=qualif__inline, update={_active_objection: ...}).
-    # LangGraph silently drops the unknown goto but applies the state update —
-    # so _active_objection is set, proving the inline dispatch path was taken.
-    assert final.get("_active_objection") is not None
-    assert final["_active_objection"]["id"] == "preco"  # type: ignore[index]
+
+    # objections_handled appended
+    handled = final.get("objections_handled", [])
+    assert len(handled) == 1
+    assert handled[0]["objection_id"] == "preco"
+    assert handled[0]["detected_at_node"] == "qualif"
+
+    # current_node UNCHANGED — inline doesn't advance
+    assert final.get("current_node") == "qualif"
+
+    # collected untouched
+    assert final.get("collected", {}) == {}
+
+    # Agent response is the inline response
+    assert final.get("last_agent_response") == "ok, deixa eu explicar o valor"

@@ -21,10 +21,11 @@ from ai_sdr.llm.factory import build_llm as _default_build_llm
 from ai_sdr.llm.messages import build_system_messages
 from ai_sdr.schemas.llm_yaml import LLMConfig, LLMDefaults
 from ai_sdr.schemas.tenant_yaml import GuardrailsConfig, ObjectionsConfig
-from ai_sdr.schemas.treeflow_yaml import GlobalObjection, NodeObjection, NodeSpec, TreeFlow
+from ai_sdr.schemas.treeflow_yaml import GlobalObjection, KBRef, NodeObjection, NodeSpec, TreeFlow
 from ai_sdr.treeflow.classifier import ClassifierResult
 from ai_sdr.treeflow.classifier import classify as default_classify
 from ai_sdr.treeflow.expressions import eval_bool
+from ai_sdr.treeflow.objection_response import build_inline_objection_messages
 from ai_sdr.treeflow.state import Message, ObjectionRecord, TalkFlowState
 
 logger = structlog.get_logger(__name__)
@@ -370,10 +371,136 @@ def compile_treeflow(
 
         return classifier_fn
 
+    def _make_inline_response(node: NodeSpec) -> Callable[[TalkFlowState], Any]:
+        async def inline_fn(state: TalkFlowState) -> dict[str, Any]:
+            tenant_id_for_log = str(tenant_id) if tenant_id is not None else None
+            active = state.get("_active_objection")
+            classifier_result = state.get("_classifier_result")
+            assert active is not None, "inline_fn entered without _active_objection — compiler bug"
+
+            # Rehydrate objection from dump (could be NodeObjection or GlobalObjection)
+            try:
+                obj: NodeObjection | GlobalObjection = NodeObjection(**active)
+            except Exception:
+                obj = GlobalObjection(**active)
+
+            # Retrieve KB chunks (Plan 3 retriever)
+            kb_content = ""
+            if (
+                tenant_id is not None
+                and kb_session_factory is not None
+                and tenant_llm.embeddings is not None
+            ):
+                embedder = await emb_fn(secrets, tenant_llm.embeddings)
+                kb_session = await kb_session_factory()
+                try:
+                    chunks = await retrieve(
+                        kb_session,
+                        tenant_id=tenant_id,
+                        kb_refs=[KBRef(id=obj.kb, top_k=3, min_score=0.0)],
+                        query=state.get("last_user_input", ""),
+                        embedder=embedder,
+                    )
+                    if not chunks:
+                        logger.info(
+                            "objection.kb.empty",
+                            tenant_id=tenant_id_for_log,
+                            node_id=node.id,
+                            kb_id=obj.kb,
+                        )
+                    else:
+                        kb_content = _render_kb_block(chunks)
+                except Exception as exc:
+                    logger.warning(
+                        "objection.kb.missing",
+                        tenant_id=tenant_id_for_log,
+                        node_id=node.id,
+                        kb_id=obj.kb,
+                        error_message=str(exc),
+                    )
+
+            # Build messages
+            llm_cfg = node.llm or tenant_llm.default
+            llm = llm_fn(llm_cfg, secrets, node.id)
+
+            history: list[Any] = []
+            for m in state.get("messages", []):
+                if m["role"] == "user":
+                    history.append(HumanMessage(content=m["content"]))
+                elif m["role"] == "assistant":
+                    history.append(AIMessage(content=m["content"]))
+            user_input = state.get("last_user_input", "")
+            if user_input:
+                history.append(HumanMessage(content=user_input))
+
+            base_messages = build_inline_objection_messages(
+                node=node,
+                objection=obj,
+                kb_content=kb_content,
+                conversation=history,
+                cache_enabled=tenant_llm.cache_enabled,
+                provider=llm_cfg.provider,
+            )
+
+            model = build_structured_model(node.collects, guardrails=guardrails)
+
+            async def _invoke_inner(msgs: list[Any]) -> Any:
+                return await extract(llm, model, msgs)
+
+            recent_history = state.get("messages", [])[-4:]
+            result = await run_with_guardrails(
+                inner=_invoke_inner,
+                base_messages=base_messages,
+                guardrails=guardrails,
+                critical=node.critical,
+                kb_chunks=[],  # KB already rendered into the system message above
+                recent_history=recent_history,
+                tenant_llm=tenant_llm,
+                secrets=secrets,
+                llm_factory=llm_fn,
+            )
+
+            record: ObjectionRecord = {
+                "objection_id": obj.id,
+                "detected_at_node": node.id,
+                "turn_index": len(state.get("messages", []) or []) // 2,
+                "quote": (classifier_result or {}).get("quote", ""),
+            }
+            logger.info(
+                "objection.inline.responded",
+                tenant_id=tenant_id_for_log,
+                node_id=node.id,
+                objection_id=obj.id,
+            )
+
+            new_msgs: list[Message] = []
+            if user_input:
+                new_msgs.append({"role": "user", "content": user_input})
+            new_msgs.append({"role": "assistant", "content": result.response_text})
+
+            return {
+                "messages": new_msgs,
+                "last_agent_response": result.response_text,
+                "last_user_input": "",
+                # current_node UNCHANGED — next turn re-enters N__classifier
+                "objections_handled": [record],
+                # clear intra-turn fields
+                "_active_objection": None,
+                "_classifier_result": None,
+            }
+
+        return inline_fn
+
     sg: StateGraph[Any, Any, Any, Any] = StateGraph(TalkFlowState)
     for n in tf.nodes:
         sg.add_node(n.id, _make_node_fn(n))  # type: ignore[call-overload]
         sg.add_node(n.id + CLASSIFIER_SUFFIX, _make_classifier(n))  # type: ignore[call-overload]
+        # Only register __inline when N has at least one inline-mode objection
+        node_inline_objs = [o for o in n.handles_objections if o.as_subnode is None]
+        has_inline_globals = any(g.as_subnode is None for g in tf.global_objections)
+        if node_inline_objs or has_inline_globals:
+            sg.add_node(n.id + INLINE_SUFFIX, _make_inline_response(n))  # type: ignore[call-overload]
+            sg.add_edge(n.id + INLINE_SUFFIX, END)
 
     def _start_router(state: TalkFlowState) -> str:
         nid = state.get("current_node") or tf.entry_node
