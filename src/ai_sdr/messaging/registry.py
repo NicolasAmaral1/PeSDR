@@ -45,9 +45,7 @@ class AdapterRegistry:
 
             tenant_cfg = self._tenant_loader.load(tenant.slug)
             if tenant_cfg.messaging is None:
-                raise ValueError(
-                    f"tenant {tenant.slug} has no `messaging` block in tenant.yaml"
-                )
+                raise ValueError(f"tenant {tenant.slug} has no `messaging` block in tenant.yaml")
             if tenant_cfg.messaging.provider != provider:
                 raise ValueError(
                     f"tenant {tenant.slug} configured provider="

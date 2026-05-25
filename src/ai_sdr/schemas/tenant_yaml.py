@@ -85,13 +85,9 @@ class MessagingConfig(BaseModel):
             for f in required:
                 v = getattr(self, f)
                 if not v:
-                    raise ValueError(
-                        f"messaging.whatsapp_cloud requires {f}"
-                    )
+                    raise ValueError(f"messaging.whatsapp_cloud requires {f}")
                 if not v.startswith("secrets/"):
-                    raise ValueError(
-                        f"messaging.{f} must start with 'secrets/' (got {v!r})"
-                    )
+                    raise ValueError(f"messaging.{f} must start with 'secrets/' (got {v!r})")
         return self
 
 

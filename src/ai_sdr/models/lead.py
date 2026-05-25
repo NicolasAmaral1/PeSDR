@@ -40,9 +40,7 @@ class Lead(Base):
     )
     whatsapp_e164: Mapped[str | None] = mapped_column(Text(), nullable=True)
     external_label: Mapped[str | None] = mapped_column(Text(), nullable=True)
-    status: Mapped[str] = mapped_column(
-        Text(), nullable=False, server_default="pending_assignment"
-    )
+    status: Mapped[str] = mapped_column(Text(), nullable=False, server_default="pending_assignment")
     unreachable_reason: Mapped[str | None] = mapped_column(Text(), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

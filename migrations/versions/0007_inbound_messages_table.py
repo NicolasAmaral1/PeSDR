@@ -50,7 +50,9 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["lead_id"], ["leads.id"], ondelete="SET NULL"),
         sa.UniqueConstraint(
-            "tenant_id", "provider", "external_id",
+            "tenant_id",
+            "provider",
+            "external_id",
             name="uq_inbound_provider_extid",
         ),
         sa.CheckConstraint(

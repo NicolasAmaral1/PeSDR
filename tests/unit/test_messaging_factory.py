@@ -31,9 +31,12 @@ def test_factory_builds_whatsapp_cloud_with_secrets() -> None:
         app_secret_ref="secrets/wa_app_secret",
     )
     secrets = {
-        "wa_phone_id": "111", "wa_token": "EAA...",
-        "wa_verify": "vt", "wa_app_secret": "as",
+        "wa_phone_id": "111",
+        "wa_token": "EAA...",
+        "wa_verify": "vt",
+        "wa_app_secret": "as",
     }
     a = build_messaging_adapter(cfg, secrets=secrets)
     from ai_sdr.messaging.whatsapp_cloud import WhatsAppCloudAPIAdapter
+
     assert isinstance(a, WhatsAppCloudAPIAdapter)

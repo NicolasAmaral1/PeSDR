@@ -12,8 +12,11 @@ from ai_sdr.messaging.fake import FakeMessagingAdapter
 async def test_handle_inbound_returns_queued_then_empties() -> None:
     fake = FakeMessagingAdapter()
     msg = InboundMessage(
-        external_id="m1", from_address="+5511999999999", text="oi",
-        received_at_iso="2026-05-25T12:00:00+00:00", raw={"id": "m1"},
+        external_id="m1",
+        from_address="+5511999999999",
+        text="oi",
+        received_at_iso="2026-05-25T12:00:00+00:00",
+        raw={"id": "m1"},
     )
     fake.queue_inbound(msg)
 

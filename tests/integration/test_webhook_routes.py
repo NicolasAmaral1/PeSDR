@@ -67,7 +67,9 @@ def signed_app(app, monkeypatch, example_tenant_in_db, db_session):
 
 
 async def test_get_challenge_echoes_when_token_matches(signed_app, example_tenant_in_db) -> None:
-    async with AsyncClient(transport=ASGITransport(app=signed_app), base_url="http://test") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=signed_app), base_url="http://test"
+    ) as client:
         r = await client.get(
             f"/webhooks/{example_tenant_in_db.slug}/whatsapp_cloud",
             params={
@@ -81,7 +83,9 @@ async def test_get_challenge_echoes_when_token_matches(signed_app, example_tenan
 
 
 async def test_get_challenge_401_when_token_mismatch(signed_app, example_tenant_in_db) -> None:
-    async with AsyncClient(transport=ASGITransport(app=signed_app), base_url="http://test") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=signed_app), base_url="http://test"
+    ) as client:
         r = await client.get(
             f"/webhooks/{example_tenant_in_db.slug}/whatsapp_cloud",
             params={
@@ -95,7 +99,9 @@ async def test_get_challenge_401_when_token_mismatch(signed_app, example_tenant_
 
 async def test_post_returns_401_on_bad_signature(signed_app, example_tenant_in_db) -> None:
     body = (FIXTURES / "inbound_text.json").read_bytes()
-    async with AsyncClient(transport=ASGITransport(app=signed_app), base_url="http://test") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=signed_app), base_url="http://test"
+    ) as client:
         r = await client.post(
             f"/webhooks/{example_tenant_in_db.slug}/whatsapp_cloud",
             content=body,
@@ -121,7 +127,9 @@ async def test_post_ingests_and_enqueues(
 
     signed_app.state.arq_pool = FakePool()
 
-    async with AsyncClient(transport=ASGITransport(app=signed_app), base_url="http://test") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=signed_app), base_url="http://test"
+    ) as client:
         r = await client.post(
             f"/webhooks/{example_tenant_in_db.slug}/whatsapp_cloud",
             content=body,
@@ -163,7 +171,9 @@ async def test_post_idempotent_on_duplicate_external_id(
 
     signed_app.state.arq_pool = FakePool()
 
-    async with AsyncClient(transport=ASGITransport(app=signed_app), base_url="http://test") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=signed_app), base_url="http://test"
+    ) as client:
         r1 = await client.post(
             f"/webhooks/{example_tenant_in_db.slug}/whatsapp_cloud",
             content=body,

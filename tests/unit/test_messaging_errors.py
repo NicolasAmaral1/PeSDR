@@ -20,8 +20,16 @@ from ai_sdr.messaging.errors import (
 
 @pytest.mark.parametrize(
     "exc_type",
-    [SignatureError, TerminalError, TransientError, AuthError, PolicyError,
-     RecipientUnreachable, WindowExpiredError, RateLimitError],
+    [
+        SignatureError,
+        TerminalError,
+        TransientError,
+        AuthError,
+        PolicyError,
+        RecipientUnreachable,
+        WindowExpiredError,
+        RateLimitError,
+    ],
 )
 def test_all_inherit_messaging_error(exc_type) -> None:
     assert issubclass(exc_type, MessagingError)

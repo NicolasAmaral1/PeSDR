@@ -73,7 +73,8 @@ def upgrade() -> None:
 
     # 7. Add NOT NULL + FK + unique constraint.
     op.alter_column(
-        "talkflows", "lead_id",
+        "talkflows",
+        "lead_id",
         existing_type=UUID(as_uuid=True),
         nullable=False,
     )
@@ -101,9 +102,7 @@ def downgrade() -> None:
     # lead has no external_label (e.g., one created by the webhook handler).
     op.drop_constraint("uq_talkflows_tenant_lead", "talkflows", type_="unique")
     op.drop_constraint("fk_talkflows_lead_id", "talkflows", type_="foreignkey")
-    op.add_column(
-        "talkflows", sa.Column("lead_id_str", sa.String(length=128), nullable=True)
-    )
+    op.add_column("talkflows", sa.Column("lead_id_str", sa.String(length=128), nullable=True))
     op.execute(
         """
         UPDATE talkflows tf
@@ -115,10 +114,9 @@ def downgrade() -> None:
     op.drop_column("talkflows", "lead_id")
     op.alter_column("talkflows", "lead_id_str", new_column_name="lead_id")
     op.alter_column(
-        "talkflows", "lead_id",
+        "talkflows",
+        "lead_id",
         existing_type=sa.String(length=128),
         nullable=False,
     )
-    op.create_unique_constraint(
-        "uq_talkflows_tenant_lead", "talkflows", ["tenant_id", "lead_id"]
-    )
+    op.create_unique_constraint("uq_talkflows_tenant_lead", "talkflows", ["tenant_id", "lead_id"])

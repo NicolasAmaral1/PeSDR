@@ -18,37 +18,45 @@ def _adapter(verify_token: str = "vt_secret") -> WhatsAppCloudAPIAdapter:
         app_secret_ref="secrets/wa_app_secret",
     )
     secrets = {
-        "wa_phone_id": "999111", "wa_token": "EAA...",
-        "wa_verify": verify_token, "wa_app_secret": "as",
+        "wa_phone_id": "999111",
+        "wa_token": "EAA...",
+        "wa_verify": verify_token,
+        "wa_app_secret": "as",
     }
     return WhatsAppCloudAPIAdapter(cfg, secrets)
 
 
 def test_challenge_echoes_when_token_matches() -> None:
     a = _adapter("vt_secret")
-    out = a.verification_challenge({
-        "hub.mode": "subscribe",
-        "hub.verify_token": "vt_secret",
-        "hub.challenge": "abc123",
-    })
+    out = a.verification_challenge(
+        {
+            "hub.mode": "subscribe",
+            "hub.verify_token": "vt_secret",
+            "hub.challenge": "abc123",
+        }
+    )
     assert out == "abc123"
 
 
 def test_challenge_returns_none_when_mode_not_subscribe() -> None:
     a = _adapter("vt_secret")
-    out = a.verification_challenge({
-        "hub.mode": "something_else",
-        "hub.verify_token": "vt_secret",
-        "hub.challenge": "abc123",
-    })
+    out = a.verification_challenge(
+        {
+            "hub.mode": "something_else",
+            "hub.verify_token": "vt_secret",
+            "hub.challenge": "abc123",
+        }
+    )
     assert out is None
 
 
 def test_challenge_raises_when_token_mismatch() -> None:
     a = _adapter("vt_secret")
     with pytest.raises(SignatureError, match="verify token"):
-        a.verification_challenge({
-            "hub.mode": "subscribe",
-            "hub.verify_token": "WRONG",
-            "hub.challenge": "abc123",
-        })
+        a.verification_challenge(
+            {
+                "hub.mode": "subscribe",
+                "hub.verify_token": "WRONG",
+                "hub.challenge": "abc123",
+            }
+        )

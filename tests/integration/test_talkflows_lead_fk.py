@@ -8,9 +8,9 @@ import pytest
 
 from ai_sdr.db.rls import set_tenant_context
 from ai_sdr.models.lead import Lead
+from ai_sdr.models.talkflow import TalkFlow
 from ai_sdr.models.tenant import Tenant
 from ai_sdr.models.treeflow_version import TreeflowVersion
-from ai_sdr.models.talkflow import TalkFlow
 
 pytestmark = pytest.mark.integration
 

@@ -49,6 +49,8 @@ async def _setup_tenant_with_lead(db_session, status: str) -> tuple[Tenant, Lead
     tenant = Tenant(slug=f"w_{uuid.uuid4().hex[:6]}", display_name="W")
     db_session.add(tenant)
     await db_session.flush()
+    # treeflow_versions has RLS — set context before inserting.
+    await set_tenant_context(db_session, tenant.id)
 
     tv = TreeflowVersion(
         tenant_id=tenant.id,
@@ -60,6 +62,7 @@ async def _setup_tenant_with_lead(db_session, status: str) -> tuple[Tenant, Lead
     db_session.add(tv)
     await db_session.commit()
 
+    # Re-set after commit (transaction-local).
     await set_tenant_context(db_session, tenant.id)
     lead = Lead(tenant_id=tenant.id, whatsapp_e164="+5511999999999", status=status)
     db_session.add(lead)

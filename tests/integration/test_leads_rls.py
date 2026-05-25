@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import select
 
 from ai_sdr.db.rls import set_tenant_context
 from ai_sdr.models.lead import Lead
