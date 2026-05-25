@@ -108,6 +108,9 @@ async def test_post_ingests_and_enqueues(
         async def enqueue_job(self, name, *args, **kwargs):
             enqueued.append((name, args, kwargs))
 
+        async def aclose(self) -> None:
+            pass
+
     signed_app.state.arq_pool = FakePool()
 
     async with AsyncClient(transport=ASGITransport(app=signed_app), base_url="http://test") as client:
@@ -146,6 +149,9 @@ async def test_post_idempotent_on_duplicate_external_id(
     class FakePool:
         async def enqueue_job(self, name, *args, **kwargs):
             return None
+
+        async def aclose(self) -> None:
+            pass
 
     signed_app.state.arq_pool = FakePool()
 
