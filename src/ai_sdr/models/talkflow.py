@@ -28,7 +28,11 @@ class TalkFlow(Base):
         nullable=False,
         index=True,
     )
-    lead_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    lead_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("leads.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
     treeflow_version_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("treeflow_versions.id", ondelete="RESTRICT"),
