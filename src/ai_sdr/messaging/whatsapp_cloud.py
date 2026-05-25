@@ -11,7 +11,11 @@ factory before construction (see `_build_whatsapp_cloud` below).
 
 from __future__ import annotations
 
-from typing import Mapping
+import datetime as dt
+import hashlib
+import hmac
+import json
+from collections.abc import Mapping
 
 from ai_sdr.messaging.base import (
     InboundMessage,
@@ -29,8 +33,7 @@ class WhatsAppCloudAPIAdapter(MessagingAdapter):
     def __init__(self, cfg: MessagingConfig, secrets: Mapping[str, str]) -> None:
         if cfg.provider != "whatsapp_cloud":
             raise ValueError(
-                f"WhatsAppCloudAPIAdapter requires provider='whatsapp_cloud' "
-                f"(got {cfg.provider!r})"
+                f"WhatsAppCloudAPIAdapter requires provider='whatsapp_cloud' (got {cfg.provider!r})"
             )
         # The factory has already validated *_ref shape; here we just bare-
         # name lookup the resolved secrets.
@@ -57,7 +60,41 @@ class WhatsAppCloudAPIAdapter(MessagingAdapter):
     async def handle_inbound(
         self, raw_body: bytes, headers: Mapping[str, str]
     ) -> list[InboundMessage]:
-        raise NotImplementedError("Lands in Plano 5 Task 14")
+        # Header lookup is case-insensitive — uvicorn lowercases, but tests
+        # and proxies may not, so we normalize.
+        sig_header = next(
+            (v for k, v in headers.items() if k.lower() == "x-hub-signature-256"),
+            "",
+        )
+        if not sig_header.startswith("sha256="):
+            raise SignatureError("missing or malformed X-Hub-Signature-256 header")
+        expected = (
+            "sha256=" + hmac.new(self._app_secret.encode(), raw_body, hashlib.sha256).hexdigest()
+        )
+        if not hmac.compare_digest(expected, sig_header):
+            raise SignatureError("HMAC mismatch")
+
+        payload = json.loads(raw_body)
+        out: list[InboundMessage] = []
+        for entry in payload.get("entry", []):
+            for change in entry.get("changes", []):
+                value = change.get("value", {})
+                # Status updates have `statuses` but no `messages`.
+                for m in value.get("messages", []):
+                    if m.get("type") != "text":
+                        continue  # Plano 5: text only. Audio/image come in Plano 8.
+                    text_body = (m.get("text") or {}).get("body", "")
+                    received_dt = dt.datetime.fromtimestamp(int(m["timestamp"]), tz=dt.UTC)
+                    out.append(
+                        InboundMessage(
+                            external_id=m["id"],
+                            from_address="+" + m["from"],
+                            text=text_body,
+                            received_at_iso=received_dt.isoformat(),
+                            raw=m,
+                        )
+                    )
+        return out
 
     async def send_text(self, to: str, text: str) -> SendResult:
         raise NotImplementedError("Lands in Plano 5 Task 15")
@@ -71,7 +108,5 @@ _factory_module._REGISTRY.pop("whatsapp_cloud", None)
 
 
 @register_provider("whatsapp_cloud")
-def _build_whatsapp_cloud(
-    cfg: MessagingConfig, secrets: Mapping[str, str]
-) -> MessagingAdapter:
+def _build_whatsapp_cloud(cfg: MessagingConfig, secrets: Mapping[str, str]) -> MessagingAdapter:
     return WhatsAppCloudAPIAdapter(cfg, secrets)
