@@ -116,6 +116,20 @@ uv run ai-sdr simulate --tenant example --treeflow example --lead test-1 --show-
 - Kill switch: `tenant.guardrails.enabled=false` makes the runner a passthrough (whitelist and critic both no-op).
 - HITL future: `guardrails/runner.py:_handle_exhausted()` is the single hook to swap when Plan-N adds human-in-the-loop. Its current body (return fallback text) becomes `await persist_pending_review(...); raise GraphInterrupt()`.
 
+## Objection Classifier (Plan 4a)
+
+- Tenant config: `tenant.yaml > objections` block — `enabled` (default `true`), `min_confidence` (default `0.6`), `max_handled_per_lead` (default `10`), `history_window` (default `4`). Section is optional; defaults preserve enabled=true.
+- Per-objection schema: every `NodeObjection` / `GlobalObjection` requires `id`, `kb`, `description` (10-300 chars). The description is what the classifier sees — be specific in PT-BR. `as_subnode: <node_id>` is optional; when set, the classifier dispatches to the referenced full Node (which must declare a transition to `BACK_TO_ORIGIN`).
+- Reuses `tenant.llm.classifier` (Haiku) — no new LLM config needed.
+- Topology: compiler emits synthetic LangGraph nodes `{node_id}__classifier` and (when N has inline objections) `{node_id}__inline`. Double-underscore separator avoids the LangGraph-reserved chars `:` and `|`. `state.current_node` stays as the TreeFlow node id (never the synthetic names). Downstream code that needs the suffix MUST import `CLASSIFIER_SUFFIX` / `INLINE_SUFFIX` from `ai_sdr.treeflow.compiler` rather than hardcoding.
+- Kill switch: `tenant.objections.enabled=false` makes every `__classifier` a passthrough (zero Haiku call). Same pattern as the guardrails kill switch.
+- CLI: `ai-sdr simulate ... --no-classifier` to disable for a single run (debug); `--show-extracted` prints `objections_handled` records per turn.
+- Failure modes (all degrade to "no match → main", never block the turn): Haiku raise (rate limit / network / auth), structured-output validation error, hallucinated objection_id, KB empty, KB missing, `BACK_TO_ORIGIN` with no origin (falls back to entry_node).
+- Events emitted (structlog): `objection.classifier.{skipped,detected,no_match,error,invalid_output,hallucinated_id}`, `objection.inline.responded`, `objection.subnode.{entered,exited,orphan_return}`, `objection.kb.{empty,missing}`, `objection.threshold.exceeded`, `objection.inline.rehydrate_failed`.
+- TreeFlow version bump required when adding objections to an existing TreeFlow YAML (runtime refuses to re-publish same version with different hash — Plan 2 rule).
+- Sub-node mode: a `NodeSpec` referenced by `as_subnode` must include a transition with `target: "BACK_TO_ORIGIN"`. The schema validator emits a warning when a node uses `BACK_TO_ORIGIN` but no objection references it (likely authoring mistake).
+- State extension: `TalkFlowState.objections_handled: list[ObjectionRecord]` (append-only via `operator.add` reducer). Each record has `objection_id`, `detected_at_node`, `turn_index`, `quote`. Survives checkpoints; cross-turn.
+
 ## Prompt caching (Anthropic, Plan 3)
 
 - `tenant.llm.cache_enabled: bool` (default `true`). Applies to Anthropic only — OpenAI auto-caches prefixes ≥1024 tok and exposes no disable.
