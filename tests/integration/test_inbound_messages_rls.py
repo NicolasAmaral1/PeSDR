@@ -81,6 +81,8 @@ async def test_inbound_dedupe_via_on_conflict(db_session) -> None:
     assert r1.rowcount == 1
     assert r2.rowcount == 0
 
+    # Tenant context is transaction-local; re-set before the post-commit SELECT.
+    await set_tenant_context(db_session, tenant.id)
     rows = (await db_session.execute(select(InboundMessageRow))).scalars().all()
     assert len(rows) == 1
     assert rows[0].text == "first"  # second was rejected silently
