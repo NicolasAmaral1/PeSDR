@@ -54,7 +54,15 @@ def signed_app(app, monkeypatch, example_tenant_in_db, db_session):
         def get(self, tenant, provider):
             return adapter
 
+    class NoopPool:
+        async def enqueue_job(self, name, *args, **kwargs):
+            return None
+
+        async def aclose(self) -> None:
+            pass
+
     app.state.adapter_registry = StaticRegistry()
+    app.state.arq_pool = NoopPool()
     return app
 
 

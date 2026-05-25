@@ -31,12 +31,12 @@ async def db_session() -> AsyncIterator[AsyncSession]:
 
 
 @pytest.fixture
-async def app() -> AsyncIterator[FastAPI]:
+def app() -> FastAPI:
     """FastAPI app — tests populate app.state directly (no lifespan).
 
-    The lifespan creates a real arq Redis pool whose teardown can race the
-    per-test asyncio event loop teardown ("Event loop is closed" during
-    pool.aclose()). Each test that needs adapter_registry / arq_pool sets
-    them on app.state explicitly via its own fixtures.
+    The lifespan creates a real arq Redis pool whose teardown races the
+    per-test asyncio event loop teardown. Tests that hit endpoints with
+    arq_pool / adapter_registry deps must set them on app.state via their
+    own fixtures (see the `signed_app` pattern in test_webhook_routes).
     """
-    yield create_app()
+    return create_app()
