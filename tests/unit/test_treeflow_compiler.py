@@ -493,3 +493,6 @@ async def test_classifier_dispatches_to_inline_on_detection_above_threshold() ->
 
     # Agent response is the inline response
     assert final.get("last_agent_response") == "ok, deixa eu explicar o valor"
+
+    # Inline never marks the turn as completed — main may, but inline never does.
+    assert final.get("completed") is False

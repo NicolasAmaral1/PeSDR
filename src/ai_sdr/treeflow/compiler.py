@@ -382,7 +382,17 @@ def compile_treeflow(
             try:
                 obj: NodeObjection | GlobalObjection = NodeObjection(**active)
             except Exception:
-                obj = GlobalObjection(**active)
+                try:
+                    obj = GlobalObjection(**active)
+                except Exception as exc:
+                    logger.error(
+                        "objection.inline.rehydrate_failed",
+                        tenant_id=tenant_id_for_log,
+                        node_id=node.id,
+                        active=active,
+                        error=str(exc),
+                    )
+                    raise
 
             # Retrieve KB chunks (Plan 3 retriever)
             kb_content = ""
@@ -397,7 +407,7 @@ def compile_treeflow(
                     chunks = await retrieve(
                         kb_session,
                         tenant_id=tenant_id,
-                        kb_refs=[KBRef(id=obj.kb, top_k=3, min_score=0.0)],
+                        kb_refs=[KBRef(id=obj.kb, top_k=3)],
                         query=state.get("last_user_input", ""),
                         embedder=embedder,
                     )
@@ -409,7 +419,15 @@ def compile_treeflow(
                             kb_id=obj.kb,
                         )
                     else:
-                        kb_content = _render_kb_block(chunks)
+                        # Pass raw content; _kb_block in objection_response handles the outer wrap.
+                        parts: list[str] = []
+                        for i, c in enumerate(chunks, 1):
+                            header = (
+                                f"[{i}] {c.heading_path or '(sem heading)'} "
+                                f"(score {c.score:.2f}) [{c.kb_id}]"
+                            )
+                            parts.append(f"{header}\n{c.content}")
+                        kb_content = "\n\n".join(parts)
                 except Exception as exc:
                     logger.warning(
                         "objection.kb.missing",
