@@ -11,6 +11,7 @@ from arq.connections import RedisSettings, create_pool
 from fastapi import FastAPI
 
 from ai_sdr.api.routes.health import router as health_router
+from ai_sdr.api.routes.leads import router as leads_router
 from ai_sdr.api.routes.webhooks import router as webhooks_router
 from ai_sdr.logging_setup import configure_logging
 from ai_sdr.messaging.registry import AdapterRegistry
@@ -45,6 +46,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 def create_app() -> FastAPI:
     app = FastAPI(title="AI SDR", lifespan=lifespan)
     app.include_router(health_router)
+    app.include_router(leads_router)
     app.include_router(webhooks_router)
     return app
 
