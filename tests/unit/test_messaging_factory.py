@@ -22,7 +22,7 @@ def test_factory_unknown_provider_raises() -> None:
 
 
 def test_factory_builds_whatsapp_cloud_with_secrets() -> None:
-    """Stub registered in Task 12 — full impl arrives in Task 13."""
+    """After Task 13, the real WhatsAppCloudAPIAdapter is constructed."""
     cfg = MessagingConfig(
         provider="whatsapp_cloud",
         phone_number_id_ref="secrets/wa_phone_id",
@@ -31,10 +31,9 @@ def test_factory_builds_whatsapp_cloud_with_secrets() -> None:
         app_secret_ref="secrets/wa_app_secret",
     )
     secrets = {
-        "wa_phone_id": "111",
-        "wa_token": "EAA...",
-        "wa_verify": "vt",
-        "wa_app_secret": "as",
+        "wa_phone_id": "111", "wa_token": "EAA...",
+        "wa_verify": "vt", "wa_app_secret": "as",
     }
-    with pytest.raises(NotImplementedError, match="Task 13"):
-        build_messaging_adapter(cfg, secrets=secrets)
+    a = build_messaging_adapter(cfg, secrets=secrets)
+    from ai_sdr.messaging.whatsapp_cloud import WhatsAppCloudAPIAdapter
+    assert isinstance(a, WhatsAppCloudAPIAdapter)
