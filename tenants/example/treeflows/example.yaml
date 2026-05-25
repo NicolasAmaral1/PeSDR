@@ -1,6 +1,17 @@
 id: example
-version: 0.2.0
+version: 0.3.0
 display_name: "Funil Exemplo"
+
+global_objections:
+  - id: preco
+    kb: kb_obj_preco
+    description: "Lead questiona o valor do investimento, acha caro, ou compara com alternativas mais baratas"
+  - id: falta_tempo
+    kb: kb_obj_tempo
+    description: "Lead diz que está sem tempo, agenda cheia, ou que esse não é o momento certo"
+  - id: preciso_pensar
+    kb: kb_obj_pensar
+    description: "Lead pede tempo pra pensar, decidir depois, falar com terceiros antes"
 
 entry_node: saudacao
 
@@ -18,6 +29,10 @@ nodes:
     prompt: |
       Você é uma SDR. Em UMA pergunta, pergunte qual é o faturamento mensal aproximado da empresa do lead, em reais.
       Se ele já disse o valor, agradeça em uma frase e siga.
+    handles_objections:
+      - id: qualif_naotenho_empresa
+        kb: kb_obj_preco
+        description: "Lead diz que ainda não tem empresa formalizada ou é freelancer começando"
     collects:
       - field: faturamento_mensal
         type: number

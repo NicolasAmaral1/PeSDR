@@ -36,3 +36,9 @@ guardrails:
   critic_enabled: true
   fallback_text: "Deixa eu confirmar esse valor com a equipe e já te respondo, ok?"
   max_retries: 2
+
+objections:
+  enabled: true
+  min_confidence: 0.6
+  max_handled_per_lead: 10
+  history_window: 4
