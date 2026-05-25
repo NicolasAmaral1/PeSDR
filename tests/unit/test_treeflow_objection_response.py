@@ -90,7 +90,8 @@ def test_empty_kb_appends_defensive_instruction():
     sm = msgs[0]
     # Block 3 is the defensive instruction (no KB content)
     block3_text = sm.content[2]["text"]
-    assert "peça mais detalhes" in block3_text or "informações suficientes" in block3_text
+    assert "Peça mais detalhes" in block3_text
+    assert "informações suficientes" in block3_text
 
 
 def test_conversation_appended_after_system():
