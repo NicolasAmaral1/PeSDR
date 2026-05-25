@@ -170,6 +170,9 @@ async def test_recipient_unreachable_marks_lead_and_stops(db_session, session_fa
     )
 
     await set_tenant_context(db_session, tenant.id)
+    # Worker updated rows in a separate session; expire our identity map so
+    # the next reads see the freshly-committed values, not session-cached state.
+    db_session.expire_all()
     await db_session.refresh(lead)
     assert lead.status == "unreachable"
     assert "unreachable" in (lead.unreachable_reason or "").lower()
