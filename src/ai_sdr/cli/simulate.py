@@ -10,6 +10,8 @@ import typer
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from ai_sdr.db.rls import set_tenant_context
+from ai_sdr.models.lead import Lead
 from ai_sdr.models.talkflow import TalkFlow
 from ai_sdr.models.tenant import Tenant
 from ai_sdr.secrets.sops_loader import SopsLoader
@@ -35,13 +37,14 @@ def simulate(
     tenants_dir: Annotated[Path, typer.Option("--tenants-dir")] = Path("tenants"),
 ) -> None:
     """Run a TalkFlow in the terminal — real Postgres, real LLM, no WhatsApp/CRM."""
+    # `lead` is used as `external_label` — find-or-create happens inside _run
     asyncio.run(_run(tenant, treeflow, lead, show_extracted, tenants_dir))
 
 
 async def _run(
     tenant_slug: str,
     treeflow_id: str,
-    lead_id: str,
+    lead_label: str,
     show_extracted: bool,
     tenants_dir: Path,
 ) -> None:
@@ -69,8 +72,30 @@ async def _run(
                     fg=typer.colors.RED,
                 )
                 raise typer.Exit(code=1)
+
+            await set_tenant_context(session, t.id)
+
+            # Find-or-create a dev Lead by external_label so the foreign-key in
+            # talkflows.lead_id can be satisfied. Simulate marks the lead 'active'
+            # so the worker (if running) won't lock waiting on assignment.
+            dev_lead = (
+                await session.execute(
+                    select(Lead).where(
+                        Lead.tenant_id == t.id,
+                        Lead.external_label == lead_label,
+                    )
+                )
+            ).scalar_one_or_none()
+            if dev_lead is None:
+                dev_lead = Lead(
+                    tenant_id=t.id,
+                    external_label=lead_label,
+                    status="active",
+                )
+                session.add(dev_lead)
+
             await runtime.publish_version(session, t, treeflow_id)
-            tf = await runtime.create(session, t, lead_id=lead_id, treeflow_id=treeflow_id)
+            tf = await runtime.create(session, t, lead_id=dev_lead.id, treeflow_id=treeflow_id)
         tf_id = tf.id
         tenant_slug_final = t.slug
 
