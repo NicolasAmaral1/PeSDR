@@ -58,7 +58,7 @@ class GuardrailsConfig(BaseModel):
 
 
 class ObjectionsConfig(BaseModel):
-    """Tenant-level objection classifier configuration (Plan 4a, spec §4.4)."""
+    """Tenant-level objection classifier configuration (Plan 4a, spec §4.2)."""
 
     model_config = ConfigDict(extra="forbid")
 

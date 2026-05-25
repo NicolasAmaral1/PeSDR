@@ -136,22 +136,34 @@ def test_objections_config_defaults() -> None:
 
 
 def test_objections_config_min_confidence_bounds() -> None:
+    # invalid below/above
     with pytest.raises(ValidationError):
         ObjectionsConfig(min_confidence=-0.1)
     with pytest.raises(ValidationError):
         ObjectionsConfig(min_confidence=1.5)
+    # valid at inclusive bounds
+    assert ObjectionsConfig(min_confidence=0.0).min_confidence == 0.0
+    assert ObjectionsConfig(min_confidence=1.0).min_confidence == 1.0
 
 
-def test_objections_config_history_window_positive() -> None:
+def test_objections_config_history_window_bounds() -> None:
     with pytest.raises(ValidationError):
         ObjectionsConfig(history_window=0)
     with pytest.raises(ValidationError):
         ObjectionsConfig(history_window=25)
+    # valid at inclusive bounds
+    assert ObjectionsConfig(history_window=1).history_window == 1
+    assert ObjectionsConfig(history_window=20).history_window == 20
 
 
-def test_objections_config_max_handled_positive() -> None:
+def test_objections_config_max_handled_bounds() -> None:
     with pytest.raises(ValidationError):
         ObjectionsConfig(max_handled_per_lead=0)
+    with pytest.raises(ValidationError):
+        ObjectionsConfig(max_handled_per_lead=101)
+    # valid at inclusive bounds
+    assert ObjectionsConfig(max_handled_per_lead=1).max_handled_per_lead == 1
+    assert ObjectionsConfig(max_handled_per_lead=100).max_handled_per_lead == 100
 
 
 def test_tenant_config_objections_optional() -> None:
