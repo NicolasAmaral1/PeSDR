@@ -26,3 +26,8 @@ async def get_session() -> AsyncIterator[AsyncSession]:
     sm = get_sessionmaker()
     async with sm() as session:
         yield session
+
+
+def session_factory_for(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
+    """Create a sessionmaker bound to an explicit engine (used by the worker process)."""
+    return async_sessionmaker(engine, expire_on_commit=False)

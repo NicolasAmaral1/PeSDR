@@ -30,6 +30,50 @@ services:
       timeout: 3s
       retries: 5
 
+  api:
+    build: .
+    container_name: ai_sdr_api
+    command: uv run uvicorn ai_sdr.main:app --host 0.0.0.0 --port 8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://ai_sdr_app:ai_sdr_app@postgres:5432/ai_sdr
+      REDIS_URL: redis://redis:6379/0
+      APP_ENV: ${APP_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      TENANTS_DIR: /app/tenants
+      SOPS_AGE_KEY_FILE: /app/.sops/age.key
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./tenants:/app/tenants:ro
+      - ./.sops:/app/.sops:ro
+    restart: unless-stopped
+
+  worker:
+    build: .
+    container_name: ai_sdr_worker
+    command: uv run ai-sdr worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://ai_sdr_app:ai_sdr_app@postgres:5432/ai_sdr
+      REDIS_URL: redis://redis:6379/0
+      APP_ENV: ${APP_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      TENANTS_DIR: /app/tenants
+      SOPS_AGE_KEY_FILE: /app/.sops/age.key
+    volumes:
+      - ./tenants:/app/tenants:ro
+      - ./.sops:/app/.sops:ro
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   redis_data:

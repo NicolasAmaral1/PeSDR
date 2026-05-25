@@ -114,7 +114,7 @@ class TalkFlowRuntime:
         self,
         session: AsyncSession,
         tenant: Tenant,
-        lead_id: str,
+        lead_id: uuid.UUID,
         treeflow_id: str,
     ) -> TalkFlow:
         """Create a TalkFlow row pinned to the latest published version of `treeflow_id`.
@@ -218,7 +218,7 @@ class TalkFlowRuntime:
             if checkpoint is None:
                 input_state = {
                     "tenant_id": str(tenant.id),
-                    "lead_id": talkflow.lead_id,
+                    "lead_id": str(talkflow.lead_id),
                     "treeflow_id": tf.id,
                     "treeflow_version": tf.version,
                     "current_node": tf.entry_node,

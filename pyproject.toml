@@ -10,10 +10,12 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0.36",
     "asyncpg>=0.30",
     "alembic>=1.14",
+    "arq>=0.26",
     "pgvector>=0.3.6",
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
     "structlog>=24.4",
+    "tenacity>=8",
     "pyyaml>=6.0",
     "redis>=5.2",
     "langgraph>=0.2.60",
@@ -63,7 +65,7 @@ select = ["E", "F", "I", "B", "UP", "ASYNC", "S", "C4", "RET", "SIM"]
 ignore = ["S101"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["S105", "S106", "S108"]
+"tests/**/*.py" = ["S105", "S106", "S107", "S108"]
 
 [tool.mypy]
 python_version = "3.12"

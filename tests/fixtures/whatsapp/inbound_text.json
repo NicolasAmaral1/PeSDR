@@ -1,0 +1,35 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "WHATSAPP_BUSINESS_ACCOUNT_ID",
+      "changes": [
+        {
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "display_phone_number": "5511999999999",
+              "phone_number_id": "PHONE_NUMBER_ID"
+            },
+            "contacts": [
+              {
+                "profile": {"name": "Lead Name"},
+                "wa_id": "5511988887777"
+              }
+            ],
+            "messages": [
+              {
+                "from": "5511988887777",
+                "id": "wamid.HBgM_FIRSTMESSAGE_AAAA=",
+                "timestamp": "1748169600",
+                "text": {"body": "oi, queria saber sobre a mentoria"},
+                "type": "text"
+              }
+            ]
+          },
+          "field": "messages"
+        }
+      ]
+    }
+  ]
+}

@@ -151,3 +151,35 @@ uv run ai-sdr simulate --tenant example --treeflow example --lead test-1 --show-
   1. `thread_id` sempre prefixado com `tenant_id:` (enforced por `TalkFlowRuntime.create`)
   2. RLS em `talkflows` (lookup `talkflow_id → thread_id`)
 - Wipe pra dev fresh: `docker exec ai_sdr_postgres psql -U ai_sdr_app -d ai_sdr -c "TRUNCATE checkpoints, checkpoint_writes, checkpoint_blobs, checkpoint_migrations;"`
+
+## Messaging (Plano 5)
+
+- Adapter contract: `src/ai_sdr/messaging/base.py` (`MessagingAdapter` ABC + `InboundMessage`/`SendResult` dataclasses).
+- Default standalone impl: `whatsapp_cloud` (`whatsapp_cloud.py`). Fake impl for dev/tests: `fake.py`.
+- Choose impl via `tenant.yaml > messaging.provider`. For `whatsapp_cloud`, set the four `*_ref` fields (all under the `secrets/` prefix convention).
+- Webhook URLs: `https://<host>/webhooks/<tenant_slug>/<provider>`. GET = handshake (WhatsApp `hub.mode=subscribe`); POST = ingestion.
+- Idempotency: dedupe via UNIQUE `(tenant_id, provider, external_id)` on `inbound_messages`. Repeated webhooks = no-op insert.
+- Worker (`uv run ai-sdr worker`, or the `worker` docker-compose service in prod): consumes `process_lead_inbox` jobs from the Redis queue. Serialization per-lead via `pg_advisory_lock`. **Always run the worker in production** — the API does not process inbounds.
+- Bootstrap (HITL-friendly): a brand-new lead nasce `status='pending_assignment'`. Mensagens ficam queued no DB; **nada acontece** até operador atribuir treeflow via:
+  - `ai-sdr leads list-pending --tenant <slug>` (lista)
+  - `ai-sdr leads assign-lead --tenant <slug> --lead <uuid> --treeflow <id>` (atribui)
+  - `POST /tenants/<slug>/leads/<uuid>/assign {treeflow_id}` (REST)
+- Replay-all: ao atribuir, o worker processa todas as inbounds acumuladas em `received_at ASC`.
+- Erros tipados (`messaging/errors.py`):
+  - `RecipientUnreachable` → marca `lead.status='unreachable'`; worker para.
+  - `WindowExpiredError` → marca msg como `error`; **hook do Plano 9** (template HSM).
+  - `AuthError`, `PolicyError` → log + alert; worker para (sem retry — precisa de operador).
+  - `TransientError` / `RateLimitError` (429) → adapter resolve internamente via `tenacity` (3 tentativas, backoff exponencial, respeita `Retry-After`).
+- Adapter compliance: `tests/integration/test_adapter_compliance.py` é parametrizado por impl — qualquer novo adapter (Vialum Chat etc.) entra apenas adicionando ao `params`.
+
+### Adding a new tenant's WhatsApp config
+
+1. No painel Meta Business Manager: obtenha `phone_number_id`, gere um system-user access token de longa duração, configure o webhook URL (`/webhooks/<slug>/whatsapp_cloud`) com um `verify_token` que você escolhe, e copie o **App Secret** da Meta App.
+2. Em `tenants/<slug>/secrets.enc.yaml` (via SOPS): salve `wa_phone_id`, `wa_token`, `wa_verify`, `wa_app_secret`.
+3. Em `tenants/<slug>/tenant.yaml`: defina o bloco `messaging:` apontando pra `whatsapp_cloud` com as 4 *_ref.
+4. Restart da API (re-carrega `tenant.yaml`) e do worker.
+
+### Simulator vs worker
+
+- `ai-sdr simulate` continua sendo dev tool — NÃO usa adapter de WhatsApp. Cria/reusa um Lead por `external_label`, marca como `status='active'` automaticamente.
+- Em produção: NUNCA rode `simulate` apontando pra tenant real; use `worker` + webhook.
