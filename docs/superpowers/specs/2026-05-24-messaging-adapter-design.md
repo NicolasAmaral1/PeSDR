@@ -162,13 +162,14 @@ Convenção: `to: str` é **opaco** no contrato — formato é provider-specific
 
 ## 6. Modelo de dados
 
-**Migration 0005 — `leads`:**
+**Migration 0006 — `leads`:**
 
 ```sql
 CREATE TABLE leads (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     whatsapp_e164 TEXT,
+    external_label TEXT,          -- human-readable id (used by simulate's --lead flag)
     status TEXT NOT NULL DEFAULT 'pending_assignment',
         -- 'pending_assignment' | 'active' | 'unreachable'
     unreachable_reason TEXT,
@@ -177,6 +178,8 @@ CREATE TABLE leads (
 );
 CREATE UNIQUE INDEX uq_leads_tenant_wa ON leads (tenant_id, whatsapp_e164)
     WHERE whatsapp_e164 IS NOT NULL;
+CREATE UNIQUE INDEX uq_leads_tenant_label ON leads (tenant_id, external_label)
+    WHERE external_label IS NOT NULL;
 CREATE INDEX ix_leads_tenant_status ON leads (tenant_id, status);
 
 ALTER TABLE leads ENABLE ROW LEVEL SECURITY;
@@ -185,11 +188,11 @@ CREATE POLICY leads_tenant_isolation ON leads
     USING (tenant_id = current_setting('app.tenant_id', true)::uuid);
 ```
 
-**Migration 0006 — `inbound_messages`:**
+**Migration 0007 — `inbound_messages`:**
 
 ```sql
 CREATE TABLE inbound_messages (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     provider TEXT NOT NULL,
     external_id TEXT NOT NULL,
@@ -215,9 +218,9 @@ CREATE POLICY inbound_messages_tenant_isolation ON inbound_messages
     USING (tenant_id = current_setting('app.tenant_id', true)::uuid);
 ```
 
-**Migration 0007 — `talkflows.lead_id` vira FK pra `leads.id`:**
+**Migration 0008 — `talkflows.lead_id` vira FK pra `leads.id`:**
 
-Hoje é `TEXT` opaco. Vira `UUID NOT NULL REFERENCES leads(id)`. Backfill: pra cada talkflow existente, cria 1 lead órfão (`status='active'`, `whatsapp_e164=NULL`) e aponta a FK. Em dev (DBs vazias) é no-op.
+Hoje é `String(128)` opaco (e.g., `"test-1"` do simulate). Vira `UUID NOT NULL REFERENCES leads(id)`. Backfill: pra cada distinct `(tenant_id, lead_id)` em `talkflows`, cria 1 lead (`status='active'`, `whatsapp_e164=NULL`, `external_label=<string antiga>`); atualiza FK. UNIQUE constraint `(tenant_id, lead_id)` em talkflows é recriada na coluna UUID. Em dev (DBs vazias) é no-op.
 
 ---
 
@@ -435,7 +438,7 @@ Parametrizada por `[whatsapp_cloud_mocked, fake]`. Testes: signature error, norm
 ## 12. Impactos periféricos
 
 1. **`ai-sdr simulate`** continua bypassando adapters. Refactor pra usar `FakeMessagingAdapter` é cosmético; deferred.
-2. **`TalkFlowRuntime.create`** assinatura: `lead_id: str` → `lead_id: UUID`. Caller `simulate` precisa criar-or-find lead antes — resolução exata (flag `--lead-id <uuid>` direto vs. `--lead-label test-1` com lookup sintético vs. auto-create+print-UUID) fica pro plano. Detalhe operacional, não bloqueia o design.
+2. **`TalkFlowRuntime.create`** assinatura: `lead_id: str` → `lead_id: UUID`. CLI `simulate` mantém UX (`--lead test-1`) via find-or-create por `(tenant_id, external_label=<string>)` antes de chamar `create()`. Lead criado por simulate nasce `status='active'` (não pending) pra não trancar no fluxo HITL — simulate é dev tool, não fluxo de produção.
 3. **Secrets template** `tenants/example/secrets.enc.yaml` ganha `wa_phone_id`, `wa_token`, `wa_verify`, `wa_app_secret` (com comentário pro tenant configurar no WhatsApp Business Manager).
 4. **docker-compose.yml** ganha service `worker` (`command: uv run ai-sdr worker`, depends_on postgres+redis).
 5. **pyproject.toml** novas deps: `arq>=0.26`, `tenacity>=8`. (`httpx` já está.)
