@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from ai_sdr.models.talkflow import TalkFlow
 from ai_sdr.models.tenant import Tenant
+from ai_sdr.schemas.tenant_yaml import ObjectionsConfig
 from ai_sdr.secrets.sops_loader import SopsLoader
 from ai_sdr.settings import get_settings
 from ai_sdr.tenant_loader.loader import TenantLoader
@@ -32,10 +33,17 @@ def simulate(
         str, typer.Option("--lead", help="Lead identifier (free-form; per-tenant unique)")
     ],
     show_extracted: Annotated[bool, typer.Option("--show-extracted/--no-show-extracted")] = False,
+    no_classifier: Annotated[
+        bool,
+        typer.Option(
+            "--no-classifier",
+            help="Disable the objection classifier for this run (debug).",
+        ),
+    ] = False,
     tenants_dir: Annotated[Path, typer.Option("--tenants-dir")] = Path("tenants"),
 ) -> None:
     """Run a TalkFlow in the terminal — real Postgres, real LLM, no WhatsApp/CRM."""
-    asyncio.run(_run(tenant, treeflow, lead, show_extracted, tenants_dir))
+    asyncio.run(_run(tenant, treeflow, lead, show_extracted, no_classifier, tenants_dir))
 
 
 async def _run(
@@ -43,6 +51,7 @@ async def _run(
     treeflow_id: str,
     lead_id: str,
     show_extracted: bool,
+    no_classifier: bool,
     tenants_dir: Path,
 ) -> None:
     await ensure_checkpointer_schema()
@@ -76,17 +85,34 @@ async def _run(
 
     typer.secho(f"[talkflow:{tf_id}] type a message, /quit to exit.\n", fg=typer.colors.GREEN)
 
+    objections_override = ObjectionsConfig(enabled=False) if no_classifier else None
+
     user_msg = ""
     while True:
         async with sm() as session:
             t = (
                 await session.execute(select(Tenant).where(Tenant.slug == tenant_slug_final))
             ).scalar_one()
-            result = await runtime.step(session, t, tf_id, user_input=user_msg)
+            result = await runtime.step(
+                session,
+                t,
+                tf_id,
+                user_input=user_msg,
+                objections_override=objections_override,
+            )
 
         typer.secho(f"[node:{result.current_node}] > {result.response_text}", fg=typer.colors.CYAN)
-        if show_extracted and result.collected:
-            typer.secho(f"  collected: {result.collected}", fg=typer.colors.BRIGHT_BLACK)
+        if show_extracted:
+            if result.collected:
+                typer.secho(f"  collected: {result.collected}", fg=typer.colors.BRIGHT_BLACK)
+            if result.objections_handled:
+                typer.secho("  objections_handled:", fg=typer.colors.BRIGHT_BLACK)
+                for r in result.objections_handled:
+                    typer.secho(
+                        f"    - {r.get('objection_id')} @ {r.get('detected_at_node')} "
+                        f"(t={r.get('turn_index')}): {(r.get('quote') or '')[:60]!r}",
+                        fg=typer.colors.BRIGHT_BLACK,
+                    )
         if result.completed:
             typer.secho("\n[talkflow completed]", fg=typer.colors.GREEN)
             break

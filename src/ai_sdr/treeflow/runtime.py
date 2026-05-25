@@ -18,6 +18,7 @@ from ai_sdr.models.talkflow import TalkFlow
 from ai_sdr.models.tenant import Tenant
 from ai_sdr.models.treeflow_version import TreeflowVersion
 from ai_sdr.schemas.llm_yaml import LLMDefaults
+from ai_sdr.schemas.tenant_yaml import ObjectionsConfig
 from ai_sdr.schemas.treeflow_yaml import TreeFlow
 from ai_sdr.secrets.sops_loader import SopsLoader
 from ai_sdr.tenant_loader.loader import TenantLoader
@@ -34,6 +35,7 @@ class StepResult:
     current_node: str
     completed: bool
     collected: dict[str, Any]
+    objections_handled: list[dict[str, Any]]  # list of ObjectionRecord dumps
 
 
 SecretsResolver = Callable[[str], dict[str, str]]
@@ -167,6 +169,8 @@ class TalkFlowRuntime:
         tenant: Tenant,
         talkflow_id: uuid.UUID,
         user_input: str,
+        *,
+        objections_override: ObjectionsConfig | None = None,
     ) -> StepResult:
         """Run one turn of the conversation. Persists state via the postgres checkpointer."""
         await set_tenant_context(session, tenant.id)
@@ -186,12 +190,20 @@ class TalkFlowRuntime:
         llm_defaults: LLMDefaults = tenant_cfg.llm
         secrets = self._resolve_secrets(tenant.slug)
 
+        # Resolve objections config: explicit override > tenant.yaml > defaults
+        if objections_override is not None:
+            objections_cfg: ObjectionsConfig | None = objections_override
+        else:
+            # None is fine — compiler defaults to enabled=True
+            objections_cfg = tenant_cfg.objections
+
         async with checkpointer_from_settings() as saver:
             graph = compile_treeflow(
                 tf,
                 tenant_llm=llm_defaults,
                 secrets=secrets,
                 guardrails=tenant_cfg.guardrails,
+                objections=objections_cfg,
                 tenant_id=tenant.id,
                 llm_factory=self._llm_factory,
                 kb_session_factory=lambda: _session_factory(session),
@@ -231,4 +243,5 @@ class TalkFlowRuntime:
             current_node=out.get("current_node", ""),
             completed=bool(out.get("completed", False)),
             collected=out.get("collected", {}),
+            objections_handled=out.get("objections_handled", []) or [],
         )
