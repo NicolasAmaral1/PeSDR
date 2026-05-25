@@ -199,3 +199,89 @@ async def test_max_handled_threshold_emits_warning() -> None:
             e for e in log_entries if e.get("event") == "objection.threshold.exceeded"
         ]
         assert len(threshold_warnings) >= 1
+
+
+@pytest.mark.integration
+async def test_subnode_mode_routes_through_subnode_and_returns_to_origin() -> None:
+    """as_subnode mode: classifier → subnode__classifier (passthrough) → subnode main
+    → BACK_TO_ORIGIN → resolved to origin, _origin_node_id cleared."""
+    await ensure_checkpointer_schema()
+
+    tf = TreeFlow(
+        id="tf",
+        version="1.0.0",
+        display_name="x",
+        entry_node="qualif",
+        nodes=[
+            NodeSpec(
+                id="qualif",
+                prompt="responda curto",
+                exit_condition=ExitCondition(type="all_fields_filled"),
+                next_nodes=[Transition(condition="true", target="END")],
+                handles_objections=[
+                    {
+                        "id": "preco",
+                        "kb": "kb_obj_preco",
+                        "description": (
+                            "Lead questiona o valor do investimento ou compara com alternativas"
+                        ),
+                        "as_subnode": "obj_preco_node",
+                    }
+                ],
+            ),
+            NodeSpec(
+                id="obj_preco_node",
+                prompt="responda sobre preço",
+                exit_condition=ExitCondition(type="all_fields_filled"),
+                next_nodes=[Transition(condition="true", target="BACK_TO_ORIGIN")],
+            ),
+        ],
+    )
+
+    async def deflect_to_subnode(**kwargs: Any) -> ClassifierResult:
+        return ClassifierResult(objection_id="preco", confidence=0.9, quote="tá caro")
+
+    async with checkpointer_from_settings() as saver:
+        graph = compile_treeflow(
+            tf,
+            tenant_llm=_tenant_llm(),
+            secrets={"anthropic_key": "fake"},
+            objections=ObjectionsConfig(enabled=True),
+            classify_fn=deflect_to_subnode,
+            llm_factory=_stub_llm_factory(
+                {
+                    "qualif": {"response_text": "qualif answer"},
+                    "obj_preco_node": {"response_text": "subnode answer"},
+                }
+            ),
+            checkpointer=saver,
+        )
+
+        config = {"configurable": {"thread_id": f"test-subnode:{uuid.uuid4()}"}}
+        state: TalkFlowState = {
+            "tenant_id": "t",
+            "lead_id": "l",
+            "treeflow_id": "tf",
+            "treeflow_version": "1.0.0",
+            "current_node": "qualif",
+            "collected": {},
+            "messages": [],
+            "last_user_input": "tá muito caro",
+            "last_agent_response": "",
+            "completed": False,
+        }
+        final = await graph.ainvoke(state, config=config)
+
+        # BACK_TO_ORIGIN routed back to origin
+        assert final["current_node"] == "qualif"
+        # _origin_node_id was cleared
+        assert final.get("_origin_node_id") is None
+
+        # ObjectionRecord appended by classifier when dispatching to subnode
+        handled = final.get("objections_handled", [])
+        assert len(handled) == 1
+        assert handled[0]["objection_id"] == "preco"
+        assert handled[0]["detected_at_node"] == "qualif"
+
+        # The agent response is the subnode's response (subnode's main ran last)
+        assert final["last_agent_response"] == "subnode answer"
