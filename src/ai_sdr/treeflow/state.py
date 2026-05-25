@@ -16,6 +16,16 @@ class Message(TypedDict):
     content: str
 
 
+class ObjectionRecord(TypedDict):
+    """One row appended to ``state.objections_handled`` whenever the classifier
+    detects an objection (inline OR sub-node mode)."""
+
+    objection_id: str
+    detected_at_node: str
+    turn_index: int
+    quote: str
+
+
 class TalkFlowState(TypedDict, total=False):
     # identity (set on create, never mutated)
     tenant_id: str
@@ -30,3 +40,9 @@ class TalkFlowState(TypedDict, total=False):
     last_user_input: str
     last_agent_response: str
     completed: bool  # True when graph reached END
+
+    # Plan 4a — objection classifier
+    objections_handled: Annotated[list[ObjectionRecord], operator.add]
+    _origin_node_id: str | None  # set when entering subnode, cleared on BACK_TO_ORIGIN
+    _active_objection: dict[str, Any] | None  # intra-turn handoff classifier → inline
+    _classifier_result: dict[str, Any] | None  # intra-turn, for observability/debug
