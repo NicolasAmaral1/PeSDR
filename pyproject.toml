@@ -10,6 +10,7 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0.36",
     "asyncpg>=0.30",
     "alembic>=1.14",
+    "arq>=0.26",
     "pgvector>=0.3.6",
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
@@ -28,6 +29,7 @@ dependencies = [
     "langchain-ollama>=0.2.0",
     "simpleeval>=1.0.3",
     "tiktoken>=0.8",
+    "tenacity>=8",
     "typer>=0.15",
 ]
 
