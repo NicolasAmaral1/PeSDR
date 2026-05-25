@@ -200,6 +200,17 @@ async def process_lead_inbox(ctx: dict[str, Any], tenant_id: str, lead_id: str) 
                     return
 
                 await db.commit()
+                # Tenant context is transaction-local (set_config(..., true));
+                # re-set so the next _fetch_next_queued can read RLS rows.
+                await set_tenant_context(db, tenant_uuid)
         finally:
+            # If the body left the transaction in an aborted state, roll back
+            # first so pg_advisory_unlock can run. The advisory lock is
+            # session-scoped (not transaction-scoped) so rollback doesn't
+            # release it.
+            try:
+                await db.rollback()
+            except Exception:  # noqa: BLE001
+                pass
             await db.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": lock_key})
             await db.commit()
