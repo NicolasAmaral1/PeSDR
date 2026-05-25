@@ -108,12 +108,13 @@ async def test_end_to_end_webhook_assign_worker_reply(
     assert r.status_code == 200
 
     # --- 3. The lead is now pending; the worker job should no-op on it ---
-    # Capture IDs as plain strings BEFORE expire_all, since expire makes
+    # Capture IDs as plain values BEFORE expire_all, since expire makes
     # subsequent .id access trigger a sync attribute refresh that breaks
     # outside an async greenlet context.
-    tenant_id_str = str(tenant.id)
+    tenant_uuid = tenant.id
+    tenant_id_str = str(tenant_uuid)
     tenant_slug = tenant.slug
-    await set_tenant_context(db_session, tenant.id)
+    await set_tenant_context(db_session, tenant_uuid)
     db_session.expire_all()
     lead = (await db_session.execute(select(Lead))).scalar_one()
     assert lead.status == "pending_assignment"
@@ -164,7 +165,7 @@ async def test_end_to_end_webhook_assign_worker_reply(
     ]
 
     # All inbounds processed
-    await set_tenant_context(db_session, tenant.id)
+    await set_tenant_context(db_session, tenant_uuid)
     db_session.expire_all()
     rows = (await db_session.execute(select(InboundMessageRow))).scalars().all()
     assert {r.status for r in rows} == {"processed"}
