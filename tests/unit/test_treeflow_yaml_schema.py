@@ -598,6 +598,20 @@ def test_node_local_objection_as_subnode_rejects_self_reference():
     assert "na" in msg
 
 
+def test_node_id_rejects_synthetic_suffix_collisions():
+    """Node ids cannot end with __classifier or __inline — those are reserved
+    by the compiler for synthetic LangGraph nodes (Plan 4a)."""
+    for bad_id in ("foo__classifier", "bar__inline", "qualif__classifier"):
+        with pytest.raises(ValidationError) as exc:
+            NodeSpec(
+                id=bad_id,
+                prompt="x",
+                exit_condition={"type": "all_fields_filled"},
+                next_nodes=[{"condition": "true", "target": "END"}],
+            )
+        assert "synthetic suffix" in str(exc.value)
+
+
 def test_orphan_back_to_origin_emits_warning():
     """A node uses BACK_TO_ORIGIN but isn't referenced by any as_subnode."""
     with pytest.warns(UserWarning, match="BACK_TO_ORIGIN"):

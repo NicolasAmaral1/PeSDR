@@ -1,10 +1,10 @@
 id: example
-version: 0.3.0
+version: 0.3.1
 display_name: "Funil Exemplo"
 
 global_objections:
   - id: preco
-    kb: kb_obj_preco
+    kb: example_kb
     description: "Lead questiona o valor do investimento, acha caro, ou compara com alternativas mais baratas"
   - id: falta_tempo
     kb: kb_obj_tempo
@@ -31,7 +31,7 @@ nodes:
       Se ele já disse o valor, agradeça em uma frase e siga.
     handles_objections:
       - id: qualif_naotenho_empresa
-        kb: kb_obj_preco
+        kb: example_kb
         description: "Lead diz que ainda não tem empresa formalizada ou é freelancer começando"
     collects:
       - field: faturamento_mensal

@@ -131,6 +131,13 @@ class NodeSpec(BaseModel):
                 "node id must be a slug: lowercase, digits, underscores; "
                 "start with a letter; 2-64 chars; end with letter or digit"
             )
+        # Plan 4a — prevent collisions with the compiler's synthetic suffixes
+        # (see CLASSIFIER_SUFFIX/INLINE_SUFFIX in ai_sdr.treeflow.compiler).
+        if v.endswith("__classifier") or v.endswith("__inline"):
+            raise ValueError(
+                f"node id {v!r} ends with a reserved synthetic suffix "
+                "('__classifier' or '__inline'); rename the node"
+            )
         return v
 
     @model_validator(mode="after")

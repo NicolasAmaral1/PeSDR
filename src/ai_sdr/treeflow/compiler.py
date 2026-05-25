@@ -11,6 +11,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_sdr.guardrails.runner import GuardrailsRunResult, run_with_guardrails
@@ -315,6 +316,14 @@ def compile_treeflow(
                     previously_handled=previously_handled,
                     history_window=objections_cfg.history_window,
                 )
+            except ValidationError as exc:
+                logger.warning(
+                    "objection.classifier.invalid_output",
+                    tenant_id=tenant_id_for_log,
+                    node_id=node.id,
+                    raw_output=str(exc),
+                )
+                return Command(goto=node.id)
             except Exception as exc:
                 logger.warning(
                     "objection.classifier.error",
@@ -451,6 +460,7 @@ def compile_treeflow(
                             tenant_id=tenant_id_for_log,
                             node_id=node.id,
                             kb_id=obj.kb,
+                            query=state.get("last_user_input", ""),
                         )
                     else:
                         # Pass raw content; _kb_block in objection_response handles the outer wrap.
