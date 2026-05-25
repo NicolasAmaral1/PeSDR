@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from ai_sdr.db.rls import set_tenant_context
+from ai_sdr.models.lead import Lead
 from ai_sdr.models.talkflow import TalkFlow
 from ai_sdr.models.tenant import Tenant
 from ai_sdr.models.treeflow_version import TreeflowVersion
@@ -28,6 +29,11 @@ async def test_create_and_read_versions_and_talkflows(session: AsyncSession) -> 
         await session.flush()
         await set_tenant_context(session, t.id)
 
+        # Create a Lead with external_label "lead-1"
+        lead = Lead(tenant_id=t.id, external_label="lead-1", status="active")
+        session.add(lead)
+        await session.flush()
+
         v = TreeflowVersion(
             tenant_id=t.id,
             treeflow_id="demo",
@@ -40,16 +46,16 @@ async def test_create_and_read_versions_and_talkflows(session: AsyncSession) -> 
 
         tf = TalkFlow(
             tenant_id=t.id,
-            lead_id="lead-1",
+            lead_id=lead.id,
             treeflow_version_id=v.id,
-            thread_id=f"{t.id}:demo:lead-1",
+            thread_id=f"{t.id}:demo:{lead.id}",
         )
         session.add(tf)
 
     async with session.begin():
         await set_tenant_context(session, t.id)
         got = (
-            await session.execute(select(TalkFlow).where(TalkFlow.lead_id == "lead-1"))
+            await session.execute(select(TalkFlow).where(TalkFlow.lead_id == lead.id))
         ).scalar_one()
         assert got.status == "active"
 
@@ -63,6 +69,9 @@ async def test_rls_blocks_cross_tenant_reads_on_talkflows(session: AsyncSession)
         await session.flush()
 
         await set_tenant_context(session, t1.id)
+        lead1 = Lead(tenant_id=t1.id, external_label="L1", status="active")
+        session.add(lead1)
+        await session.flush()
         v1 = TreeflowVersion(
             tenant_id=t1.id,
             treeflow_id="d",
@@ -75,14 +84,17 @@ async def test_rls_blocks_cross_tenant_reads_on_talkflows(session: AsyncSession)
         session.add(
             TalkFlow(
                 tenant_id=t1.id,
-                lead_id="L1",
+                lead_id=lead1.id,
                 treeflow_version_id=v1.id,
-                thread_id=f"{t1.id}:d:L1",
+                thread_id=f"{t1.id}:d:{lead1.id}",
             )
         )
         await session.flush()  # force INSERT before switching tenant context (RLS WITH CHECK)
 
         await set_tenant_context(session, t2.id)
+        lead2 = Lead(tenant_id=t2.id, external_label="L2", status="active")
+        session.add(lead2)
+        await session.flush()
         v2 = TreeflowVersion(
             tenant_id=t2.id,
             treeflow_id="d",
@@ -95,23 +107,23 @@ async def test_rls_blocks_cross_tenant_reads_on_talkflows(session: AsyncSession)
         session.add(
             TalkFlow(
                 tenant_id=t2.id,
-                lead_id="L2",
+                lead_id=lead2.id,
                 treeflow_version_id=v2.id,
-                thread_id=f"{t2.id}:d:L2",
+                thread_id=f"{t2.id}:d:{lead2.id}",
             )
         )
         await session.flush()
 
-    # Read as t1 — should see only L1
+    # Read as t1 — should see only lead1
     async with session.begin():
         await set_tenant_context(session, t1.id)
         rows = (await session.execute(select(TalkFlow))).scalars().all()
         leads = sorted(r.lead_id for r in rows)
-        assert leads == ["L1"]
+        assert leads == [lead1.id]
 
-    # Read as t2 — should see only L2
+    # Read as t2 — should see only lead2
     async with session.begin():
         await set_tenant_context(session, t2.id)
         rows = (await session.execute(select(TalkFlow))).scalars().all()
         leads = sorted(r.lead_id for r in rows)
-        assert leads == ["L2"]
+        assert leads == [lead2.id]

@@ -9,6 +9,8 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from ai_sdr.db.rls import set_tenant_context
+from ai_sdr.models.lead import Lead
 from ai_sdr.models.tenant import Tenant
 from ai_sdr.schemas.llm_yaml import LLMConfig
 from ai_sdr.secrets.sops_loader import SopsLoader
@@ -123,8 +125,13 @@ async def test_publish_create_step_end_to_end(tmp_path: Path) -> None:
             t = Tenant(slug=tenant_slug_base, display_name="RT")
             session.add(t)
             await session.flush()
+            await set_tenant_context(session, t.id)
+            # Create a Lead with external_label "lead-A"
+            lead = Lead(tenant_id=t.id, external_label="lead-A", status="active")
+            session.add(lead)
+            await session.flush()
             await runtime.publish_version(session, t, "demo")
-            tf = await runtime.create(session, t, lead_id="lead-A", treeflow_id="demo")
+            tf = await runtime.create(session, t, lead_id=lead.id, treeflow_id="demo")
         tf_id = tf.id
         tenant_slug = t.slug
 
