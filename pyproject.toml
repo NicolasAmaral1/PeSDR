@@ -1,0 +1,108 @@
+[project]
+name = "ai-sdr"
+version = "0.1.0"
+description = "Multi-tenant AI SDR platform"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "asyncpg>=0.30",
+    "alembic>=1.14",
+    "arq>=0.26",
+    "pgvector>=0.3.6",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "structlog>=24.4",
+    "tenacity>=8",
+    "pyyaml>=6.0",
+    "redis>=5.2",
+    "langgraph>=0.2.60",
+    "langgraph-checkpoint-postgres>=2.0.21",
+    "psycopg[binary,pool]>=3.2.3",
+    "langchain-core>=0.3.28",
+    "langchain>=1.3.0",
+    "langchain-anthropic>=0.3.0",
+    "langchain-openai>=0.2.14",
+    "langchain-google-genai>=2.0.0",
+    "langchain-deepseek>=0.1.0",
+    "langchain-ollama>=0.2.0",
+    "simpleeval>=1.0.3",
+    "tiktoken>=0.8",
+    "typer>=0.15",
+]
+
+[project.scripts]
+ai-sdr = "ai_sdr.cli.app:app"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",
+    "httpx>=0.28",
+    "testcontainers[postgres]>=4.8",
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "pre-commit>=4.0",
+    "types-pyyaml>=6.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ai_sdr"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "ASYNC", "S", "C4", "RET", "SIM"]
+ignore = ["S101"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S105", "S106", "S107", "S108"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+disallow_untyped_decorators = false
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = "testcontainers.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "redis.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "simpleeval.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "langgraph.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "pgvector.*"
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+# Session-scoped event loop avoids "Event loop is closed" races during
+# fixture teardown when AsyncClient+asyncpg leave pending tasks. Tests use
+# unique tenant slugs for isolation, so sharing the loop is safe.
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+    "integration: tests that require docker (postgres, redis)",
+    "live_llm: tests that hit real LLM APIs (requires ANTHROPIC_API_KEY and/or OPENAI_API_KEY)",
+]

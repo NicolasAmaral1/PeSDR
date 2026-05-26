@@ -1,0 +1,57 @@
+id: "example"
+display_name: "Example Tenant"
+timezone: "America/Sao_Paulo"
+
+schedule:
+  mon-fri: "08:00-22:00"
+  sat: "09:00-18:00"
+  sun: "off"
+  off_hours_behavior: "queue"
+
+conversation:
+  debounce_ms: 5000
+  optout_stop_words: ["para", "pare", "parar", "stop", "sair"]
+  optout_action: "end_conversation_silent"
+
+llm:
+  default:
+    provider: anthropic
+    model: claude-sonnet-4-6
+    temperature: 0.7
+    api_key_ref: secrets/anthropic_key
+  classifier:
+    provider: anthropic
+    model: claude-haiku-4-5
+    api_key_ref: secrets/anthropic_key
+  embeddings:
+    provider: openai
+    model: text-embedding-3-small
+    api_key_ref: secrets/openai_key
+  cache_enabled: true
+
+guardrails:
+  enabled: true
+  allowed_prices: [247, 1497, 1997, 2000, 6000]
+  allowed_products: ["Mentoria", "Aceleradora", "Downsell", "Curso Express"]
+  critic_enabled: true
+  fallback_text: "Deixa eu confirmar esse valor com a equipe e já te respondo, ok?"
+  max_retries: 2
+
+messaging:
+  provider: fake
+  # When switching this tenant to live WhatsApp, change provider to
+  # 'whatsapp_cloud' and uncomment + populate the *_ref fields. The
+  # referenced secret names must exist in tenants/example/secrets.enc.yaml.
+  #
+  # provider: whatsapp_cloud
+  # phone_number_id_ref: secrets/wa_phone_id
+  # access_token_ref: secrets/wa_token
+  # webhook_verify_token_ref: secrets/wa_verify
+  # app_secret_ref: secrets/wa_app_secret
+  # api_version: v21.0
+
+objections:
+  enabled: true
+  min_confidence: 0.6
+  max_handled_per_lead: 10
+  history_window: 4
