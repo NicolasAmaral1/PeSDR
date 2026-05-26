@@ -95,6 +95,11 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# Session-scoped event loop avoids "Event loop is closed" races during
+# fixture teardown when AsyncClient+asyncpg leave pending tasks. Tests use
+# unique tenant slugs for isolation, so sharing the loop is safe.
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
 markers = [
