@@ -19,6 +19,24 @@ from ai_sdr.models.treeflow_version import TreeflowVersion
 pytestmark = pytest.mark.integration
 
 
+@pytest.fixture(autouse=True)
+def _install_default_arq_pool(app) -> None:
+    """The assign endpoint declares an arq_pool dep that runs BEFORE the
+    route handler (FastAPI evaluates all deps first). Without a default
+    pool on app.state, even 404/409 tests fail because the dep raises
+    RuntimeError. Install a no-op pool; tests that need to observe enqueue
+    calls overwrite it with their own FakePool."""
+
+    class NoopPool:
+        async def enqueue_job(self, name, *args, **kwargs):  # noqa: ARG002
+            return None
+
+        async def aclose(self) -> None:
+            pass
+
+    app.state.arq_pool = NoopPool()
+
+
 @pytest.fixture
 async def tenant_with_treeflow(db_session) -> tuple[Tenant, TreeflowVersion]:
     t = Tenant(slug=f"lead_{uuid.uuid4().hex[:6]}", display_name="L")
