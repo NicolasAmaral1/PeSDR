@@ -22,6 +22,28 @@ from ai_sdr.treeflow.classifier import classify
 pytestmark = [pytest.mark.live_llm, pytest.mark.integration]
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _preflight_anthropic_auth() -> None:
+    """Skip the module if the loaded Anthropic key is invalid.
+
+    SopsLoader can return a key that's syntactically valid but expired or
+    revoked — the test then fails deep inside the classifier with a 401.
+    One tiny preflight call validates auth before the suite runs and skips
+    cleanly if the credential is bad.
+    """
+    import anthropic
+
+    secrets = _load_secrets()  # raises pytest.skip when no key is reachable
+    try:
+        anthropic.Anthropic(api_key=secrets["anthropic_key"]).messages.create(
+            model="claude-haiku-4-5",
+            max_tokens=1,
+            messages=[{"role": "user", "content": "ping"}],
+        )
+    except anthropic.AuthenticationError as e:
+        pytest.skip(f"Anthropic auth invalid; skipping live tests: {e}")
+
+
 def _load_secrets() -> dict[str, str]:
     """Load tenant secrets, falling back to env var if SOPS isn't available."""
     try:

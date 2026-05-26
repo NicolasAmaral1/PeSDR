@@ -31,6 +31,38 @@ def _credentials_available() -> bool:
     return bool(secrets.get("anthropic_key"))
 
 
+def _resolve_anthropic_key() -> str | None:
+    try:
+        secrets = SopsLoader(Path("tenants")).load("example")
+        return secrets.get("anthropic_key") or os.getenv("ANTHROPIC_API_KEY")
+    except Exception:
+        return os.getenv("ANTHROPIC_API_KEY")
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _preflight_anthropic_auth() -> None:
+    """Skip if the loaded Anthropic key is invalid.
+
+    SopsLoader can return a key that's syntactically valid but expired or
+    revoked — the simulate CLI then fails deep with a 401 and the test
+    fails for an environment reason, not a code reason. One tiny preflight
+    call validates auth and skips cleanly if the credential is bad.
+    """
+    key = _resolve_anthropic_key()
+    if not key:
+        pytest.skip("No ANTHROPIC_API_KEY available")
+    import anthropic
+
+    try:
+        anthropic.Anthropic(api_key=key).messages.create(
+            model="claude-haiku-4-5",
+            max_tokens=1,
+            messages=[{"role": "user", "content": "ping"}],
+        )
+    except anthropic.AuthenticationError as e:
+        pytest.skip(f"Anthropic auth invalid; skipping live test: {e}")
+
+
 @pytest.mark.skipif(not _credentials_available(), reason="No ANTHROPIC_API_KEY available")
 def test_simulate_handles_price_objection_and_continues() -> None:
     """Scripted flow:
