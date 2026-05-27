@@ -71,6 +71,25 @@ class MessagingAdapter(ABC):
         """
 
     @abstractmethod
+    async def send_template(
+        self,
+        to: str,
+        template_ref: str,
+        language: str,
+        params: list[str],
+    ) -> SendResult:
+        """Send a pre-approved HSM template. Provider validates template_ref
+        + language + params shape against its registered templates.
+
+        Returns SendResult (same shape as send_text). Adapter retries
+        Transient/RateLimit internally; raises typed terminal errors
+        (AuthError, RecipientUnreachable, PolicyError) on terminal failures.
+
+        WindowExpiredError should NEVER fire for templates — HSM messages
+        bypass the 24h window. If it does, treat as adapter bug.
+        """
+
+    @abstractmethod
     def verification_challenge(self, params: Mapping[str, str]) -> str | None:
         """For providers with a GET-based webhook challenge (WhatsApp's
         hub.mode=subscribe handshake). Returns the challenge token to echo.
