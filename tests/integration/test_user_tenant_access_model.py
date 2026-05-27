@@ -60,8 +60,8 @@ async def test_user_cascade_delete_removes_grants(db_session) -> None:
     await db_session.commit()
 
     rows = (
-        await db_session.execute(
-            select(UserTenantAccess).where(UserTenantAccess.user_id == u.id)
-        )
-    ).scalars().all()
+        (await db_session.execute(select(UserTenantAccess).where(UserTenantAccess.user_id == u.id)))
+        .scalars()
+        .all()
+    )
     assert rows == []

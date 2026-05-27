@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -82,7 +82,7 @@ def _format_lead_display(lead: Lead) -> str:
 
 def _format_time_short(dt: datetime) -> str:
     """HH:MM if today, else DD/MM HH:MM."""
-    now = datetime.now(datetime.UTC)
+    now = datetime.now(UTC)
     if dt.date() == now.date():
         return dt.strftime("%H:%M")
     return dt.strftime("%d/%m %H:%M")
@@ -255,9 +255,7 @@ async def lead_assign(
 ) -> HTMLResponse:
     tenant, _user = access
     lead = (
-        await db.execute(
-            select(Lead).where(Lead.id == lead_id, Lead.tenant_id == tenant.id)
-        )
+        await db.execute(select(Lead).where(Lead.id == lead_id, Lead.tenant_id == tenant.id))
     ).scalar_one_or_none()
     if lead is None:
         raise HTTPException(status_code=404, detail="lead not found")
@@ -291,8 +289,5 @@ async def lead_assign(
         subtitle="Clique em um lead à esquerda para ver detalhes.",
     )
     # HTMX OOB swap: the second fragment with hx-swap-oob replaces #lead-detail.
-    body = (
-        leads_html
-        + f'\n<div id="lead-detail" hx-swap-oob="innerHTML">{empty_state_html}</div>'
-    )
+    body = leads_html + f'\n<div id="lead-detail" hx-swap-oob="innerHTML">{empty_state_html}</div>'
     return HTMLResponse(content=body)

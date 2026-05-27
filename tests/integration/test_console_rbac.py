@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Annotated
 
 import pytest
-from fastapi import APIRouter, Depends, FastAPI
+from fastapi import APIRouter, Depends
 from httpx import ASGITransport, AsyncClient
 
 from ai_sdr.models.tenant import Tenant
@@ -50,7 +50,7 @@ llm:
     model: claude-sonnet-4-6
     api_key_ref: secrets/anthropic_key
 console:
-  enabled: {'true' if enabled else 'false'}
+  enabled: {"true" if enabled else "false"}
 """
     (tmpdir / slug / "tenant.yaml").write_text(yaml)
 
@@ -79,9 +79,7 @@ async def seeded(db_session, isolated_tenants_dir) -> dict:
     _make_tenant_yaml(isolated_tenants_dir, tenant_b.slug, enabled=True)
     _make_tenant_yaml(isolated_tenants_dir, tenant_c.slug, enabled=False)
 
-    operator = User(
-        username=f"op_{uuid.uuid4().hex[:6]}", password_hash=hash_password("p")
-    )
+    operator = User(username=f"op_{uuid.uuid4().hex[:6]}", password_hash=hash_password("p"))
     admin = User(
         username=f"adm_{uuid.uuid4().hex[:6]}",
         password_hash=hash_password("p"),
@@ -89,9 +87,7 @@ async def seeded(db_session, isolated_tenants_dir) -> dict:
     )
     db_session.add_all([operator, admin])
     await db_session.flush()
-    db_session.add(
-        UserTenantAccess(user_id=operator.id, tenant_id=tenant_a.id, role="operator")
-    )
+    db_session.add(UserTenantAccess(user_id=operator.id, tenant_id=tenant_a.id, role="operator"))
     await db_session.commit()
 
     return {
@@ -109,9 +105,7 @@ def app_with_ping(app):
     return app
 
 
-async def test_operator_can_access_granted_tenant(
-    app_with_ping, seeded, monkeypatch
-) -> None:
+async def test_operator_can_access_granted_tenant(app_with_ping, seeded, monkeypatch) -> None:
     _patch_settings(monkeypatch)
     cookie = sign_session_cookie(seeded["operator"].id)
     async with AsyncClient(
@@ -127,9 +121,7 @@ async def test_operator_can_access_granted_tenant(
     assert body["admin"] is False
 
 
-async def test_operator_without_grant_gets_403(
-    app_with_ping, seeded, monkeypatch
-) -> None:
+async def test_operator_without_grant_gets_403(app_with_ping, seeded, monkeypatch) -> None:
     _patch_settings(monkeypatch)
     cookie = sign_session_cookie(seeded["operator"].id)
     async with AsyncClient(
@@ -142,9 +134,7 @@ async def test_operator_without_grant_gets_403(
     assert r.status_code == 403
 
 
-async def test_admin_accesses_any_tenant(
-    app_with_ping, seeded, monkeypatch
-) -> None:
+async def test_admin_accesses_any_tenant(app_with_ping, seeded, monkeypatch) -> None:
     _patch_settings(monkeypatch)
     cookie = sign_session_cookie(seeded["admin"].id)
     async with AsyncClient(
@@ -184,8 +174,6 @@ async def test_no_cookie_redirects_to_login(app_with_ping, seeded) -> None:
         base_url="http://test",
         follow_redirects=False,
     ) as client:
-        r = await client.get(
-            f"/console/{seeded['tenant_a'].slug}/__ping__"
-        )
+        r = await client.get(f"/console/{seeded['tenant_a'].slug}/__ping__")
     assert r.status_code == 303
     assert r.headers["location"] == "/console/login"

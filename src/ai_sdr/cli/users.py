@@ -14,7 +14,12 @@ import typer
 from rich.console import Console
 from rich.table import Table
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from ai_sdr.models.tenant import Tenant
 from ai_sdr.models.user import User

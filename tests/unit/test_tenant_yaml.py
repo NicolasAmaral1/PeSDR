@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from ai_sdr.schemas.tenant_yaml import ConsoleConfig, TenantConfig
+from ai_sdr.schemas.tenant_yaml import TenantConfig
 
 
 def _minimal_tenant_data() -> dict:

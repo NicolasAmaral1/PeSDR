@@ -27,17 +27,13 @@ async def seeded(db_session) -> tuple[User, Tenant]:
     )
     db_session.add(user)
     await db_session.flush()
-    db_session.add(
-        UserTenantAccess(user_id=user.id, tenant_id=tenant.id, role="operator")
-    )
+    db_session.add(UserTenantAccess(user_id=user.id, tenant_id=tenant.id, role="operator"))
     await db_session.commit()
     return user, tenant
 
 
 async def test_get_login_renders_form(app) -> None:
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         r = await client.get("/console/login")
     assert r.status_code == 200
     assert "<form" in r.text
@@ -47,9 +43,7 @@ async def test_get_login_renders_form(app) -> None:
 
 async def test_post_login_wrong_password_returns_401(app, seeded) -> None:
     user, _tenant = seeded
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         r = await client.post(
             "/console/login",
             data={"username": user.username, "password": "wrong"},
@@ -60,9 +54,7 @@ async def test_post_login_wrong_password_returns_401(app, seeded) -> None:
 
 
 async def test_post_login_unknown_user_returns_401(app) -> None:
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         r = await client.post(
             "/console/login",
             data={"username": "ghost", "password": "whatever"},
@@ -72,12 +64,11 @@ async def test_post_login_unknown_user_returns_401(app) -> None:
     assert "Usuário ou senha incorretos" in r.text
 
 
-async def test_post_login_success_issues_cookie_and_redirects(
-    app, seeded, monkeypatch
-) -> None:
+async def test_post_login_success_issues_cookie_and_redirects(app, seeded, monkeypatch) -> None:
     user, tenant = seeded
     # Ensure CONSOLE_SECRET_KEY is set so the cookie signer works
     from ai_sdr.settings import get_settings
+
     monkeypatch.setattr(get_settings(), "console_secret_key", "x" * 48)
 
     async with AsyncClient(
@@ -94,10 +85,9 @@ async def test_post_login_success_issues_cookie_and_redirects(
     assert "pesdr_session" in r.cookies
 
 
-async def test_post_login_admin_redirects_to_a_tenant(
-    app, db_session, monkeypatch
-) -> None:
+async def test_post_login_admin_redirects_to_a_tenant(app, db_session, monkeypatch) -> None:
     from ai_sdr.settings import get_settings
+
     monkeypatch.setattr(get_settings(), "console_secret_key", "x" * 48)
 
     tenant = Tenant(slug=f"adm_{uuid.uuid4().hex[:6]}", display_name="A")

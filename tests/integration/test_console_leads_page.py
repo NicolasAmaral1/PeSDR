@@ -44,8 +44,7 @@ console:
     # only uses the filename stem; runtime.create reads TreeflowVersion
     # rows from DB, not this file.
     (tmpdir / slug / "treeflows" / "mentoria.yaml").write_text(
-        "id: mentoria\nversion: 1.0.0\nentry_node: n1\n"
-        "nodes:\n  - id: n1\n    prompt: hi\n"
+        "id: mentoria\nversion: 1.0.0\nentry_node: n1\nnodes:\n  - id: n1\n    prompt: hi\n"
     )
 
 
@@ -78,8 +77,7 @@ async def seeded(db_session, isolated_tenants_dir):
         version="1.0.0",
         content_hash="x" * 64,
         content_yaml=(
-            "id: mentoria\nversion: 1.0.0\nentry_node: n1\n"
-            "nodes:\n  n1:\n    prompt: hi\n"
+            "id: mentoria\nversion: 1.0.0\nentry_node: n1\nnodes:\n  n1:\n    prompt: hi\n"
         ),
     )
     db_session.add(tv)
@@ -87,9 +85,7 @@ async def seeded(db_session, isolated_tenants_dir):
     user = User(username=f"u_{uuid.uuid4().hex[:6]}", password_hash=hash_password("pw"))
     db_session.add(user)
     await db_session.flush()
-    db_session.add(
-        UserTenantAccess(user_id=user.id, tenant_id=tenant.id, role="operator")
-    )
+    db_session.add(UserTenantAccess(user_id=user.id, tenant_id=tenant.id, role="operator"))
 
     lead = Lead(
         tenant_id=tenant.id,
