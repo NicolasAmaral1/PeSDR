@@ -69,9 +69,9 @@ def isolated_tenants_dir(monkeypatch):
 async def seeded(db_session, isolated_tenants_dir) -> dict:
     """Create: tenant_a (enabled), tenant_b (enabled), tenant_c (disabled),
     operator with grant to tenant_a, admin (no grants)."""
-    tenant_a = Tenant(slug=f"a_{uuid.uuid4().hex[:6]}", display_name="A")
-    tenant_b = Tenant(slug=f"b_{uuid.uuid4().hex[:6]}", display_name="B")
-    tenant_c = Tenant(slug=f"c_{uuid.uuid4().hex[:6]}", display_name="C")
+    tenant_a = Tenant(slug=f"a-{uuid.uuid4().hex[:6]}", display_name="A")
+    tenant_b = Tenant(slug=f"b-{uuid.uuid4().hex[:6]}", display_name="B")
+    tenant_c = Tenant(slug=f"c-{uuid.uuid4().hex[:6]}", display_name="C")
     db_session.add_all([tenant_a, tenant_b, tenant_c])
     await db_session.flush()
 

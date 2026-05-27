@@ -65,7 +65,7 @@ def isolated_tenants_dir():
 @pytest.fixture
 async def seeded(db_session, isolated_tenants_dir):
     """Full seed: tenant + tenant.yaml + treeflow_version + user + grant + lead + queued msg."""
-    tenant = Tenant(slug=f"lp_{uuid.uuid4().hex[:6]}", display_name="LeadsPage")
+    tenant = Tenant(slug=f"lp-{uuid.uuid4().hex[:6]}", display_name="LeadsPage")
     db_session.add(tenant)
     await db_session.flush()
     _make_tenant_yaml(isolated_tenants_dir, tenant.slug)
