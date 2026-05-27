@@ -7,6 +7,7 @@ from ai_sdr.models.lead import Lead
 from ai_sdr.models.talkflow import TalkFlow
 from ai_sdr.models.tenant import Tenant
 from ai_sdr.models.treeflow_version import TreeflowVersion
+from ai_sdr.models.user import User
 
 __all__ = [
     "InboundMessageRow",
@@ -16,4 +17,5 @@ __all__ = [
     "TalkFlow",
     "Tenant",
     "TreeflowVersion",
+    "User",
 ]
