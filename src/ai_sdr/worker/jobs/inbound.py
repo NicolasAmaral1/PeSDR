@@ -201,13 +201,60 @@ async def process_lead_inbox(ctx: dict[str, Any], tenant_id: str, lead_id: str) 
                     await db.commit()
                     return
                 except WindowExpiredError as e:
-                    msg.status = "error"
-                    msg.error_detail = f"window_expired: {e}"
-                    log.warning(
-                        "worker.window_expired",
-                        lead_id=lead_id,
-                        err=str(e),
+                    # P9: try the tenant's reengagement_template fallback.
+                    from pathlib import Path
+
+                    from ai_sdr.follow_up.jinja import render_params
+                    from ai_sdr.settings import get_settings
+                    from ai_sdr.tenant_loader.loader import TenantLoader
+
+                    tenant_cfg = TenantLoader(Path(get_settings().tenants_dir)).load(
+                        tenant.slug
                     )
+                    reeng = (
+                        tenant_cfg.messaging.reengagement_template
+                        if tenant_cfg.messaging is not None
+                        else None
+                    )
+                    if reeng is not None:
+                        try:
+                            params = render_params(
+                                reeng.params,
+                                lead=lead,
+                                tenant=tenant,
+                                collected={},
+                            )
+                            await adapter.send_template(
+                                to=msg.from_address,
+                                template_ref=reeng.template_ref,
+                                language=reeng.language,
+                                params=params,
+                            )
+                            msg.status = "processed"
+                            msg.processed_at = datetime.now(UTC)
+                            msg.error_detail = (
+                                "window_expired; recovered via reengagement template"
+                            )
+                            talkflow.last_agent_message_at = datetime.now(UTC)
+                            log.info(
+                                "messaging.window_expired_recovered",
+                                lead_id=str(lead.id),
+                            )
+                        except Exception as e2:
+                            msg.status = "error"
+                            msg.error_detail = f"window_expired; reengagement failed: {e2}"
+                            log.warning(
+                                "messaging.reengagement_failed",
+                                lead_id=str(lead.id),
+                                err=str(e2),
+                            )
+                    else:
+                        msg.status = "error"
+                        msg.error_detail = f"window_expired: {e}"
+                        log.warning(
+                            "messaging.window_expired_no_template",
+                            lead_id=str(lead.id),
+                        )
                     await db.commit()
                     return
                 except (AuthError, PolicyError) as e:
