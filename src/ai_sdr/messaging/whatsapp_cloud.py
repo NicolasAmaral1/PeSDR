@@ -211,10 +211,7 @@ class WhatsAppCloudAPIAdapter(MessagingAdapter):
         language: str,
         params: list[str],
     ) -> SendResult:
-        url = (
-            f"https://graph.facebook.com/{self._api_version}/"
-            f"{self._phone_number_id}/messages"
-        )
+        url = f"https://graph.facebook.com/{self._api_version}/{self._phone_number_id}/messages"
         template_block: dict[str, object] = {
             "name": template_ref,
             "language": {"code": language},

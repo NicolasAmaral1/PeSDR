@@ -6,6 +6,7 @@ import uuid
 from types import SimpleNamespace
 
 import pytest
+from jinja2.exceptions import SecurityError
 
 from ai_sdr.follow_up.jinja import render_params
 
@@ -54,13 +55,13 @@ def test_multiple_params_independent() -> None:
 
 def test_sandbox_blocks_dunder_access() -> None:
     params = ["{{ collected.__class__.__mro__ }}"]
-    with pytest.raises(Exception):
+    with pytest.raises(SecurityError):
         render_params(params, lead=_lead(), tenant=_tenant(), collected={})
 
 
 def test_sandbox_blocks_import() -> None:
     params = ["{{ ''.__class__.__bases__[0].__subclasses__() }}"]
-    with pytest.raises(Exception):
+    with pytest.raises(SecurityError):
         render_params(params, lead=_lead(), tenant=_tenant(), collected={})
 
 

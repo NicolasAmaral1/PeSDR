@@ -95,6 +95,10 @@ ignore_missing_imports = true
 module = "pgvector.*"
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = "isodate.*"
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 # Session-scoped event loop avoids "Event loop is closed" races during

@@ -16,14 +16,16 @@ def test_disabled_default() -> None:
 
 
 def test_enabled_with_full_sequence() -> None:
-    cfg = FollowUpConfig.model_validate({
-        "enabled": True,
-        "max_attempts": 2,
-        "sequence": [
-            {"after": "PT24H", "template_ref": "followup_24h_v1"},
-            {"after": "P3D", "template_ref": "followup_72h_v1"},
-        ],
-    })
+    cfg = FollowUpConfig.model_validate(
+        {
+            "enabled": True,
+            "max_attempts": 2,
+            "sequence": [
+                {"after": "PT24H", "template_ref": "followup_24h_v1"},
+                {"after": "P3D", "template_ref": "followup_72h_v1"},
+            ],
+        }
+    )
     assert cfg.enabled is True
     assert len(cfg.sequence) == 2
     assert cfg.sequence[0].language == "pt_BR"  # default
@@ -32,21 +34,25 @@ def test_enabled_with_full_sequence() -> None:
 
 def test_enabled_requires_sequence_at_least_max_attempts() -> None:
     with pytest.raises(ValidationError, match="sequence has 1 entries"):
-        FollowUpConfig.model_validate({
-            "enabled": True,
-            "max_attempts": 3,
-            "sequence": [
-                {"after": "PT24H", "template_ref": "x"},
-            ],
-        })
+        FollowUpConfig.model_validate(
+            {
+                "enabled": True,
+                "max_attempts": 3,
+                "sequence": [
+                    {"after": "PT24H", "template_ref": "x"},
+                ],
+            }
+        )
 
 
 def test_disabled_allows_empty_sequence() -> None:
-    cfg = FollowUpConfig.model_validate({
-        "enabled": False,
-        "max_attempts": 3,
-        "sequence": [],
-    })
+    cfg = FollowUpConfig.model_validate(
+        {
+            "enabled": False,
+            "max_attempts": 3,
+            "sequence": [],
+        }
+    )
     assert cfg.enabled is False
 
 

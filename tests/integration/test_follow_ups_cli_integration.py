@@ -28,7 +28,9 @@ async def test_cancel_marks_pending_as_cancelled(db_session) -> None:
     await db_session.flush()
     await set_tenant_context(db_session, tenant.id)
     tv = TreeflowVersion(
-        tenant_id=tenant.id, treeflow_id="t1", version="1.0.0",
+        tenant_id=tenant.id,
+        treeflow_id="t1",
+        version="1.0.0",
         content_hash="x" * 64,
         content_yaml="id: t1\nversion: 1.0.0\nentry_node: n1\nnodes: {n1: {prompt: hi}}\n",
     )
@@ -38,15 +40,22 @@ async def test_cancel_marks_pending_as_cancelled(db_session) -> None:
     db_session.add(lead)
     await db_session.flush()
     tf = TalkFlow(
-        tenant_id=tenant.id, lead_id=lead.id, treeflow_version_id=tv.id,
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        treeflow_version_id=tv.id,
         thread_id=f"{tenant.id}:{uuid.uuid4()}",
     )
     db_session.add(tf)
-    db_session.add(FollowUpJob(
-        tenant_id=tenant.id, talkflow_id=tf.id, lead_id=lead.id,
-        attempt_number=1, scheduled_at=datetime.now(UTC) + timedelta(hours=1),
-        status="pending",
-    ))
+    db_session.add(
+        FollowUpJob(
+            tenant_id=tenant.id,
+            talkflow_id=tf.id,
+            lead_id=lead.id,
+            attempt_number=1,
+            scheduled_at=datetime.now(UTC) + timedelta(hours=1),
+            status="pending",
+        )
+    )
     await db_session.commit()
 
     r = runner.invoke(
@@ -59,9 +68,7 @@ async def test_cancel_marks_pending_as_cancelled(db_session) -> None:
     await set_tenant_context(db_session, tenant.id)
     db_session.expire_all()
     job = (
-        await db_session.execute(
-            select(FollowUpJob).where(FollowUpJob.lead_id == lead.id)
-        )
+        await db_session.execute(select(FollowUpJob).where(FollowUpJob.lead_id == lead.id))
     ).scalar_one()
     assert job.status == "cancelled"
     assert "manual" in (job.error_detail or "")

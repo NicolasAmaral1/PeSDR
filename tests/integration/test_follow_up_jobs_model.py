@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from ai_sdr.db.rls import set_tenant_context
 from ai_sdr.models.follow_up_job import FollowUpJob
@@ -69,11 +70,17 @@ async def test_create_follow_up_job_defaults(db_session) -> None:
 async def test_check_constraint_rejects_bad_status(db_session) -> None:
     tenant, tf, lead = await _seed(db_session)
     await set_tenant_context(db_session, tenant.id)
-    db_session.add(FollowUpJob(
-        tenant_id=tenant.id, talkflow_id=tf.id, lead_id=lead.id,
-        attempt_number=1, scheduled_at=datetime.now(UTC), status="weird",
-    ))
-    with pytest.raises(Exception):
+    db_session.add(
+        FollowUpJob(
+            tenant_id=tenant.id,
+            talkflow_id=tf.id,
+            lead_id=lead.id,
+            attempt_number=1,
+            scheduled_at=datetime.now(UTC),
+            status="weird",
+        )
+    )
+    with pytest.raises(IntegrityError):
         await db_session.commit()
     await db_session.rollback()
 
@@ -81,11 +88,16 @@ async def test_check_constraint_rejects_bad_status(db_session) -> None:
 async def test_check_constraint_rejects_zero_attempt(db_session) -> None:
     tenant, tf, lead = await _seed(db_session)
     await set_tenant_context(db_session, tenant.id)
-    db_session.add(FollowUpJob(
-        tenant_id=tenant.id, talkflow_id=tf.id, lead_id=lead.id,
-        attempt_number=0, scheduled_at=datetime.now(UTC),
-    ))
-    with pytest.raises(Exception):
+    db_session.add(
+        FollowUpJob(
+            tenant_id=tenant.id,
+            talkflow_id=tf.id,
+            lead_id=lead.id,
+            attempt_number=0,
+            scheduled_at=datetime.now(UTC),
+        )
+    )
+    with pytest.raises(IntegrityError):
         await db_session.commit()
     await db_session.rollback()
 
@@ -93,10 +105,15 @@ async def test_check_constraint_rejects_zero_attempt(db_session) -> None:
 async def test_rls_blocks_cross_tenant_read(db_session) -> None:
     tenant_a, tf_a, lead_a = await _seed(db_session)
     await set_tenant_context(db_session, tenant_a.id)
-    db_session.add(FollowUpJob(
-        tenant_id=tenant_a.id, talkflow_id=tf_a.id, lead_id=lead_a.id,
-        attempt_number=1, scheduled_at=datetime.now(UTC),
-    ))
+    db_session.add(
+        FollowUpJob(
+            tenant_id=tenant_a.id,
+            talkflow_id=tf_a.id,
+            lead_id=lead_a.id,
+            attempt_number=1,
+            scheduled_at=datetime.now(UTC),
+        )
+    )
     await db_session.commit()
 
     # Switch to a fresh tenant — should see nothing
@@ -111,10 +128,15 @@ async def test_rls_blocks_cross_tenant_read(db_session) -> None:
 async def test_lead_cascade_delete_removes_jobs(db_session) -> None:
     tenant, tf, lead = await _seed(db_session)
     await set_tenant_context(db_session, tenant.id)
-    db_session.add(FollowUpJob(
-        tenant_id=tenant.id, talkflow_id=tf.id, lead_id=lead.id,
-        attempt_number=1, scheduled_at=datetime.now(UTC),
-    ))
+    db_session.add(
+        FollowUpJob(
+            tenant_id=tenant.id,
+            talkflow_id=tf.id,
+            lead_id=lead.id,
+            attempt_number=1,
+            scheduled_at=datetime.now(UTC),
+        )
+    )
     await db_session.commit()
 
     await db_session.delete(lead)

@@ -48,9 +48,7 @@ def isolated_tenants_dir():
 
 @pytest.fixture
 def session_factory():
-    return async_sessionmaker(
-        build_engine(get_settings().database_url), expire_on_commit=False
-    )
+    return async_sessionmaker(build_engine(get_settings().database_url), expire_on_commit=False)
 
 
 async def test_window_expired_no_template_marks_error(
@@ -69,13 +67,15 @@ async def test_window_expired_no_template_marks_error(
 
     await set_tenant_context(db_session, tenant.id)
     tv = TreeflowVersion(
-        tenant_id=tenant.id, treeflow_id="t1", version="1.0.0",
+        tenant_id=tenant.id,
+        treeflow_id="t1",
+        version="1.0.0",
         content_hash="x" * 64,
         content_yaml=(
             "id: t1\nversion: 1.0.0\ndisplay_name: T1\nentry_node: n1\n"
             "nodes:\n  - id: n1\n    prompt: hi\n"
             "    exit_condition:\n      type: all_fields_filled\n"
-            "    next_nodes:\n      - condition: \"true\"\n        target: END\n"
+            '    next_nodes:\n      - condition: "true"\n        target: END\n'
         ),
     )
     db_session.add(tv)
@@ -84,15 +84,21 @@ async def test_window_expired_no_template_marks_error(
     db_session.add(lead)
     await db_session.flush()
     tf = TalkFlow(
-        tenant_id=tenant.id, lead_id=lead.id, treeflow_version_id=tv.id,
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        treeflow_version_id=tv.id,
         thread_id=f"{tenant.id}:{uuid.uuid4()}",
     )
     db_session.add(tf)
     inbound = InboundMessageRow(
-        tenant_id=tenant.id, provider="whatsapp_cloud",
-        external_id=f"x_{uuid.uuid4().hex}", lead_id=lead.id,
-        from_address="+5511999", text="oi",
-        received_at=datetime.now(UTC), raw={},
+        tenant_id=tenant.id,
+        provider="whatsapp_cloud",
+        external_id=f"x_{uuid.uuid4().hex}",
+        lead_id=lead.id,
+        from_address="+5511999",
+        text="oi",
+        received_at=datetime.now(UTC),
+        raw={},
     )
     db_session.add(inbound)
     await db_session.commit()
@@ -110,7 +116,8 @@ async def test_window_expired_no_template_marks_error(
 
     await process_lead_inbox(
         {"session_factory": session_factory, "adapter_registry": registry, "runtime": runtime},
-        str(tenant.id), str(lead.id),
+        str(tenant.id),
+        str(lead.id),
     )
 
     assert adapter.sent_messages == []

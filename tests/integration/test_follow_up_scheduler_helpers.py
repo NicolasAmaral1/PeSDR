@@ -31,7 +31,9 @@ async def _seed(db_session) -> tuple[Tenant, TalkFlow, Lead]:
     await set_tenant_context(db_session, tenant.id)
 
     tv = TreeflowVersion(
-        tenant_id=tenant.id, treeflow_id="t1", version="1.0.0",
+        tenant_id=tenant.id,
+        treeflow_id="t1",
+        version="1.0.0",
         content_hash="x" * 64,
         content_yaml="id: t1\nversion: 1.0.0\nentry_node: n1\nnodes: {n1: {prompt: hi}}\n",
     )
@@ -41,7 +43,9 @@ async def _seed(db_session) -> tuple[Tenant, TalkFlow, Lead]:
     db_session.add(lead)
     await db_session.flush()
     tf = TalkFlow(
-        tenant_id=tenant.id, lead_id=lead.id, treeflow_version_id=tv.id,
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        treeflow_version_id=tv.id,
         thread_id=f"{tenant.id}:{uuid.uuid4()}",
     )
     db_session.add(tf)
@@ -66,15 +70,35 @@ async def test_cancel_pending_for_lead_marks_only_pending(db_session) -> None:
     await set_tenant_context(db_session, tenant.id)
 
     # 1 pending + 1 completed + 1 cancelled
-    db_session.add_all([
-        FollowUpJob(tenant_id=tenant.id, talkflow_id=tf.id, lead_id=lead.id,
-                    attempt_number=1, scheduled_at=datetime.now(UTC), status="pending"),
-        FollowUpJob(tenant_id=tenant.id, talkflow_id=tf.id, lead_id=lead.id,
-                    attempt_number=2, scheduled_at=datetime.now(UTC), status="completed",
-                    fired_at=datetime.now(UTC)),
-        FollowUpJob(tenant_id=tenant.id, talkflow_id=tf.id, lead_id=lead.id,
-                    attempt_number=3, scheduled_at=datetime.now(UTC), status="cancelled"),
-    ])
+    db_session.add_all(
+        [
+            FollowUpJob(
+                tenant_id=tenant.id,
+                talkflow_id=tf.id,
+                lead_id=lead.id,
+                attempt_number=1,
+                scheduled_at=datetime.now(UTC),
+                status="pending",
+            ),
+            FollowUpJob(
+                tenant_id=tenant.id,
+                talkflow_id=tf.id,
+                lead_id=lead.id,
+                attempt_number=2,
+                scheduled_at=datetime.now(UTC),
+                status="completed",
+                fired_at=datetime.now(UTC),
+            ),
+            FollowUpJob(
+                tenant_id=tenant.id,
+                talkflow_id=tf.id,
+                lead_id=lead.id,
+                attempt_number=3,
+                scheduled_at=datetime.now(UTC),
+                status="cancelled",
+            ),
+        ]
+    )
     await db_session.commit()
 
     await set_tenant_context(db_session, tenant.id)
@@ -83,11 +107,17 @@ async def test_cancel_pending_for_lead_marks_only_pending(db_session) -> None:
     assert rowcount == 1
 
     await set_tenant_context(db_session, tenant.id)
-    rows = (await db_session.execute(
-        select(FollowUpJob)
-        .where(FollowUpJob.lead_id == lead.id)
-        .order_by(FollowUpJob.attempt_number)
-    )).scalars().all()
+    rows = (
+        (
+            await db_session.execute(
+                select(FollowUpJob)
+                .where(FollowUpJob.lead_id == lead.id)
+                .order_by(FollowUpJob.attempt_number)
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert [r.status for r in rows] == ["cancelled", "completed", "cancelled"]
     assert rows[0].error_detail == "lead responded"
 
@@ -101,9 +131,9 @@ async def test_schedule_next_followup_inserts_with_correct_delay(db_session) -> 
     await db_session.commit()
 
     await set_tenant_context(db_session, tenant.id)
-    job = (await db_session.execute(
-        select(FollowUpJob).where(FollowUpJob.lead_id == lead.id)
-    )).scalar_one()
+    job = (
+        await db_session.execute(select(FollowUpJob).where(FollowUpJob.lead_id == lead.id))
+    ).scalar_one()
     assert job.attempt_number == 2
     assert job.status == "pending"
     # sequence[1] is "P3D" -> 72h
@@ -117,8 +147,10 @@ async def test_schedule_next_followup_inserts_with_correct_delay(db_session) -> 
 
 def test_mark_cold_if_exhausted() -> None:
     tf = TalkFlow(
-        tenant_id=uuid.uuid4(), lead_id=uuid.uuid4(),
-        treeflow_version_id=uuid.uuid4(), thread_id="x",
+        tenant_id=uuid.uuid4(),
+        lead_id=uuid.uuid4(),
+        treeflow_version_id=uuid.uuid4(),
+        thread_id="x",
     )
     tf.status = "active"
     cfg = _config()  # max_attempts=3

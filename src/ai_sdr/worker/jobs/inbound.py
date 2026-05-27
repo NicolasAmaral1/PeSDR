@@ -177,15 +177,18 @@ async def process_lead_inbox(ctx: dict[str, Any], tenant_id: str, lead_id: str) 
                     tf_config = await load_treeflow_follow_up(db, talkflow)
                     if tf_config and tf_config.enabled and tf_config.sequence:
                         await schedule_next_followup(
-                            db, talkflow, lead, tenant, tf_config,
+                            db,
+                            talkflow,
+                            lead,
+                            tenant,
+                            tf_config,
                             next_attempt_number=1,
                         )
                         log.info(
                             "follow_up.first_scheduled",
                             lead_id=str(lead.id),
                             at=(
-                                datetime.now(UTC)
-                                + parse_duration(tf_config.sequence[0].after)
+                                datetime.now(UTC) + parse_duration(tf_config.sequence[0].after)
                             ).isoformat(),
                         )
                 except RecipientUnreachable as e:
@@ -208,9 +211,7 @@ async def process_lead_inbox(ctx: dict[str, Any], tenant_id: str, lead_id: str) 
                     from ai_sdr.settings import get_settings
                     from ai_sdr.tenant_loader.loader import TenantLoader
 
-                    tenant_cfg = TenantLoader(Path(get_settings().tenants_dir)).load(
-                        tenant.slug
-                    )
+                    tenant_cfg = TenantLoader(Path(get_settings().tenants_dir)).load(tenant.slug)
                     reeng = (
                         tenant_cfg.messaging.reengagement_template
                         if tenant_cfg.messaging is not None
@@ -232,9 +233,7 @@ async def process_lead_inbox(ctx: dict[str, Any], tenant_id: str, lead_id: str) 
                             )
                             msg.status = "processed"
                             msg.processed_at = datetime.now(UTC)
-                            msg.error_detail = (
-                                "window_expired; recovered via reengagement template"
-                            )
+                            msg.error_detail = "window_expired; recovered via reengagement template"
                             talkflow.last_agent_message_at = datetime.now(UTC)
                             log.info(
                                 "messaging.window_expired_recovered",

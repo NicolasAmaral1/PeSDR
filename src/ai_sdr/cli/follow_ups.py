@@ -22,7 +22,7 @@ import yaml
 from rich.console import Console
 from rich.table import Table
 from sqlalchemy import select, update
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 from ai_sdr.db.rls import set_tenant_context
 from ai_sdr.follow_up.duration import parse_duration
@@ -39,27 +39,24 @@ follow_ups_app = typer.Typer(help="Follow-up scheduler ops")
 console = Console()
 
 
-def _make_session():
+def _make_session() -> tuple[async_sessionmaker[AsyncSession], AsyncEngine]:
     engine = create_async_engine(get_settings().database_url, future=True)
     return async_sessionmaker(engine, expire_on_commit=False), engine
 
 
-async def _load_tenant(session, slug: str) -> Tenant:
-    t = (
-        await session.execute(select(Tenant).where(Tenant.slug == slug))
-    ).scalar_one_or_none()
+async def _load_tenant(session: AsyncSession, slug: str) -> Tenant:
+    t = (await session.execute(select(Tenant).where(Tenant.slug == slug))).scalar_one_or_none()
     if t is None:
         console.print(f"[red]tenant not found: {slug}[/red]")
         raise typer.Exit(1)
+    assert isinstance(t, Tenant)
     return t
 
 
 @follow_ups_app.command("list")
 def list_(
     tenant: Annotated[str, typer.Option("--tenant")],
-    lead: Annotated[
-        str | None, typer.Option("--lead", help="Filter to one lead UUID")
-    ] = None,
+    lead: Annotated[str | None, typer.Option("--lead", help="Filter to one lead UUID")] = None,
     status: Annotated[
         str,
         typer.Option(
@@ -71,9 +68,7 @@ def list_(
     asyncio.run(_list_async(tenant, lead, status))
 
 
-async def _list_async(
-    tenant_slug: str, lead_filter: str | None, status_filter: str
-) -> None:
+async def _list_async(tenant_slug: str, lead_filter: str | None, status_filter: str) -> None:
     sm, engine = _make_session()
     async with sm() as session:
         tenant = await _load_tenant(session, tenant_slug)
@@ -86,9 +81,7 @@ async def _list_async(
         rows = (await session.execute(stmt)).scalars().all()
 
         if not rows:
-            console.print(
-                f"[yellow]no follow-ups (status={status_filter!r})[/yellow]"
-            )
+            console.print(f"[yellow]no follow-ups (status={status_filter!r})[/yellow]")
             await engine.dispose()
             return
 
@@ -133,16 +126,13 @@ async def _cancel_async(tenant_slug: str, lead_id_str: str) -> None:
             .where(FollowUpJob.lead_id == lead_id, FollowUpJob.status == "pending")
             .values(status="cancelled", error_detail="manual cancel via CLI")
         )
-        n = result.rowcount or 0
+        n = result.rowcount or 0  # type: ignore[attr-defined]
         await session.commit()
         if n == 0:
-            console.print(
-                f"[yellow]no pending follow-ups for lead {lead_id_str}[/yellow]"
-            )
+            console.print(f"[yellow]no pending follow-ups for lead {lead_id_str}[/yellow]")
         else:
             console.print(
-                f"[green]cancelled {n} pending follow-up(s) for lead "
-                f"{lead_id_str}[/green]"
+                f"[green]cancelled {n} pending follow-up(s) for lead {lead_id_str}[/green]"
             )
     await engine.dispose()
 
@@ -156,9 +146,7 @@ def dry_run(
     asyncio.run(_dry_run_async(tenant, treeflow, lead))
 
 
-async def _dry_run_async(
-    tenant_slug: str, treeflow_id: str, lead_id_str: str
-) -> None:
+async def _dry_run_async(tenant_slug: str, treeflow_id: str, lead_id_str: str) -> None:
     sm, engine = _make_session()
     async with sm() as session:
         tenant = await _load_tenant(session, tenant_slug)
@@ -177,9 +165,7 @@ async def _dry_run_async(
             )
         ).scalar_one_or_none()
         if talkflow is None:
-            console.print(
-                f"[red]no TalkFlow for this lead in tenant {tenant_slug}[/red]"
-            )
+            console.print(f"[red]no TalkFlow for this lead in tenant {tenant_slug}[/red]")
             raise typer.Exit(1)
 
         tv = (
@@ -200,9 +186,7 @@ async def _dry_run_async(
         parsed = TreeFlow.model_validate(yaml.safe_load(tv.content_yaml))
         cfg = parsed.follow_up
         if cfg is None or not cfg.enabled:
-            console.print(
-                f"[yellow]TreeFlow {treeflow_id} has no follow_up enabled[/yellow]"
-            )
+            console.print(f"[yellow]TreeFlow {treeflow_id} has no follow_up enabled[/yellow]")
             await engine.dispose()
             return
 

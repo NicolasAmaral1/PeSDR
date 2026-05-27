@@ -34,15 +34,15 @@ async def cancel_pending_for_lead(
         .where(FollowUpJob.lead_id == lead_id, FollowUpJob.status == "pending")
         .values(status="cancelled", error_detail=reason)
     )
-    return result.rowcount or 0
+    return result.rowcount or 0  # type: ignore[attr-defined]
 
 
 async def schedule_next_followup(
     session: AsyncSession,
-    talkflow: "TalkFlow",
-    lead: "Lead",
-    tenant: "Tenant",
-    follow_up_config: "FollowUpConfig",
+    talkflow: TalkFlow,
+    lead: Lead,
+    tenant: Tenant,
+    follow_up_config: FollowUpConfig,
     *,
     next_attempt_number: int,
 ) -> FollowUpJob:
@@ -68,8 +68,8 @@ async def schedule_next_followup(
 
 
 def mark_cold_if_exhausted(
-    talkflow: "TalkFlow",
-    follow_up_config: "FollowUpConfig",
+    talkflow: TalkFlow,
+    follow_up_config: FollowUpConfig,
     last_attempt_number: int,
 ) -> bool:
     """Pure helper. If `last_attempt_number >= max_attempts`, sets

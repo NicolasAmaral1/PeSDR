@@ -68,15 +68,19 @@ async def follow_up_scanner(ctx: dict[str, Any]) -> None:
     for row in rows:
         try:
             await _fire_follow_up(
-                session_factory, registry, row.id, row.tenant_id, row.lead_id,
+                session_factory,
+                registry,
+                row.id,
+                row.tenant_id,
+                row.lead_id,
             )
         except Exception:
             log.exception("follow_up.scanner.job_failed", job_id=str(row.id))
 
 
 async def _fire_follow_up(
-    session_factory,
-    registry,
+    session_factory: Any,
+    registry: Any,
     job_id: uuid.UUID,
     tenant_id: uuid.UUID,
     lead_id: uuid.UUID,
@@ -88,9 +92,7 @@ async def _fire_follow_up(
     async with session_factory() as db:
         await set_tenant_context(db, tenant_id)
 
-        got = (
-            await db.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": lock_key})
-        ).scalar()
+        got = (await db.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": lock_key})).scalar()
         if not got:
             log.info("follow_up.lock_contention", lead_id=str(lead_id))
             return
@@ -110,10 +112,7 @@ async def _fire_follow_up(
                 return
 
             # Race-belt
-            if (
-                talkflow.last_lead_message_at
-                and talkflow.last_lead_message_at > job.scheduled_at
-            ):
+            if talkflow.last_lead_message_at and talkflow.last_lead_message_at > job.scheduled_at:
                 job.status = "cancelled"
                 job.error_detail = "lead responded after scheduling"
                 await db.commit()
@@ -143,7 +142,10 @@ async def _fire_follow_up(
                 return
 
             params = render_params(
-                step.params, lead=lead, tenant=tenant, collected={},
+                step.params,
+                lead=lead,
+                tenant=tenant,
+                collected={},
             )
             adapter = registry.get(tenant, "whatsapp_cloud")
 
@@ -198,7 +200,11 @@ async def _fire_follow_up(
                 )
             else:
                 await schedule_next_followup(
-                    db, talkflow, lead, tenant, tf_config,
+                    db,
+                    talkflow,
+                    lead,
+                    tenant,
+                    tf_config,
                     next_attempt_number=job.attempt_number + 1,
                 )
 

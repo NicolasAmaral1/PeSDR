@@ -14,10 +14,12 @@ def test_messaging_without_reengagement() -> None:
 
 
 def test_reengagement_template_minimal() -> None:
-    cfg = MessagingConfig.model_validate({
-        "provider": "fake",
-        "reengagement_template": {"template_ref": "reengagement_v1"},
-    })
+    cfg = MessagingConfig.model_validate(
+        {
+            "provider": "fake",
+            "reengagement_template": {"template_ref": "reengagement_v1"},
+        }
+    )
     assert cfg.reengagement_template is not None
     assert cfg.reengagement_template.template_ref == "reengagement_v1"
     assert cfg.reengagement_template.language == "pt_BR"
@@ -25,21 +27,25 @@ def test_reengagement_template_minimal() -> None:
 
 
 def test_reengagement_template_with_params() -> None:
-    cfg = MessagingConfig.model_validate({
-        "provider": "fake",
-        "reengagement_template": {
-            "template_ref": "reengagement_v1",
-            "language": "pt_BR",
-            "params": ["{{ collected.nome | default('amigo') }}"],
-        },
-    })
+    cfg = MessagingConfig.model_validate(
+        {
+            "provider": "fake",
+            "reengagement_template": {
+                "template_ref": "reengagement_v1",
+                "language": "pt_BR",
+                "params": ["{{ collected.nome | default('amigo') }}"],
+            },
+        }
+    )
     assert cfg.reengagement_template is not None
     assert cfg.reengagement_template.params == ["{{ collected.nome | default('amigo') }}"]
 
 
 def test_reengagement_template_ref_required() -> None:
     with pytest.raises(ValidationError):
-        MessagingConfig.model_validate({
-            "provider": "fake",
-            "reengagement_template": {"language": "pt_BR"},
-        })
+        MessagingConfig.model_validate(
+            {
+                "provider": "fake",
+                "reengagement_template": {"language": "pt_BR"},
+            }
+        )

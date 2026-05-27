@@ -51,9 +51,7 @@ follow_up:
 
 @pytest.fixture
 def session_factory():
-    return async_sessionmaker(
-        build_engine(get_settings().database_url), expire_on_commit=False
-    )
+    return async_sessionmaker(build_engine(get_settings().database_url), expire_on_commit=False)
 
 
 async def _seed_inactive_lead(db_session, *, talkflow_status="active"):
@@ -63,8 +61,11 @@ async def _seed_inactive_lead(db_session, *, talkflow_status="active"):
     await set_tenant_context(db_session, tenant.id)
 
     tv = TreeflowVersion(
-        tenant_id=tenant.id, treeflow_id="t1", version="1.0.0",
-        content_hash="x" * 64, content_yaml=_YAML_FOLLOWUP,
+        tenant_id=tenant.id,
+        treeflow_id="t1",
+        version="1.0.0",
+        content_hash="x" * 64,
+        content_yaml=_YAML_FOLLOWUP,
     )
     db_session.add(tv)
     await db_session.flush()
@@ -74,7 +75,9 @@ async def _seed_inactive_lead(db_session, *, talkflow_status="active"):
     await db_session.flush()
 
     tf = TalkFlow(
-        tenant_id=tenant.id, lead_id=lead.id, treeflow_version_id=tv.id,
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        treeflow_version_id=tv.id,
         thread_id=f"{tenant.id}:{uuid.uuid4()}",
         last_agent_message_at=datetime.now(UTC) - timedelta(hours=10),
         follow_up_attempt_number=2,
@@ -84,17 +87,28 @@ async def _seed_inactive_lead(db_session, *, talkflow_status="active"):
     await db_session.flush()
 
     # Pre-existing pending follow-up + a queued inbound (this triggers the worker)
-    db_session.add(FollowUpJob(
-        tenant_id=tenant.id, talkflow_id=tf.id, lead_id=lead.id,
-        attempt_number=3, scheduled_at=datetime.now(UTC) + timedelta(hours=10),
-        status="pending",
-    ))
-    db_session.add(InboundMessageRow(
-        tenant_id=tenant.id, provider="whatsapp_cloud",
-        external_id=f"wamid_{uuid.uuid4().hex}", lead_id=lead.id,
-        from_address="+5511999", text="estou de volta",
-        received_at=datetime.now(UTC), raw={},
-    ))
+    db_session.add(
+        FollowUpJob(
+            tenant_id=tenant.id,
+            talkflow_id=tf.id,
+            lead_id=lead.id,
+            attempt_number=3,
+            scheduled_at=datetime.now(UTC) + timedelta(hours=10),
+            status="pending",
+        )
+    )
+    db_session.add(
+        InboundMessageRow(
+            tenant_id=tenant.id,
+            provider="whatsapp_cloud",
+            external_id=f"wamid_{uuid.uuid4().hex}",
+            lead_id=lead.id,
+            from_address="+5511999",
+            text="estou de volta",
+            received_at=datetime.now(UTC),
+            raw={},
+        )
+    )
     await db_session.commit()
     return tenant, tf, lead
 
@@ -110,15 +124,14 @@ def _ctx(session_factory, adapter, runtime_response_text="oi"):
     return {"session_factory": session_factory, "adapter_registry": registry, "runtime": runtime}
 
 
-async def test_inbound_cancels_pending_and_resets_counter(
-    db_session, session_factory
-) -> None:
+async def test_inbound_cancels_pending_and_resets_counter(db_session, session_factory) -> None:
     tenant, tf, lead = await _seed_inactive_lead(db_session)
     adapter = FakeMessagingAdapter()
 
     await process_lead_inbox(
         _ctx(session_factory, adapter),
-        str(tenant.id), str(lead.id),
+        str(tenant.id),
+        str(lead.id),
     )
 
     await set_tenant_context(db_session, tenant.id)
@@ -128,11 +141,17 @@ async def test_inbound_cancels_pending_and_resets_counter(
     assert tf.last_lead_message_at is not None
 
     # Pre-existing pending -> cancelled
-    jobs = (await db_session.execute(
-        select(FollowUpJob)
-        .where(FollowUpJob.lead_id == lead.id)
-        .order_by(FollowUpJob.created_at.asc())
-    )).scalars().all()
+    jobs = (
+        (
+            await db_session.execute(
+                select(FollowUpJob)
+                .where(FollowUpJob.lead_id == lead.id)
+                .order_by(FollowUpJob.created_at.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
     pre_existing = jobs[0]
     assert pre_existing.status == "cancelled"
     assert pre_existing.error_detail == "lead responded"
@@ -144,15 +163,14 @@ async def test_inbound_cancels_pending_and_resets_counter(
     assert new_jobs[0].attempt_number == 1
 
 
-async def test_inbound_reactivates_cold_talkflow(
-    db_session, session_factory
-) -> None:
+async def test_inbound_reactivates_cold_talkflow(db_session, session_factory) -> None:
     tenant, tf, lead = await _seed_inactive_lead(db_session, talkflow_status="cold")
     adapter = FakeMessagingAdapter()
 
     await process_lead_inbox(
         _ctx(session_factory, adapter),
-        str(tenant.id), str(lead.id),
+        str(tenant.id),
+        str(lead.id),
     )
 
     await set_tenant_context(db_session, tenant.id)

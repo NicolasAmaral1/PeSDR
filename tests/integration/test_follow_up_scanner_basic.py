@@ -55,8 +55,11 @@ async def _seed(db_session) -> tuple[Tenant, TalkFlow, Lead]:
     await set_tenant_context(db_session, tenant.id)
 
     tv = TreeflowVersion(
-        tenant_id=tenant.id, treeflow_id="t1", version="1.0.0",
-        content_hash="x" * 64, content_yaml=_YAML,
+        tenant_id=tenant.id,
+        treeflow_id="t1",
+        version="1.0.0",
+        content_hash="x" * 64,
+        content_yaml=_YAML,
     )
     db_session.add(tv)
     await db_session.flush()
@@ -66,7 +69,9 @@ async def _seed(db_session) -> tuple[Tenant, TalkFlow, Lead]:
     await db_session.flush()
 
     tf = TalkFlow(
-        tenant_id=tenant.id, lead_id=lead.id, treeflow_version_id=tv.id,
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        treeflow_version_id=tv.id,
         thread_id=f"{tenant.id}:{uuid.uuid4()}",
         last_agent_message_at=datetime.now(UTC) - timedelta(hours=2),
     )
@@ -77,40 +82,55 @@ async def _seed(db_session) -> tuple[Tenant, TalkFlow, Lead]:
 
 @pytest.fixture
 def session_factory():
-    return async_sessionmaker(
-        build_engine(get_settings().database_url), expire_on_commit=False
-    )
+    return async_sessionmaker(build_engine(get_settings().database_url), expire_on_commit=False)
 
 
 async def test_scanner_fires_only_due_pending(db_session, session_factory) -> None:
     tenant, tf, lead = await _seed(db_session)
     await set_tenant_context(db_session, tenant.id)
     # 1 due + 1 future + 1 cancelled
-    db_session.add(FollowUpJob(
-        tenant_id=tenant.id, talkflow_id=tf.id, lead_id=lead.id,
-        attempt_number=1, scheduled_at=datetime.now(UTC) - timedelta(minutes=1),
-        status="pending",
-    ))
-    db_session.add(FollowUpJob(
-        tenant_id=tenant.id, talkflow_id=tf.id, lead_id=lead.id,
-        attempt_number=2, scheduled_at=datetime.now(UTC) + timedelta(hours=1),
-        status="pending",
-    ))
-    db_session.add(FollowUpJob(
-        tenant_id=tenant.id, talkflow_id=tf.id, lead_id=lead.id,
-        attempt_number=2, scheduled_at=datetime.now(UTC) - timedelta(minutes=5),
-        status="cancelled",
-    ))
+    db_session.add(
+        FollowUpJob(
+            tenant_id=tenant.id,
+            talkflow_id=tf.id,
+            lead_id=lead.id,
+            attempt_number=1,
+            scheduled_at=datetime.now(UTC) - timedelta(minutes=1),
+            status="pending",
+        )
+    )
+    db_session.add(
+        FollowUpJob(
+            tenant_id=tenant.id,
+            talkflow_id=tf.id,
+            lead_id=lead.id,
+            attempt_number=2,
+            scheduled_at=datetime.now(UTC) + timedelta(hours=1),
+            status="pending",
+        )
+    )
+    db_session.add(
+        FollowUpJob(
+            tenant_id=tenant.id,
+            talkflow_id=tf.id,
+            lead_id=lead.id,
+            attempt_number=2,
+            scheduled_at=datetime.now(UTC) - timedelta(minutes=5),
+            status="cancelled",
+        )
+    )
     await db_session.commit()
 
     adapter = FakeMessagingAdapter()
     registry = MagicMock()
     registry.get.return_value = adapter
 
-    await follow_up_scanner({
-        "session_factory": session_factory,
-        "adapter_registry": registry,
-    })
+    await follow_up_scanner(
+        {
+            "session_factory": session_factory,
+            "adapter_registry": registry,
+        }
+    )
 
     # Exactly one template sent (the due pending)
     assert len(adapter.sent_templates) == 1
@@ -119,14 +139,20 @@ async def test_scanner_fires_only_due_pending(db_session, session_factory) -> No
     # State updates
     await set_tenant_context(db_session, tenant.id)
     db_session.expire_all()
-    jobs = (await db_session.execute(
-        select(FollowUpJob)
-        .where(FollowUpJob.lead_id == lead.id)
-        .order_by(FollowUpJob.attempt_number, FollowUpJob.created_at)
-    )).scalars().all()
+    jobs = (
+        (
+            await db_session.execute(
+                select(FollowUpJob)
+                .where(FollowUpJob.lead_id == lead.id)
+                .order_by(FollowUpJob.attempt_number, FollowUpJob.created_at)
+            )
+        )
+        .scalars()
+        .all()
+    )
     completed = [j for j in jobs if j.status == "completed"]
     pending = [j for j in jobs if j.status == "pending"]
     cancelled = [j for j in jobs if j.status == "cancelled"]
     assert len(completed) == 1  # attempt 1 just fired
-    assert len(pending) == 2    # original future + newly-scheduled attempt 2
+    assert len(pending) == 2  # original future + newly-scheduled attempt 2
     assert len(cancelled) == 1  # untouched

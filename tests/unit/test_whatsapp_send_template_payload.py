@@ -33,9 +33,7 @@ def adapter_no_retry_sleep(monkeypatch) -> WhatsAppCloudAPIAdapter:
         "wa_app_secret": "as",
     }
     a = WhatsAppCloudAPIAdapter(cfg, secrets)
-    monkeypatch.setattr(
-        "ai_sdr.messaging.whatsapp_cloud._WAIT_STRATEGY", tenacity.wait_none()
-    )
+    monkeypatch.setattr("ai_sdr.messaging.whatsapp_cloud._WAIT_STRATEGY", tenacity.wait_none())
     return a
 
 
@@ -103,7 +101,10 @@ async def test_payload_shape_without_params(adapter_no_retry_sleep, monkeypatch)
         lambda: httpx.AsyncClient(transport=httpx.MockTransport(transport), timeout=15.0),
     )
     await adapter_no_retry_sleep.send_template(
-        to="+5511999", template_ref="x", language="pt_BR", params=[],
+        to="+5511999",
+        template_ref="x",
+        language="pt_BR",
+        params=[],
     )
     # When params is empty, components MUST be omitted (Meta API rejects empty components)
     assert "components" not in captured["body"]["template"]
@@ -130,5 +131,8 @@ async def test_classifies_errors_same_as_send_text(
     )
     with pytest.raises(expected_exc):
         await adapter_no_retry_sleep.send_template(
-            "+5511999", "x", "pt_BR", [],
+            "+5511999",
+            "x",
+            "pt_BR",
+            [],
         )

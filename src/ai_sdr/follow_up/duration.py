@@ -31,6 +31,5 @@ def parse_duration(s: str) -> timedelta:
     if isinstance(result, timedelta):
         return result
     raise ValueError(
-        f"month/year-relative durations not supported (got {s!r}); "
-        f"use weeks (P*W) or days (P*D)"
+        f"month/year-relative durations not supported (got {s!r}); use weeks (P*W) or days (P*D)"
     )
