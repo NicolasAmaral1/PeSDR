@@ -7,18 +7,23 @@ from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from arq.connections import ArqRedis
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ai_sdr.api.deps import db_session
+from ai_sdr.api.deps import arq_pool, db_session
 from ai_sdr.models.inbound_message import InboundMessageRow
 from ai_sdr.models.lead import Lead
 from ai_sdr.models.tenant import Tenant
 from ai_sdr.models.user import User
 from ai_sdr.models.user_tenant_access import UserTenantAccess
+from ai_sdr.secrets.sops_loader import SopsLoader
 from ai_sdr.settings import get_settings
+from ai_sdr.tenant_loader.loader import TenantLoader
+from ai_sdr.treeflow.loader import TreeFlowLoader
+from ai_sdr.treeflow.runtime import TalkFlowRuntime
 from ai_sdr.web.auth import require_tenant_access
 from ai_sdr.web.deps import templates
 
@@ -237,3 +242,57 @@ async def lead_detail_partial(
             "treeflows": treeflows,
         },
     )
+
+
+@router.post("/console/{tenant_slug}/leads/{lead_id}/assign", response_class=HTMLResponse)
+async def lead_assign(
+    request: Request,
+    lead_id: uuid.UUID,
+    treeflow_id: Annotated[str, Form()],
+    access: Annotated[tuple[Tenant, User], Depends(require_tenant_access)],
+    db: Annotated[AsyncSession, Depends(db_session)],
+    pool: Annotated[ArqRedis, Depends(arq_pool)],
+) -> HTMLResponse:
+    tenant, _user = access
+    lead = (
+        await db.execute(
+            select(Lead).where(Lead.id == lead_id, Lead.tenant_id == tenant.id)
+        )
+    ).scalar_one_or_none()
+    if lead is None:
+        raise HTTPException(status_code=404, detail="lead not found")
+    if lead.status != "pending_assignment":
+        raise HTTPException(
+            status_code=409,
+            detail=f"lead is {lead.status}, not pending_assignment",
+        )
+
+    tdir = Path(get_settings().tenants_dir)
+    runtime = TalkFlowRuntime(
+        tenant_loader=TenantLoader(tdir),
+        treeflow_loader=TreeFlowLoader(tdir),
+        sops_loader=SopsLoader(tdir),
+    )
+    _talkflow = await runtime.create(db, tenant, lead_id=lead.id, treeflow_id=treeflow_id)
+    lead.status = "active"
+    await db.commit()
+
+    await pool.enqueue_job("process_lead_inbox", str(tenant.id), str(lead.id))
+
+    # Render updated master list + OOB swap for detail panel as one response.
+    leads = await _list_pending_lead_rows(db, tenant.id)
+    leads_html = templates.get_template("_lead_card.html").render(
+        leads=leads,
+        current_tenant=tenant,
+        selected_lead_id=None,
+    )
+    empty_state_html = templates.get_template("_empty_state.html").render(
+        title="Nenhum lead selecionado",
+        subtitle="Clique em um lead à esquerda para ver detalhes.",
+    )
+    # HTMX OOB swap: the second fragment with hx-swap-oob replaces #lead-detail.
+    body = (
+        leads_html
+        + f'\n<div id="lead-detail" hx-swap-oob="innerHTML">{empty_state_html}</div>'
+    )
+    return HTMLResponse(content=body)

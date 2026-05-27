@@ -31,10 +31,7 @@
       {# initial render is empty; polling fires immediately via 'load' #}
     </div>
   </div>
-  <div id="lead-detail" class="detail"
-       hx-get=""
-       hx-trigger="leadAssigned from:body"
-       hx-swap="innerHTML">
+  <div id="lead-detail" class="detail">
     {% include "_empty_state.html" %}
   </div>
 </div>
