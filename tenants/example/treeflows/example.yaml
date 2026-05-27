@@ -1,5 +1,5 @@
 id: example
-version: 0.3.1
+version: 0.4.0
 display_name: "Funil Exemplo"
 
 global_objections:
@@ -160,3 +160,21 @@ nodes:
     next_nodes:
       - condition: "true"
         target: END
+
+# Plano 9: follow-up scheduler. enabled=false here so dev/sim runs don't
+# schedule jobs against unregistered Meta templates. Flip to true once
+# `followup_24h_v1` and `followup_72h_v1` are approved in Meta Business Manager.
+follow_up:
+  enabled: false
+  max_attempts: 2
+  sequence:
+    - after: "PT24H"
+      template_ref: "followup_24h_v1"
+      language: "pt_BR"
+      params:
+        - "{{ collected.nome | default('amigo') }}"
+    - after: "P3D"
+      template_ref: "followup_72h_v1"
+      language: "pt_BR"
+      params:
+        - "{{ collected.nome | default('amigo') }}"
