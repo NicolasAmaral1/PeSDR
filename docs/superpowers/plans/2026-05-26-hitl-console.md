@@ -3126,7 +3126,7 @@ async def test_full_flow(app, seeded, isolated_tenants_dir, monkeypatch) -> None
         )
         assert list_partial.status_code == 200
         assert "+55 11 98888-7777" in list_partial.text
-        assert "queried sobre a mentoria" in list_partial.text or "queria" in list_partial.text
+        assert "queria saber sobre a mentoria" in list_partial.text
 
         # 4. Detail partial
         detail = await client.get(
@@ -3151,14 +3151,8 @@ async def test_full_flow(app, seeded, isolated_tenants_dir, monkeypatch) -> None
         assert 'id="lead-detail"' in assign.text
         assert "hx-swap-oob" in assign.text
 
-    # 6. Verify DB state
-    from ai_sdr.db.rls import set_tenant_context
-
-    await set_tenant_context(seeded.get("db_session") or app.state and __import__("pytest").skip("need session"), tenant.id) if False else None
-
-    # We don't have a direct session here; re-fetch via app session — simplest skip.
-    # The fact that the list partial removed the lead is the functional confirmation.
-
+    # 6. Verify side-effects (DB state confirmed indirectly by the list
+    # partial no longer including the lead; the arq job confirms enqueue).
     assert len(enqueued) == 1
     assert enqueued[0][0] == "process_lead_inbox"
 ```
