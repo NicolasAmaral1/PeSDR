@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +18,7 @@ from ai_sdr.models.lead import Lead
 from ai_sdr.models.tenant import Tenant
 from ai_sdr.models.user import User
 from ai_sdr.models.user_tenant_access import UserTenantAccess
+from ai_sdr.settings import get_settings
 from ai_sdr.web.auth import require_tenant_access
 from ai_sdr.web.deps import templates
 
@@ -159,5 +161,79 @@ async def leads_list_partial(
             "leads": leads,
             "current_tenant": tenant,
             "selected_lead_id": selected_lead_id,
+        },
+    )
+
+
+@router.get("/console/{tenant_slug}/leads/{lead_id}/detail", response_class=HTMLResponse)
+async def lead_detail_partial(
+    request: Request,
+    lead_id: uuid.UUID,
+    access: Annotated[tuple[Tenant, User], Depends(require_tenant_access)],
+    db: Annotated[AsyncSession, Depends(db_session)],
+) -> HTMLResponse:
+    tenant, _user = access
+    lead = (
+        await db.execute(select(Lead).where(Lead.id == lead_id, Lead.tenant_id == tenant.id))
+    ).scalar_one_or_none()
+    if lead is None:
+        raise HTTPException(status_code=404, detail="lead not found in this tenant")
+    if lead.status != "pending_assignment":
+        # Lead might have been just assigned by another operator — render
+        # an empty-state hint instead of a stale detail panel.
+        subtitle = "Outro operador pode ter atribuído enquanto você olhava. Selecione outro lead."
+        return templates.TemplateResponse(
+            request,
+            "_empty_state.html",
+            {
+                "title": "Lead já foi atribuído",
+                "subtitle": subtitle,
+            },
+        )
+
+    messages = (
+        (
+            await db.execute(
+                select(InboundMessageRow)
+                .where(
+                    InboundMessageRow.lead_id == lead.id,
+                    InboundMessageRow.status == "queued",
+                )
+                .order_by(InboundMessageRow.received_at.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    # Enumerate available treeflows by scanning tenants/<slug>/treeflows/*.yaml
+    tenants_dir = Path(get_settings().tenants_dir)
+    treeflow_dir = tenants_dir / tenant.slug / "treeflows"
+    treeflows = sorted(p.stem for p in treeflow_dir.glob("*.yaml")) if treeflow_dir.is_dir() else []
+
+    lead_ctx = {
+        "id": lead.id,
+        "id_short": str(lead.id)[:8] + "…",
+        "display_label": _format_lead_display(lead),
+        "created_at_short": _format_time_short(lead.created_at),
+        "provider": "whatsapp_cloud" if lead.whatsapp_e164 else None,
+        "status": lead.status,
+    }
+    message_ctx = [
+        {
+            "received_at_short": _format_time_short(m.received_at),
+            "text": m.text,
+        }
+        for m in messages
+    ]
+
+    return templates.TemplateResponse(
+        request,
+        "_lead_detail.html",
+        {
+            "lead": lead_ctx,
+            "messages": message_ctx,
+            "current_tenant": tenant,
+            "treeflows": treeflows,
         },
     )
