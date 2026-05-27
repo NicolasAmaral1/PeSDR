@@ -28,6 +28,12 @@ from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_sdr.db.rls import set_tenant_context
+from ai_sdr.follow_up.duration import parse_duration
+from ai_sdr.follow_up.scheduler import (
+    cancel_pending_for_lead,
+    schedule_next_followup,
+)
+from ai_sdr.follow_up.treeflow_loader import load_treeflow_follow_up
 from ai_sdr.messaging.errors import (
     AuthError,
     MessagingError,
@@ -138,6 +144,16 @@ async def process_lead_inbox(ctx: dict[str, Any], tenant_id: str, lead_id: str) 
 
             adapter = registry.get(tenant, "whatsapp_cloud")
 
+            # P9: lead responded — cancel pending follow-ups, reset counter,
+            # reactivate cold talkflow.
+            cancelled = await cancel_pending_for_lead(db, lead.id, reason="lead responded")
+            if cancelled:
+                log.info("follow_up.cancelled_on_inbound", lead_id=str(lead.id), n=cancelled)
+            talkflow.follow_up_attempt_number = 0
+            if talkflow.status == "cold":
+                talkflow.status = "active"
+                log.info("follow_up.cold_reactivated", talkflow_id=str(talkflow.id))
+
             while True:
                 msg = await _fetch_next_queued(db, lead.id)
                 if msg is None:
@@ -155,6 +171,23 @@ async def process_lead_inbox(ctx: dict[str, Any], tenant_id: str, lead_id: str) 
                         msg_id=str(msg.id),
                         sent_external_id=send_result.external_id,
                     )
+                    # P9: agent just spoke — update timestamps + schedule next follow-up.
+                    talkflow.last_agent_message_at = datetime.now(UTC)
+                    talkflow.last_lead_message_at = msg.received_at
+                    tf_config = await load_treeflow_follow_up(db, talkflow)
+                    if tf_config and tf_config.enabled and tf_config.sequence:
+                        await schedule_next_followup(
+                            db, talkflow, lead, tenant, tf_config,
+                            next_attempt_number=1,
+                        )
+                        log.info(
+                            "follow_up.first_scheduled",
+                            lead_id=str(lead.id),
+                            at=(
+                                datetime.now(UTC)
+                                + parse_duration(tf_config.sequence[0].after)
+                            ).isoformat(),
+                        )
                 except RecipientUnreachable as e:
                     lead.status = "unreachable"
                     lead.unreachable_reason = f"unreachable: {e}"
