@@ -8,6 +8,7 @@ from ai_sdr.models.talkflow import TalkFlow
 from ai_sdr.models.tenant import Tenant
 from ai_sdr.models.treeflow_version import TreeflowVersion
 from ai_sdr.models.user import User
+from ai_sdr.models.user_tenant_access import UserTenantAccess
 
 __all__ = [
     "InboundMessageRow",
@@ -18,4 +19,5 @@ __all__ = [
     "Tenant",
     "TreeflowVersion",
     "User",
+    "UserTenantAccess",
 ]
