@@ -14,6 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_sdr.api.deps import arq_pool, db_session
+from ai_sdr.db.rls import set_tenant_context
 from ai_sdr.models.inbound_message import InboundMessageRow
 from ai_sdr.models.lead import Lead
 from ai_sdr.models.tenant import Tenant
@@ -277,6 +278,9 @@ async def lead_assign(
 
     await pool.enqueue_job("process_lead_inbox", str(tenant.id), str(lead.id))
 
+    # commit() ended the transaction → set_local tenant context was lost.
+    # Re-set so the master-list query passes the RLS policy on `leads`.
+    await set_tenant_context(db, tenant.id)
     # Render updated master list + OOB swap for detail panel as one response.
     leads = await _list_pending_lead_rows(db, tenant.id)
     leads_html = templates.get_template("_lead_card.html").render(
