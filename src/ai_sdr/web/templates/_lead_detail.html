@@ -1,43 +1,191 @@
+<style>
+  .detail-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+  }
+  .detail-title {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--text);
+  }
+  .detail-id {
+    font-size: 11px;
+    color: var(--text-subtle);
+    font-family: var(--mono);
+  }
+  .detail-meta {
+    font-size: 12px;
+    color: var(--text-subtle);
+    margin: 6px 0 24px 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+  .detail-meta .dot {
+    width: 3px;
+    height: 3px;
+    border-radius: 50%;
+    background: #d1d5db;
+    display: inline-block;
+  }
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.6;
+    font-family: var(--mono);
+  }
+  .pill-provider {
+    background: #f3f4f6;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+  }
+  .pill-status {
+    background: #fef2f2;
+    color: #b91c1c;
+    border: 1px solid #fecaca;
+    font-family: inherit;
+  }
+  .section-label {
+    font-size: 11px;
+    color: var(--text-subtle);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  .messages-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 4px 0;
+    margin-bottom: 24px;
+  }
+  .message-row {
+    padding: 10px 14px;
+    font-size: 13px;
+    color: var(--text);
+    line-height: 1.5;
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+  }
+  .message-row + .message-row { border-top: 1px solid #f3f4f6; }
+  .message-time {
+    color: var(--text-faint);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    padding-top: 1px;
+    min-width: 56px;
+  }
+  .messages-empty {
+    padding: 12px 14px;
+    font-size: 13px;
+    color: var(--text-faint);
+    font-style: italic;
+  }
+  .assign-form {
+    display: flex;
+    gap: 8px;
+  }
+  .assign-form select {
+    flex: 1;
+    padding: 9px 12px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
+    font-size: 13px;
+    background: var(--surface);
+    color: var(--text);
+    font-family: inherit;
+    transition: border-color 120ms ease, box-shadow 120ms ease;
+  }
+  .assign-form select:hover { border-color: #9ca3af; }
+  .assign-form select:focus-visible {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18);
+  }
+  .btn-primary {
+    padding: 0 18px;
+    background: var(--primary);
+    color: white;
+    border: 1px solid var(--primary);
+    border-radius: var(--radius-md);
+    font-size: 13px;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+  }
+  .btn-primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
+  .btn-primary:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.35);
+  }
+  .btn-primary:active { background: #1e40af; }
+  .btn-primary:disabled { background: #9ca3af; border-color: #9ca3af; cursor: not-allowed; }
+  .assign-hint {
+    font-size: 12px;
+    color: var(--text-subtle);
+    margin-top: 10px;
+    line-height: 1.5;
+  }
+  .assign-hint code {
+    background: #f3f4f6;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+  }
+</style>
 <div>
-  <div style="display: flex; justify-content: space-between; align-items: baseline;">
-    <h3 style="margin: 0; font-size: 18px;">{{ lead.display_label }}</h3>
-    <span style="font-size: 11px; color: #6b7280; font-family: monospace;">id: {{ lead.id_short }}</span>
+  <div class="detail-header">
+    <h3 class="detail-title">{{ lead.display_label }}</h3>
+    <span class="detail-id">id: {{ lead.id_short }}</span>
   </div>
-  <div style="font-size: 12px; color: #6b7280; margin: 4px 0 18px 0;">
-    Criado às {{ lead.created_at_short }}
-    {% if lead.provider %}via <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px;font-size:10px">{{ lead.provider }}</code>{% endif %}
-    • <span style="color:#dc2626;font-weight:500">{{ lead.status }}</span>
+  <div class="detail-meta">
+    <span>Criado às {{ lead.created_at_short }}</span>
+    {% if lead.provider %}<span class="dot"></span><span class="pill pill-provider">{{ lead.provider }}</span>{% endif %}
+    <span class="dot"></span><span class="pill pill-status">{{ lead.status }}</span>
   </div>
 
-  <div style="font-size: 10px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; margin-bottom: 8px;">
-    Mensagens em fila ({{ messages | length }})
-  </div>
-  <div style="background: white; border: 1px solid #e5e7eb; border-radius: 6px; padding: 8px; margin-bottom: 18px;">
+  <div class="section-label">Mensagens em fila ({{ messages | length }})</div>
+  <div class="messages-box">
     {% if messages %}
       {% for m in messages %}
-        <div style="padding: 8px 10px; {% if not loop.last %}border-bottom: 1px solid #f3f4f6;{% endif %} font-size: 12px;">
-          <span style="color:#6b7280; font-size:10px; margin-right:6px">{{ m.received_at_short }}</span>
-          {{ m.text }}
+        <div class="message-row">
+          <span class="message-time">{{ m.received_at_short }}</span>
+          <span>{{ m.text }}</span>
         </div>
       {% endfor %}
     {% else %}
-      <div style="padding: 8px 10px; font-size:12px; color:#9ca3af;">(nenhuma mensagem em fila)</div>
+      <div class="messages-empty">(nenhuma mensagem em fila)</div>
     {% endif %}
   </div>
 
-  <div style="font-size: 10px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; margin-bottom: 8px;">
-    Atribuir treeflow
-  </div>
-  <form hx-post="/console/{{ current_tenant.slug }}/leads/{{ lead.id }}/assign"
+  <div class="section-label">Atribuir treeflow</div>
+  <form class="assign-form"
+        hx-post="/console/{{ current_tenant.slug }}/leads/{{ lead.id }}/assign"
         hx-target="#leads-list"
-        hx-swap="innerHTML"
-        style="display: flex; gap: 8px;">
-    <select name="treeflow_id" required style="flex: 1; padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; background: white;">
+        hx-swap="innerHTML">
+    <label for="treeflow_id" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0;">Treeflow</label>
+    <select id="treeflow_id" name="treeflow_id" required>
       {% for tf in treeflows %}<option value="{{ tf }}">{{ tf }}</option>{% endfor %}
     </select>
-    <button type="submit" style="padding: 0 18px; background: #3b82f6; color: white; border: none; border-radius: 4px; font-size: 13px; font-weight: 500; cursor: pointer;">Atribuir e iniciar →</button>
+    <button type="submit" class="btn-primary">Atribuir e iniciar &rarr;</button>
   </form>
-  <div style="font-size: 11px; color: #6b7280; margin-top: 8px; line-height: 1.5;">
-    Ao atribuir, o lead vira <code style="background:#f3f4f6;padding:1px 4px;border-radius:3px;font-size:10px">active</code> e o worker dispara o replay das {{ messages | length }} mensage{{ 'ns' if messages | length != 1 else 'm' }} em fila.
+  <div class="assign-hint">
+    Ao atribuir, o lead vira <code>active</code> e o worker dispara o replay das {{ messages | length }} mensage{{ 'ns' if messages | length != 1 else 'm' }} em fila.
   </div>
 </div>

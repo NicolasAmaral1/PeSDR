@@ -10,7 +10,7 @@
         <div class="lead-card-time">{{ lead.created_at_short }}</div>
       </div>
       <div class="lead-card-sub">{{ lead.queued_count }} mensage{{ 'ns' if lead.queued_count != 1 else 'm' }} em fila</div>
-      {% if lead.preview %}<div class="lead-card-preview">"{{ lead.preview }}"</div>{% endif %}
+      {% if lead.preview %}<div class="lead-card-preview">&ldquo;{{ lead.preview }}&rdquo;</div>{% endif %}
     </div>
   {% endfor %}
 {% else %}
