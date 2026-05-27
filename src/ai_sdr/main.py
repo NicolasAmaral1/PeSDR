@@ -19,6 +19,7 @@ from ai_sdr.secrets.sops_loader import SopsLoader
 from ai_sdr.settings import Settings, get_settings
 from ai_sdr.tenant_loader.loader import TenantLoader
 from ai_sdr.treeflow.checkpointer import ensure_checkpointer_schema
+from ai_sdr.web.login import router as console_login_router
 
 
 def _validate_console_secret_key_if_needed(settings: Settings) -> None:
@@ -82,6 +83,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(leads_router)
     app.include_router(webhooks_router)
+    app.include_router(console_login_router)
     return app
 
 
