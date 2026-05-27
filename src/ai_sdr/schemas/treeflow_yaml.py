@@ -61,18 +61,53 @@ class Transition(BaseModel):
 
 
 class FollowUpStep(BaseModel):
+    """One attempt in a TreeFlow's follow-up sequence.
+
+    `after` is an ISO-8601 duration ("PT24H", "P3D", "P1W"). `template_ref` is the
+    name of a Meta-registered HSM template; `params` are Jinja strings rendered at
+    fire time against `collected`/`lead`/`tenant`.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
-    after: str = Field(pattern=r"^\d+(s|m|h|d)$")  # e.g. "24h", "30m", "7d"
-    template: str = Field(min_length=1)
+    after: str  # ISO-8601 duration
+    template_ref: str = Field(min_length=1)
+    language: str = "pt_BR"
+    params: list[str] = Field(default_factory=list)
+
+    @field_validator("after")
+    @classmethod
+    def _check_iso_duration(cls, v: str) -> str:
+        from ai_sdr.follow_up.duration import parse_duration
+
+        try:
+            parse_duration(v)
+        except Exception as e:
+            raise ValueError(f"invalid ISO-8601 duration {v!r}: {e}") from e
+        return v
 
 
 class FollowUpConfig(BaseModel):
+    """TreeFlow-level follow-up declaration.
+
+    `enabled` + `sequence` (with `template_ref`s pointing to Meta-registered HSM
+    templates) + `max_attempts`. See spec §5 + §6.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
-    enabled: bool = True
+    enabled: bool = False
     max_attempts: int = Field(default=3, ge=1, le=10)
     sequence: list[FollowUpStep] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _check_sequence_length(self) -> FollowUpConfig:
+        if self.enabled and len(self.sequence) < self.max_attempts:
+            raise ValueError(
+                f"follow_up.sequence has {len(self.sequence)} entries but "
+                f"max_attempts={self.max_attempts} — need at least max_attempts entries"
+            )
+        return self
 
 
 class GlobalObjection(BaseModel):
