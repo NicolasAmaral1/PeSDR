@@ -1,5 +1,6 @@
 """SQLAlchemy models. Each model is re-exported here so alembic can discover them."""
 
+from ai_sdr.models.follow_up_job import FollowUpJob
 from ai_sdr.models.inbound_message import InboundMessageRow
 from ai_sdr.models.kb_chunk import KbChunk
 from ai_sdr.models.kb_document import KbDocument
@@ -9,6 +10,7 @@ from ai_sdr.models.tenant import Tenant
 from ai_sdr.models.treeflow_version import TreeflowVersion
 
 __all__ = [
+    "FollowUpJob",
     "InboundMessageRow",
     "KbChunk",
     "KbDocument",
