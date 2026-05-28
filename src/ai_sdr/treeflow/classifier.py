@@ -3,7 +3,7 @@ message raised one of the declared objections (Plan 4a, spec §4.4)."""
 
 from __future__ import annotations
 
-from typing import cast
+from typing import Any, cast
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
@@ -63,10 +63,15 @@ async def classify(
     conversation: list[BaseMessage],
     previously_handled: list[str],
     history_window: int,
+    trace_metadata: dict[str, Any] | None = None,
 ) -> ClassifierResult:
     """Single LLM call. Returns ClassifierResult(objection_id=None) if list empty.
 
     Raises whatever the LLM raises — callers are expected to catch and degrade.
+
+    `trace_metadata`, when provided, is attached to the underlying
+    ``ainvoke`` call as ``config={"metadata": ...}`` so LangSmith can
+    filter/group sub-traces by tenant/talkflow/lead/node + trace_origin.
     """
     if not objections:
         return ClassifierResult(objection_id=None, confidence=0.0)
@@ -81,4 +86,9 @@ async def classify(
 
     messages: list[BaseMessage] = [SystemMessage(content=system_text), *history]
     structured = llm.with_structured_output(ClassifierResult)
+    if trace_metadata:
+        return cast(
+            ClassifierResult,
+            await structured.ainvoke(messages, config={"metadata": trace_metadata}),
+        )
     return cast(ClassifierResult, await structured.ainvoke(messages))
