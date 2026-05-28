@@ -185,9 +185,7 @@ class TalkFlowRuntime:
             )
         ).scalar_one()
 
-        lead = (
-            await session.execute(select(Lead).where(Lead.id == talkflow.lead_id))
-        ).scalar_one()
+        lead = (await session.execute(select(Lead).where(Lead.id == talkflow.lead_id))).scalar_one()
 
         tf = TreeFlow.model_validate(yaml.safe_load(version.content_yaml))
         tenant_cfg = self._tenants.load(tenant.slug)

@@ -27,7 +27,10 @@ async def test_list_shows_recent_outbound(db_session) -> None:
     await db_session.flush()
     await set_tenant_context(db_session, tenant.id)
     tv = TreeflowVersion(
-        tenant_id=tenant.id, treeflow_id="t1", version="1.0.0", content_hash="x"*64,
+        tenant_id=tenant.id,
+        treeflow_id="t1",
+        version="1.0.0",
+        content_hash="x" * 64,
         content_yaml="id: t1\nversion: 1.0.0\nentry_node: n1\nnodes: {n1: {prompt: hi}}\n",
     )
     db_session.add(tv)
@@ -36,27 +39,45 @@ async def test_list_shows_recent_outbound(db_session) -> None:
     db_session.add(lead)
     await db_session.flush()
     tf = TalkFlow(
-        tenant_id=tenant.id, lead_id=lead.id, treeflow_version_id=tv.id,
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        treeflow_version_id=tv.id,
         thread_id=f"{tenant.id}:{uuid.uuid4()}",
     )
     db_session.add(tf)
     await db_session.flush()
 
     # 1 sent text + 1 failed template
-    db_session.add(OutboundMessage(
-        tenant_id=tenant.id, talkflow_id=tf.id, lead_id=lead.id,
-        provider="whatsapp_cloud", message_type="text", body_text="Olá",
-        status="sent", external_id="wamid.A", triggered_by="inbound",
-        sent_at=datetime.now(UTC),
-    ))
-    db_session.add(OutboundMessage(
-        tenant_id=tenant.id, talkflow_id=tf.id, lead_id=lead.id,
-        provider="whatsapp_cloud", message_type="template",
-        template_ref="t1", template_language="pt_BR", template_params=["x"],
-        status="failed", error_detail="AuthError: bad token",
-        triggered_by="follow_up_scanner",
-        sent_at=datetime.now(UTC),
-    ))
+    db_session.add(
+        OutboundMessage(
+            tenant_id=tenant.id,
+            talkflow_id=tf.id,
+            lead_id=lead.id,
+            provider="whatsapp_cloud",
+            message_type="text",
+            body_text="Olá",
+            status="sent",
+            external_id="wamid.A",
+            triggered_by="inbound",
+            sent_at=datetime.now(UTC),
+        )
+    )
+    db_session.add(
+        OutboundMessage(
+            tenant_id=tenant.id,
+            talkflow_id=tf.id,
+            lead_id=lead.id,
+            provider="whatsapp_cloud",
+            message_type="template",
+            template_ref="t1",
+            template_language="pt_BR",
+            template_params=["x"],
+            status="failed",
+            error_detail="AuthError: bad token",
+            triggered_by="follow_up_scanner",
+            sent_at=datetime.now(UTC),
+        )
+    )
     await db_session.commit()
 
     r = runner.invoke(app, ["outbound", "list", "--tenant", tenant.slug])
@@ -75,7 +96,10 @@ async def test_list_filter_status_failed(db_session) -> None:
     await db_session.flush()
     await set_tenant_context(db_session, tenant.id)
     tv = TreeflowVersion(
-        tenant_id=tenant.id, treeflow_id="t1", version="1.0.0", content_hash="x"*64,
+        tenant_id=tenant.id,
+        treeflow_id="t1",
+        version="1.0.0",
+        content_hash="x" * 64,
         content_yaml="id: t1\nversion: 1.0.0\nentry_node: n1\nnodes: {n1: {prompt: hi}}\n",
     )
     db_session.add(tv)
@@ -84,17 +108,27 @@ async def test_list_filter_status_failed(db_session) -> None:
     db_session.add(lead)
     await db_session.flush()
     tf = TalkFlow(
-        tenant_id=tenant.id, lead_id=lead.id, treeflow_version_id=tv.id,
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        treeflow_version_id=tv.id,
         thread_id=f"{tenant.id}:{uuid.uuid4()}",
     )
     db_session.add(tf)
     await db_session.flush()
-    db_session.add(OutboundMessage(
-        tenant_id=tenant.id, talkflow_id=tf.id, lead_id=lead.id,
-        provider="whatsapp_cloud", message_type="text", body_text="OK",
-        status="sent", external_id="wamid.X", triggered_by="inbound",
-        sent_at=datetime.now(UTC),
-    ))
+    db_session.add(
+        OutboundMessage(
+            tenant_id=tenant.id,
+            talkflow_id=tf.id,
+            lead_id=lead.id,
+            provider="whatsapp_cloud",
+            message_type="text",
+            body_text="OK",
+            status="sent",
+            external_id="wamid.X",
+            triggered_by="inbound",
+            sent_at=datetime.now(UTC),
+        )
+    )
     await db_session.commit()
 
     r = runner.invoke(app, ["outbound", "list", "--tenant", tenant.slug, "--status", "failed"])

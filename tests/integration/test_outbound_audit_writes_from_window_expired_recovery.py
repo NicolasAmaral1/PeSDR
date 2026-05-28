@@ -62,6 +62,7 @@ async def test_window_expired_writes_failed_text_and_sent_template(
     db_session, isolated_tenants_dir, session_factory, monkeypatch
 ) -> None:
     from ai_sdr.settings import get_settings as _gs
+
     monkeypatch.setattr(_gs(), "tenants_dir", str(isolated_tenants_dir))
 
     tenant = Tenant(slug=f"wer_{uuid.uuid4().hex[:6]}", display_name="WER")
@@ -75,7 +76,10 @@ async def test_window_expired_writes_failed_text_and_sent_template(
 
     await set_tenant_context(db_session, tenant.id)
     tv = TreeflowVersion(
-        tenant_id=tenant.id, treeflow_id="t1", version="1.0.0", content_hash="x" * 64,
+        tenant_id=tenant.id,
+        treeflow_id="t1",
+        version="1.0.0",
+        content_hash="x" * 64,
         content_yaml="id: t1\nversion: 1.0.0\nentry_node: n1\nnodes: {n1: {prompt: hi}}\n",
     )
     db_session.add(tv)
@@ -84,16 +88,22 @@ async def test_window_expired_writes_failed_text_and_sent_template(
     db_session.add(lead)
     await db_session.flush()
     tf = TalkFlow(
-        tenant_id=tenant.id, lead_id=lead.id, treeflow_version_id=tv.id,
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        treeflow_version_id=tv.id,
         thread_id=f"{tenant.id}:{uuid.uuid4()}",
     )
     db_session.add(tf)
     await db_session.flush()
     inbound = InboundMessageRow(
-        tenant_id=tenant.id, provider="whatsapp_cloud",
-        external_id=f"wamid_{uuid.uuid4().hex}", lead_id=lead.id,
-        from_address="+5511999", text="oi",
-        received_at=datetime.now(UTC), raw={},
+        tenant_id=tenant.id,
+        provider="whatsapp_cloud",
+        external_id=f"wamid_{uuid.uuid4().hex}",
+        lead_id=lead.id,
+        from_address="+5511999",
+        text="oi",
+        received_at=datetime.now(UTC),
+        raw={},
     )
     db_session.add(inbound)
     await db_session.commit()
@@ -102,24 +112,33 @@ async def test_window_expired_writes_failed_text_and_sent_template(
     adapter.fail_next_send(WindowExpiredError("24h expired"))
 
     runtime = MagicMock()
+
     async def step_stub(*a, **kw):
         return MagicMock(response_text="Olá")
+
     runtime.step = step_stub
     registry = MagicMock()
     registry.get.return_value = adapter
 
     await process_lead_inbox(
         {"session_factory": session_factory, "adapter_registry": registry, "runtime": runtime},
-        str(tenant.id), str(lead.id),
+        str(tenant.id),
+        str(lead.id),
     )
 
     await set_tenant_context(db_session, tenant.id)
     db_session.expire_all()
-    rows = (await db_session.execute(
-        select(OutboundMessage)
-        .where(OutboundMessage.lead_id == lead.id)
-        .order_by(OutboundMessage.sent_at.asc())
-    )).scalars().all()
+    rows = (
+        (
+            await db_session.execute(
+                select(OutboundMessage)
+                .where(OutboundMessage.lead_id == lead.id)
+                .order_by(OutboundMessage.sent_at.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
 
     # Expect 2 rows: the failed text + the successful template recovery
     assert len(rows) == 2

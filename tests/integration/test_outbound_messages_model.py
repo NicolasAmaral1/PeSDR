@@ -26,7 +26,9 @@ async def _seed(db_session) -> tuple[Tenant, TalkFlow, Lead]:
     await set_tenant_context(db_session, tenant.id)
 
     tv = TreeflowVersion(
-        tenant_id=tenant.id, treeflow_id="t1", version="1.0.0",
+        tenant_id=tenant.id,
+        treeflow_id="t1",
+        version="1.0.0",
         content_hash="x" * 64,
         content_yaml="id: t1\nversion: 1.0.0\nentry_node: n1\nnodes: {n1: {prompt: hi}}\n",
     )
@@ -38,7 +40,9 @@ async def _seed(db_session) -> tuple[Tenant, TalkFlow, Lead]:
     await db_session.flush()
 
     tf = TalkFlow(
-        tenant_id=tenant.id, lead_id=lead.id, treeflow_version_id=tv.id,
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        treeflow_version_id=tv.id,
         thread_id=f"{tenant.id}:{uuid.uuid4()}",
     )
     db_session.add(tf)
@@ -50,7 +54,9 @@ async def test_create_text_message(db_session) -> None:
     tenant, tf, lead = await _seed(db_session)
     await set_tenant_context(db_session, tenant.id)
     row = OutboundMessage(
-        tenant_id=tenant.id, talkflow_id=tf.id, lead_id=lead.id,
+        tenant_id=tenant.id,
+        talkflow_id=tf.id,
+        lead_id=lead.id,
         provider="whatsapp_cloud",
         message_type="text",
         body_text="Olá",
@@ -69,7 +75,9 @@ async def test_create_template_message(db_session) -> None:
     tenant, tf, lead = await _seed(db_session)
     await set_tenant_context(db_session, tenant.id)
     row = OutboundMessage(
-        tenant_id=tenant.id, talkflow_id=tf.id, lead_id=lead.id,
+        tenant_id=tenant.id,
+        talkflow_id=tf.id,
+        lead_id=lead.id,
         provider="whatsapp_cloud",
         message_type="template",
         template_ref="followup_24h_v1",
@@ -88,16 +96,20 @@ async def test_create_template_message(db_session) -> None:
 async def test_xor_check_text_with_template_ref_fails(db_session) -> None:
     tenant, tf, lead = await _seed(db_session)
     await set_tenant_context(db_session, tenant.id)
-    db_session.add(OutboundMessage(
-        tenant_id=tenant.id, talkflow_id=tf.id, lead_id=lead.id,
-        provider="whatsapp_cloud",
-        message_type="text",
-        body_text="Olá",
-        template_ref="should_not_be_here",
-        status="sent",
-        triggered_by="inbound",
-        sent_at=datetime.now(UTC),
-    ))
+    db_session.add(
+        OutboundMessage(
+            tenant_id=tenant.id,
+            talkflow_id=tf.id,
+            lead_id=lead.id,
+            provider="whatsapp_cloud",
+            message_type="text",
+            body_text="Olá",
+            template_ref="should_not_be_here",
+            status="sent",
+            triggered_by="inbound",
+            sent_at=datetime.now(UTC),
+        )
+    )
     with pytest.raises(IntegrityError):  # ck_outbound_body_consistency
         await db_session.commit()
     await db_session.rollback()
@@ -106,15 +118,19 @@ async def test_xor_check_text_with_template_ref_fails(db_session) -> None:
 async def test_xor_check_template_missing_ref_fails(db_session) -> None:
     tenant, tf, lead = await _seed(db_session)
     await set_tenant_context(db_session, tenant.id)
-    db_session.add(OutboundMessage(
-        tenant_id=tenant.id, talkflow_id=tf.id, lead_id=lead.id,
-        provider="whatsapp_cloud",
-        message_type="template",
-        # no template_ref — must fail
-        status="sent",
-        triggered_by="follow_up_scanner",
-        sent_at=datetime.now(UTC),
-    ))
+    db_session.add(
+        OutboundMessage(
+            tenant_id=tenant.id,
+            talkflow_id=tf.id,
+            lead_id=lead.id,
+            provider="whatsapp_cloud",
+            message_type="template",
+            # no template_ref — must fail
+            status="sent",
+            triggered_by="follow_up_scanner",
+            sent_at=datetime.now(UTC),
+        )
+    )
     with pytest.raises(IntegrityError):
         await db_session.commit()
     await db_session.rollback()
@@ -123,15 +139,19 @@ async def test_xor_check_template_missing_ref_fails(db_session) -> None:
 async def test_triggered_by_enum_rejects_invalid(db_session) -> None:
     tenant, tf, lead = await _seed(db_session)
     await set_tenant_context(db_session, tenant.id)
-    db_session.add(OutboundMessage(
-        tenant_id=tenant.id, talkflow_id=tf.id, lead_id=lead.id,
-        provider="whatsapp_cloud",
-        message_type="text",
-        body_text="x",
-        status="sent",
-        triggered_by="manual_takeover",  # not yet a valid enum value
-        sent_at=datetime.now(UTC),
-    ))
+    db_session.add(
+        OutboundMessage(
+            tenant_id=tenant.id,
+            talkflow_id=tf.id,
+            lead_id=lead.id,
+            provider="whatsapp_cloud",
+            message_type="text",
+            body_text="x",
+            status="sent",
+            triggered_by="manual_takeover",  # not yet a valid enum value
+            sent_at=datetime.now(UTC),
+        )
+    )
     with pytest.raises(IntegrityError):
         await db_session.commit()
     await db_session.rollback()
@@ -140,15 +160,19 @@ async def test_triggered_by_enum_rejects_invalid(db_session) -> None:
 async def test_rls_blocks_cross_tenant_read(db_session) -> None:
     tenant_a, tf_a, lead_a = await _seed(db_session)
     await set_tenant_context(db_session, tenant_a.id)
-    db_session.add(OutboundMessage(
-        tenant_id=tenant_a.id, talkflow_id=tf_a.id, lead_id=lead_a.id,
-        provider="whatsapp_cloud",
-        message_type="text",
-        body_text="visible only to tenant A",
-        status="sent",
-        triggered_by="inbound",
-        sent_at=datetime.now(UTC),
-    ))
+    db_session.add(
+        OutboundMessage(
+            tenant_id=tenant_a.id,
+            talkflow_id=tf_a.id,
+            lead_id=lead_a.id,
+            provider="whatsapp_cloud",
+            message_type="text",
+            body_text="visible only to tenant A",
+            status="sent",
+            triggered_by="inbound",
+            sent_at=datetime.now(UTC),
+        )
+    )
     await db_session.commit()
 
     tenant_b = Tenant(slug=f"b_{uuid.uuid4().hex[:6]}", display_name="B")
@@ -162,15 +186,19 @@ async def test_rls_blocks_cross_tenant_read(db_session) -> None:
 async def test_lead_cascade_delete_removes_outbound(db_session) -> None:
     tenant, tf, lead = await _seed(db_session)
     await set_tenant_context(db_session, tenant.id)
-    db_session.add(OutboundMessage(
-        tenant_id=tenant.id, talkflow_id=tf.id, lead_id=lead.id,
-        provider="whatsapp_cloud",
-        message_type="text",
-        body_text="bye",
-        status="sent",
-        triggered_by="inbound",
-        sent_at=datetime.now(UTC),
-    ))
+    db_session.add(
+        OutboundMessage(
+            tenant_id=tenant.id,
+            talkflow_id=tf.id,
+            lead_id=lead.id,
+            provider="whatsapp_cloud",
+            message_type="text",
+            body_text="bye",
+            status="sent",
+            triggered_by="inbound",
+            sent_at=datetime.now(UTC),
+        )
+    )
     await db_session.commit()
 
     await db_session.delete(lead)

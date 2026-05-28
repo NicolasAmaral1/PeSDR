@@ -100,9 +100,7 @@ async def critic_pass(
         HumanMessage(content=user_block),
     ]
     if trace_metadata:
-        result: Verdict = await runnable.ainvoke(
-            messages, config={"metadata": trace_metadata}
-        )
+        result: Verdict = await runnable.ainvoke(messages, config={"metadata": trace_metadata})
     else:
         result = await runnable.ainvoke(messages)
     return result

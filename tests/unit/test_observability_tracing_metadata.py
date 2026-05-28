@@ -39,8 +39,11 @@ def test_full_metadata() -> None:
     tf = _talkflow()
     lead_obj = _lead()
     m = build_trace_metadata(
-        tenant=t, talkflow=tf, lead=lead_obj,
-        node="qualificacao", turn_index=3,
+        tenant=t,
+        talkflow=tf,
+        lead=lead_obj,
+        node="qualificacao",
+        turn_index=3,
         trace_origin="guardrails_critic",
     )
     assert m["trace_origin"] == "guardrails_critic"
@@ -54,7 +57,8 @@ def test_full_metadata() -> None:
 
 def test_omits_missing_fields() -> None:
     m = build_trace_metadata(
-        tenant=_tenant(), trace_origin="objection_classifier",
+        tenant=_tenant(),
+        trace_origin="objection_classifier",
     )
     # only tenant + trace_origin keys; no talkflow_id / lead_id / node / turn_index
     assert set(m.keys()) == {"trace_origin", "tenant_id", "tenant_slug"}
@@ -67,15 +71,18 @@ def test_turn_index_zero_is_included() -> None:
     assert m["turn_index"] == 0
 
 
-@pytest.mark.parametrize("origin", [
-    "process_lead_inbox",
-    "follow_up_scanner",
-    "window_expired_recovery",
-    "simulate",
-    "objection_classifier",
-    "guardrails_critic",
-    "field_extractor",
-])
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "process_lead_inbox",
+        "follow_up_scanner",
+        "window_expired_recovery",
+        "simulate",
+        "objection_classifier",
+        "guardrails_critic",
+        "field_extractor",
+    ],
+)
 def test_accepts_all_documented_origins(origin) -> None:
     m = build_trace_metadata(trace_origin=origin)
     assert m["trace_origin"] == origin

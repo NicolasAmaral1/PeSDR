@@ -37,7 +37,9 @@ async def _seed(db_session) -> tuple[Tenant, TalkFlow, Lead, InboundMessageRow]:
     await set_tenant_context(db_session, tenant.id)
 
     tv = TreeflowVersion(
-        tenant_id=tenant.id, treeflow_id="t1", version="1.0.0",
+        tenant_id=tenant.id,
+        treeflow_id="t1",
+        version="1.0.0",
         content_hash="x" * 64,
         content_yaml="id: t1\nversion: 1.0.0\nentry_node: n1\nnodes: {n1: {prompt: hi}}\n",
     )
@@ -49,46 +51,59 @@ async def _seed(db_session) -> tuple[Tenant, TalkFlow, Lead, InboundMessageRow]:
     await db_session.flush()
 
     tf = TalkFlow(
-        tenant_id=tenant.id, lead_id=lead.id, treeflow_version_id=tv.id,
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        treeflow_version_id=tv.id,
         thread_id=f"{tenant.id}:{uuid.uuid4()}",
     )
     db_session.add(tf)
     await db_session.flush()
 
     inbound = InboundMessageRow(
-        tenant_id=tenant.id, provider="whatsapp_cloud",
-        external_id=f"wamid_{uuid.uuid4().hex}", lead_id=lead.id,
-        from_address="+5511999", text="oi",
-        received_at=datetime.now(UTC), raw={},
+        tenant_id=tenant.id,
+        provider="whatsapp_cloud",
+        external_id=f"wamid_{uuid.uuid4().hex}",
+        lead_id=lead.id,
+        from_address="+5511999",
+        text="oi",
+        received_at=datetime.now(UTC),
+        raw={},
     )
     db_session.add(inbound)
     await db_session.commit()
     return tenant, tf, lead, inbound
 
 
-async def test_send_text_success_writes_outbound_row(
-    db_session, session_factory
-) -> None:
+async def test_send_text_success_writes_outbound_row(db_session, session_factory) -> None:
     tenant, tf, lead, inbound = await _seed(db_session)
 
     adapter = FakeMessagingAdapter()
     runtime = MagicMock()
+
     async def step_stub(*a, **kw):
         return MagicMock(response_text="Olá! Como posso ajudar?")
+
     runtime.step = step_stub
     registry = MagicMock()
     registry.get.return_value = adapter
 
     await process_lead_inbox(
         {"session_factory": session_factory, "adapter_registry": registry, "runtime": runtime},
-        str(tenant.id), str(lead.id),
+        str(tenant.id),
+        str(lead.id),
     )
 
     await set_tenant_context(db_session, tenant.id)
     db_session.expire_all()
-    rows = (await db_session.execute(
-        select(OutboundMessage).where(OutboundMessage.lead_id == lead.id)
-    )).scalars().all()
+    rows = (
+        (
+            await db_session.execute(
+                select(OutboundMessage).where(OutboundMessage.lead_id == lead.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert len(rows) == 1
     row = rows[0]
     assert row.status == "sent"

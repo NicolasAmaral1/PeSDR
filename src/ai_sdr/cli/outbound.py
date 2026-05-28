@@ -45,16 +45,12 @@ def _truncate(s: str | None, n: int) -> str:
 @outbound_app.command("list")
 def list_(
     tenant: Annotated[str, typer.Option("--tenant", help="Tenant slug (required)")],
-    lead: Annotated[
-        str | None, typer.Option("--lead", help="Filter by lead UUID")
-    ] = None,
+    lead: Annotated[str | None, typer.Option("--lead", help="Filter by lead UUID")] = None,
     status: Annotated[
         str,
         typer.Option("--status", help="Filter: sent | failed | all (default all)"),
     ] = "all",
-    limit: Annotated[
-        int, typer.Option("--limit", help="Max rows to display (default 50)")
-    ] = 50,
+    limit: Annotated[int, typer.Option("--limit", help="Max rows to display (default 50)")] = 50,
 ) -> None:
     """List outbound messages for a tenant, ordered by most recent first."""
     asyncio.run(_list_async(tenant, lead, status, limit))

@@ -36,7 +36,9 @@ async def test_record_sent_text_fills_body_only() -> None:
     db = _stub_session()
     row = await record_outbound_sent(
         db,
-        tenant=_tenant(), talkflow=_talkflow(), lead=_lead(),
+        tenant=_tenant(),
+        talkflow=_talkflow(),
+        lead=_lead(),
         provider="whatsapp_cloud",
         message_type="text",
         triggered_by="inbound",
@@ -61,7 +63,9 @@ async def test_record_sent_template_fills_template_only() -> None:
     db = _stub_session()
     row = await record_outbound_sent(
         db,
-        tenant=_tenant(), talkflow=_talkflow(), lead=_lead(),
+        tenant=_tenant(),
+        talkflow=_talkflow(),
+        lead=_lead(),
         provider="whatsapp_cloud",
         message_type="template",
         triggered_by="follow_up_scanner",
@@ -84,7 +88,9 @@ async def test_record_failed_carries_error_detail() -> None:
     db = _stub_session()
     row = await record_outbound_failed(
         db,
-        tenant=_tenant(), talkflow=_talkflow(), lead=_lead(),
+        tenant=_tenant(),
+        talkflow=_talkflow(),
+        lead=_lead(),
         provider="whatsapp_cloud",
         message_type="text",
         triggered_by="inbound",
@@ -102,7 +108,9 @@ async def test_record_failed_template_carries_template_fields() -> None:
     db = _stub_session()
     row = await record_outbound_failed(
         db,
-        tenant=_tenant(), talkflow=_talkflow(), lead=_lead(),
+        tenant=_tenant(),
+        talkflow=_talkflow(),
+        lead=_lead(),
         provider="whatsapp_cloud",
         message_type="template",
         triggered_by="follow_up_scanner",

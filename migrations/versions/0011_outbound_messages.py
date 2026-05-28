@@ -27,23 +27,18 @@ def upgrade() -> None:
         sa.Column("tenant_id", UUID(as_uuid=True), nullable=False),
         sa.Column("talkflow_id", UUID(as_uuid=True), nullable=False),
         sa.Column("lead_id", UUID(as_uuid=True), nullable=False),
-
         sa.Column("provider", sa.Text(), nullable=False),
         sa.Column("message_type", sa.Text(), nullable=False),
-
         sa.Column("body_text", sa.Text(), nullable=True),
         sa.Column("template_ref", sa.Text(), nullable=True),
         sa.Column("template_language", sa.Text(), nullable=True),
         sa.Column("template_params", JSONB(), nullable=True),
-
         sa.Column("status", sa.Text(), nullable=False),
         sa.Column("external_id", sa.Text(), nullable=True),
         sa.Column("error_detail", sa.Text(), nullable=True),
-
         sa.Column("triggered_by", sa.Text(), nullable=False),
         sa.Column("inbound_message_id", UUID(as_uuid=True), nullable=True),
         sa.Column("follow_up_job_id", UUID(as_uuid=True), nullable=True),
-
         sa.Column("sent_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column(
             "created_at",
@@ -51,7 +46,6 @@ def upgrade() -> None:
             server_default=sa.text("now()"),
             nullable=False,
         ),
-
         sa.PrimaryKeyConstraint("id"),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["talkflow_id"], ["talkflows.id"], ondelete="CASCADE"),
@@ -59,9 +53,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(
             ["inbound_message_id"], ["inbound_messages.id"], ondelete="SET NULL"
         ),
-        sa.ForeignKeyConstraint(
-            ["follow_up_job_id"], ["follow_up_jobs.id"], ondelete="SET NULL"
-        ),
+        sa.ForeignKeyConstraint(["follow_up_job_id"], ["follow_up_jobs.id"], ondelete="SET NULL"),
         sa.CheckConstraint(
             "message_type IN ('text', 'template')",
             name="ck_outbound_message_type",

@@ -46,17 +46,18 @@ def session_factory():
     return async_sessionmaker(build_engine(get_settings().database_url), expire_on_commit=False)
 
 
-async def test_scanner_send_template_writes_outbound_row(
-    db_session, session_factory
-) -> None:
+async def test_scanner_send_template_writes_outbound_row(db_session, session_factory) -> None:
     tenant = Tenant(slug=f"sa_{uuid.uuid4().hex[:6]}", display_name="SA")
     db_session.add(tenant)
     await db_session.flush()
     await set_tenant_context(db_session, tenant.id)
 
     tv = TreeflowVersion(
-        tenant_id=tenant.id, treeflow_id="t1", version="1.0.0",
-        content_hash="x" * 64, content_yaml=_YAML,
+        tenant_id=tenant.id,
+        treeflow_id="t1",
+        version="1.0.0",
+        content_hash="x" * 64,
+        content_yaml=_YAML,
     )
     db_session.add(tv)
     await db_session.flush()
@@ -66,7 +67,9 @@ async def test_scanner_send_template_writes_outbound_row(
     await db_session.flush()
 
     tf = TalkFlow(
-        tenant_id=tenant.id, lead_id=lead.id, treeflow_version_id=tv.id,
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        treeflow_version_id=tv.id,
         thread_id=f"{tenant.id}:{uuid.uuid4()}",
         last_agent_message_at=datetime.now(UTC) - timedelta(hours=2),
     )
@@ -74,7 +77,9 @@ async def test_scanner_send_template_writes_outbound_row(
     await db_session.flush()
 
     job = FollowUpJob(
-        tenant_id=tenant.id, talkflow_id=tf.id, lead_id=lead.id,
+        tenant_id=tenant.id,
+        talkflow_id=tf.id,
+        lead_id=lead.id,
         attempt_number=1,
         scheduled_at=datetime.now(UTC) - timedelta(minutes=1),
         status="pending",
@@ -86,16 +91,24 @@ async def test_scanner_send_template_writes_outbound_row(
     registry = MagicMock()
     registry.get.return_value = adapter
 
-    await follow_up_scanner({
-        "session_factory": session_factory,
-        "adapter_registry": registry,
-    })
+    await follow_up_scanner(
+        {
+            "session_factory": session_factory,
+            "adapter_registry": registry,
+        }
+    )
 
     await set_tenant_context(db_session, tenant.id)
     db_session.expire_all()
-    rows = (await db_session.execute(
-        select(OutboundMessage).where(OutboundMessage.lead_id == lead.id)
-    )).scalars().all()
+    rows = (
+        (
+            await db_session.execute(
+                select(OutboundMessage).where(OutboundMessage.lead_id == lead.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert len(rows) == 1
     row = rows[0]
     assert row.status == "sent"
