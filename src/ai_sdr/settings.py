@@ -24,6 +24,12 @@ class Settings(BaseSettings):
     tenants_dir: str = "tenants"
     sops_age_key_file: str
 
+    # LangSmith tracing — opt-in. langchain-core reads env vars directly;
+    # these fields exist so main.py startup validator can warn on misconfig.
+    langchain_tracing_v2: bool = False
+    langsmith_api_key: str | None = None
+    langchain_project: str = "pesdr-dev"
+
 
 _settings: Settings | None = None
 
