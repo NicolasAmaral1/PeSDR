@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from ai_sdr.db.rls import set_tenant_context
 from ai_sdr.models.lead import Lead
@@ -97,7 +98,7 @@ async def test_xor_check_text_with_template_ref_fails(db_session) -> None:
         triggered_by="inbound",
         sent_at=datetime.now(UTC),
     ))
-    with pytest.raises(Exception):  # ck_outbound_body_consistency
+    with pytest.raises(IntegrityError):  # ck_outbound_body_consistency
         await db_session.commit()
     await db_session.rollback()
 
@@ -114,7 +115,7 @@ async def test_xor_check_template_missing_ref_fails(db_session) -> None:
         triggered_by="follow_up_scanner",
         sent_at=datetime.now(UTC),
     ))
-    with pytest.raises(Exception):
+    with pytest.raises(IntegrityError):
         await db_session.commit()
     await db_session.rollback()
 
@@ -131,7 +132,7 @@ async def test_triggered_by_enum_rejects_invalid(db_session) -> None:
         triggered_by="manual_takeover",  # not yet a valid enum value
         sent_at=datetime.now(UTC),
     ))
-    with pytest.raises(Exception):
+    with pytest.raises(IntegrityError):
         await db_session.commit()
     await db_session.rollback()
 
