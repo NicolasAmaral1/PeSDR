@@ -7,8 +7,6 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
-
 from ai_sdr.observability.outbound_audit import (
     record_outbound_failed,
     record_outbound_sent,
