@@ -204,6 +204,78 @@ class WhatsAppCloudAPIAdapter(MessagingAdapter):
 
         raise RuntimeError("unreachable: tenacity exhausted without raising")
 
+    async def send_template(
+        self,
+        to: str,
+        template_ref: str,
+        language: str,
+        params: list[str],
+    ) -> SendResult:
+        url = f"https://graph.facebook.com/{self._api_version}/{self._phone_number_id}/messages"
+        template_block: dict[str, object] = {
+            "name": template_ref,
+            "language": {"code": language},
+        }
+        if params:
+            template_block["components"] = [
+                {
+                    "type": "body",
+                    "parameters": [{"type": "text", "text": p} for p in params],
+                }
+            ]
+        body = {
+            "messaging_product": "whatsapp",
+            "to": to.lstrip("+"),
+            "type": "template",
+            "template": template_block,
+        }
+        request_headers = {"Authorization": f"Bearer {self._access_token}"}
+
+        retryer = tenacity.AsyncRetrying(
+            stop=tenacity.stop_after_attempt(_MAX_ATTEMPTS),
+            wait=_WAIT_STRATEGY,
+            retry=tenacity.retry_if_exception_type(TransientError),
+            reraise=True,
+        )
+
+        log.info("wa.send_template.start", to=to, template_ref=template_ref)
+        async for attempt in retryer:
+            with attempt:
+                async with _build_http_client() as client:
+                    response = await client.post(url, json=body, headers=request_headers)
+                if response.status_code == 200:
+                    data = response.json()
+                    out_id = data["messages"][0]["id"]
+                    log.info(
+                        "wa.send_template.success",
+                        to=to,
+                        template_ref=template_ref,
+                        external_id=out_id,
+                        attempt=attempt.retry_state.attempt_number,
+                    )
+                    return SendResult(
+                        external_id=out_id,
+                        sent_at_iso=datetime.now(dt.UTC).isoformat(),
+                    )
+                try:
+                    err_body = response.json().get("error")
+                except Exception:
+                    err_body = None
+                retry_after_hdr = response.headers.get("Retry-After")
+                retry_after_s = int(retry_after_hdr) if retry_after_hdr else None
+                exc = _classify_error(response.status_code, err_body, retry_after_s)
+                log.warning(
+                    "wa.send_template.error",
+                    to=to,
+                    template_ref=template_ref,
+                    status=response.status_code,
+                    err_type=type(exc).__name__,
+                    err=str(exc),
+                )
+                raise exc
+
+        raise RuntimeError("unreachable: tenacity exhausted without raising")
+
 
 # Replace the placeholder builder registered in Task 12.
 # We re-register here; the factory's _REGISTRY mutates.

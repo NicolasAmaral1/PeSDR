@@ -28,9 +28,7 @@ pytestmark = pytest.mark.integration
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "whatsapp"
 
 
-async def test_end_to_end_webhook_assign_worker_reply(
-    app, db_session
-) -> None:
+async def test_end_to_end_webhook_assign_worker_reply(app, db_session) -> None:
     # --- 1. Set up tenant + treeflow + a registry that returns a FakeAdapter ---
     tenant = Tenant(slug=f"e2e_{uuid.uuid4().hex[:6]}", display_name="E2E")
     db_session.add(tenant)
@@ -38,7 +36,9 @@ async def test_end_to_end_webhook_assign_worker_reply(
     # treeflow_versions has RLS — set context before inserting.
     await set_tenant_context(db_session, tenant.id)
     tv = TreeflowVersion(
-        tenant_id=tenant.id, treeflow_id="mentoria", version="1.0.0",
+        tenant_id=tenant.id,
+        treeflow_id="mentoria",
+        version="1.0.0",
         content_hash="x" * 64,
         content_yaml="id: mentoria\nversion: 1.0.0\nentry_node: n1\nnodes: {n1: {prompt: hi}}\n",
     )
@@ -51,6 +51,7 @@ async def test_end_to_end_webhook_assign_worker_reply(
     # a FakeMessagingAdapter so we don't hit the real Graph API.
     from ai_sdr.messaging.whatsapp_cloud import WhatsAppCloudAPIAdapter
     from ai_sdr.schemas.tenant_yaml import MessagingConfig
+
     cfg = MessagingConfig(
         provider="whatsapp_cloud",
         phone_number_id_ref="secrets/wa_phone_id",
@@ -59,8 +60,10 @@ async def test_end_to_end_webhook_assign_worker_reply(
         app_secret_ref="secrets/wa_app_secret",
     )
     secrets = {
-        "wa_phone_id": "999", "wa_token": "EAA",
-        "wa_verify": "vt", "wa_app_secret": "appsecret_e2e",
+        "wa_phone_id": "999",
+        "wa_token": "EAA",
+        "wa_verify": "vt",
+        "wa_app_secret": "appsecret_e2e",
     }
     wa_adapter = WhatsAppCloudAPIAdapter(cfg, secrets)
 
@@ -69,17 +72,21 @@ async def test_end_to_end_webhook_assign_worker_reply(
     class HybridAdapter:
         """For inbound, behave like WhatsApp (HMAC + parser). For send_text,
         delegate to the FakeMessagingAdapter so we don't network out."""
+
         async def handle_inbound(self, body, headers):
             return await wa_adapter.handle_inbound(body, headers)
+
         async def send_text(self, to, text):
             return await fake_for_send.send_text(to, text)
+
         def verification_challenge(self, params):
             return wa_adapter.verification_challenge(params)
 
     hybrid = HybridAdapter()
 
     class StaticRegistry:
-        def get(self, tenant, provider): return hybrid
+        def get(self, tenant, provider):
+            return hybrid
 
     app.state.adapter_registry = StaticRegistry()
 
@@ -98,12 +105,11 @@ async def test_end_to_end_webhook_assign_worker_reply(
     # --- 2. POST a signed inbound webhook ---
     body = (FIXTURES / "inbound_text.json").read_bytes()
     sig = "sha256=" + hmac.new(b"appsecret_e2e", body, hashlib.sha256).hexdigest()
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         r = await client.post(
             f"/webhooks/{tenant.slug}/whatsapp_cloud",
-            content=body, headers={"x-hub-signature-256": sig},
+            content=body,
+            headers={"x-hub-signature-256": sig},
         )
     assert r.status_code == 200
 
@@ -135,9 +141,7 @@ async def test_end_to_end_webhook_assign_worker_reply(
     assert fake_for_send.sent_messages == []
 
     # --- 4. Operator assigns ---
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         r = await client.post(
             f"/tenants/{tenant_slug}/leads/{lead_id_str}/assign",
             json={"treeflow_id": "mentoria"},

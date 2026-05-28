@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import json
 from pathlib import Path
 
 import httpx
@@ -18,7 +17,6 @@ from ai_sdr.messaging.errors import (
     AuthError,
     RecipientUnreachable,
     SignatureError,
-    TransientError,
 )
 from ai_sdr.messaging.fake import FakeMessagingAdapter
 from ai_sdr.messaging.whatsapp_cloud import WhatsAppCloudAPIAdapter
@@ -38,14 +36,15 @@ def _build_whatsapp_mocked(monkeypatch) -> tuple[MessagingAdapter, dict]:
         app_secret_ref="secrets/wa_app_secret",
     )
     secrets = {
-        "wa_phone_id": "999", "wa_token": "EAA",
-        "wa_verify": "vt", "wa_app_secret": "appsecret",
+        "wa_phone_id": "999",
+        "wa_token": "EAA",
+        "wa_verify": "vt",
+        "wa_app_secret": "appsecret",
     }
     adapter = WhatsAppCloudAPIAdapter(cfg, secrets)
     import tenacity
-    monkeypatch.setattr(
-        "ai_sdr.messaging.whatsapp_cloud._WAIT_STRATEGY", tenacity.wait_none()
-    )
+
+    monkeypatch.setattr("ai_sdr.messaging.whatsapp_cloud._WAIT_STRATEGY", tenacity.wait_none())
     helpers = {
         "app_secret": "appsecret",
         "build_inbound_body": lambda: (FIXTURES / "inbound_text.json").read_bytes(),
@@ -85,9 +84,8 @@ def _sign(body: bytes, secret: str | None) -> dict:
     if secret is None:
         return {}
     return {
-        "x-hub-signature-256": "sha256=" + hmac.new(
-            secret.encode(), body, hashlib.sha256
-        ).hexdigest()
+        "x-hub-signature-256": "sha256="
+        + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
     }
 
 
@@ -111,23 +109,17 @@ async def test_handle_inbound_raises_signature_error_on_tampered_payload(
         pytest.skip("fake adapter does not enforce HMAC")
     body = helpers["build_inbound_body"]()
     with pytest.raises(SignatureError):
-        await adapter.handle_inbound(
-            body, headers={"x-hub-signature-256": "sha256=" + "0" * 64}
-        )
+        await adapter.handle_inbound(body, headers={"x-hub-signature-256": "sha256=" + "0" * 64})
 
 
-async def test_send_text_returns_external_id(
-    adapter_under_test, monkeypatch
-) -> None:
+async def test_send_text_returns_external_id(adapter_under_test, monkeypatch) -> None:
     adapter, helpers = adapter_under_test
     if isinstance(adapter, WhatsAppCloudAPIAdapter):
         monkeypatch.setattr(
             "ai_sdr.messaging.whatsapp_cloud._build_http_client",
             lambda: httpx.AsyncClient(
                 transport=httpx.MockTransport(
-                    lambda req: httpx.Response(
-                        200, json={"messages": [{"id": "wamid.OUT_X="}]}
-                    )
+                    lambda req: httpx.Response(200, json={"messages": [{"id": "wamid.OUT_X="}]})
                 ),
                 timeout=15.0,
             ),
@@ -137,9 +129,7 @@ async def test_send_text_returns_external_id(
     assert r.external_id
 
 
-async def test_send_text_raises_recipient_unreachable(
-    adapter_under_test, monkeypatch
-) -> None:
+async def test_send_text_raises_recipient_unreachable(adapter_under_test, monkeypatch) -> None:
     adapter, helpers = adapter_under_test
     if isinstance(adapter, FakeMessagingAdapter):
         adapter.fail_next_send(RecipientUnreachable("number not on WA"))
@@ -165,3 +155,77 @@ def test_verification_challenge_signature(adapter_under_test) -> None:
     adapter, _ = adapter_under_test
     out = adapter.verification_challenge({})
     assert out is None or isinstance(out, str)
+
+
+async def test_send_template_returns_external_id(adapter_under_test, monkeypatch) -> None:
+    adapter, helpers = adapter_under_test
+    if isinstance(adapter, WhatsAppCloudAPIAdapter):
+        monkeypatch.setattr(
+            "ai_sdr.messaging.whatsapp_cloud._build_http_client",
+            lambda: httpx.AsyncClient(
+                transport=httpx.MockTransport(
+                    lambda req: httpx.Response(
+                        200,
+                        json={"messages": [{"id": "wamid.TPL_OUT="}]},
+                    )
+                ),
+                timeout=15.0,
+            ),
+        )
+    r = await adapter.send_template(
+        to=helpers["expected_from_address"],
+        template_ref="any_template_v1",
+        language="pt_BR",
+        params=["x"],
+    )
+    assert isinstance(r, SendResult)
+    assert r.external_id
+
+
+async def test_send_template_raises_recipient_unreachable(adapter_under_test, monkeypatch) -> None:
+    adapter, helpers = adapter_under_test
+    if isinstance(adapter, FakeMessagingAdapter):
+        adapter.fail_next_template_send(RecipientUnreachable("not on WA"))
+    else:
+        monkeypatch.setattr(
+            "ai_sdr.messaging.whatsapp_cloud._build_http_client",
+            lambda: httpx.AsyncClient(
+                transport=httpx.MockTransport(
+                    lambda req: httpx.Response(
+                        400,
+                        json={"error": {"code": 131026, "message": "not on WA"}},
+                    )
+                ),
+                timeout=15.0,
+            ),
+        )
+    with pytest.raises(RecipientUnreachable):
+        await adapter.send_template(
+            to=helpers["expected_from_address"],
+            template_ref="x",
+            language="pt_BR",
+            params=[],
+        )
+
+
+async def test_send_template_raises_auth_error_on_401(adapter_under_test, monkeypatch) -> None:
+    adapter, helpers = adapter_under_test
+    if isinstance(adapter, FakeMessagingAdapter):
+        adapter.fail_next_template_send(AuthError("bad token"))
+    else:
+        monkeypatch.setattr(
+            "ai_sdr.messaging.whatsapp_cloud._build_http_client",
+            lambda: httpx.AsyncClient(
+                transport=httpx.MockTransport(
+                    lambda req: httpx.Response(401, json={"error": {"code": 190}})
+                ),
+                timeout=15.0,
+            ),
+        )
+    with pytest.raises(AuthError):
+        await adapter.send_template(
+            to=helpers["expected_from_address"],
+            template_ref="x",
+            language="pt_BR",
+            params=[],
+        )
