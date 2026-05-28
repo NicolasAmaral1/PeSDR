@@ -6,6 +6,7 @@ import typer
 
 from ai_sdr.cli.follow_ups import follow_ups_app
 from ai_sdr.cli.leads import leads_app
+from ai_sdr.cli.outbound import outbound_app
 from ai_sdr.cli.reindex_kb import reindex_kb_app
 from ai_sdr.cli.simulate import simulate
 from ai_sdr.cli.worker import worker
@@ -15,6 +16,7 @@ app.command(name="simulate")(simulate)
 app.add_typer(reindex_kb_app, name="reindex-kb")
 app.add_typer(leads_app, name="leads")
 app.add_typer(follow_ups_app, name="follow-ups")
+app.add_typer(outbound_app, name="outbound")
 app.command(name="worker")(worker)
 
 
