@@ -28,10 +28,6 @@ def _validate_langsmith_config(settings) -> None:
     if not settings.langchain_tracing_v2:
         return
     if not settings.langsmith_api_key:
-        import logging
-
-        import structlog
-
         structlog.get_logger().warning(
             "langsmith.misconfigured",
             reason=(
@@ -41,15 +37,6 @@ def _validate_langsmith_config(settings) -> None:
                 "(from https://smith.langchain.com → API Keys)."
             ),
             project=settings.langchain_project,
-        )
-        # Also emit via stdlib logging so test fixtures (caplog) and operators
-        # using stdlib-based log aggregation see the misconfiguration. structlog
-        # with PrintLoggerFactory bypasses stdlib, so this is needed.
-        logging.getLogger(__name__).warning(
-            "langsmith.misconfigured: LANGCHAIN_TRACING_V2=true but "
-            "LANGSMITH_API_KEY is unset — langchain will silently no-op "
-            "tracing (project=%s)",
-            settings.langchain_project,
         )
 
 

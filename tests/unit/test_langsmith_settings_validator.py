@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-import logging
 from unittest.mock import MagicMock
 
+import pytest
+
+from ai_sdr.logging_setup import configure_logging
 from ai_sdr.main import _validate_langsmith_config
 
 
@@ -20,14 +22,20 @@ def test_passes_when_tracing_disabled() -> None:
     _validate_langsmith_config(_settings(tracing=False))  # no raise, no warn
 
 
-def test_passes_when_tracing_enabled_with_api_key(caplog) -> None:
-    caplog.set_level(logging.WARNING)
+def test_passes_when_tracing_enabled_with_api_key(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    configure_logging(level="WARNING")
     _validate_langsmith_config(_settings(tracing=True, api_key="ls__abc"))
-    assert "LANGSMITH_API_KEY" not in caplog.text
+    out = capsys.readouterr().out
+    assert "LANGSMITH_API_KEY" not in out
 
 
-def test_warns_when_tracing_enabled_without_api_key(caplog) -> None:
-    caplog.set_level(logging.WARNING)
+def test_warns_when_tracing_enabled_without_api_key(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    configure_logging(level="WARNING")
     _validate_langsmith_config(_settings(tracing=True, api_key=None))
-    assert "LANGSMITH_API_KEY" in caplog.text
-    assert "silently" in caplog.text.lower() or "no-op" in caplog.text.lower()
+    out = capsys.readouterr().out
+    assert "LANGSMITH_API_KEY" in out
+    assert "silently" in out.lower() or "no-op" in out.lower()
