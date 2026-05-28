@@ -22,7 +22,12 @@ import yaml
 from rich.console import Console
 from rich.table import Table
 from sqlalchemy import select, update
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from ai_sdr.db.rls import set_tenant_context
 from ai_sdr.follow_up.duration import parse_duration

@@ -24,9 +24,9 @@ def _talkflow():
 
 
 def _lead():
-    l = SimpleNamespace()
-    l.id = uuid.uuid4()
-    return l
+    lead_obj = SimpleNamespace()
+    lead_obj.id = uuid.uuid4()
+    return lead_obj
 
 
 def test_minimal_only_trace_origin() -> None:
@@ -37,9 +37,9 @@ def test_minimal_only_trace_origin() -> None:
 def test_full_metadata() -> None:
     t = _tenant("joana")
     tf = _talkflow()
-    l = _lead()
+    lead_obj = _lead()
     m = build_trace_metadata(
-        tenant=t, talkflow=tf, lead=l,
+        tenant=t, talkflow=tf, lead=lead_obj,
         node="qualificacao", turn_index=3,
         trace_origin="guardrails_critic",
     )
@@ -47,7 +47,7 @@ def test_full_metadata() -> None:
     assert m["tenant_id"] == str(t.id)
     assert m["tenant_slug"] == "joana"
     assert m["talkflow_id"] == str(tf.id)
-    assert m["lead_id"] == str(l.id)
+    assert m["lead_id"] == str(lead_obj.id)
     assert m["node"] == "qualificacao"
     assert m["turn_index"] == 3
 

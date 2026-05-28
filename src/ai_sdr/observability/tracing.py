@@ -35,9 +35,9 @@ TraceOrigin = Literal[
 
 def build_trace_metadata(
     *,
-    tenant: "Tenant | None" = None,
-    talkflow: "TalkFlow | None" = None,
-    lead: "Lead | None" = None,
+    tenant: Tenant | None = None,
+    talkflow: TalkFlow | None = None,
+    lead: Lead | None = None,
     node: str | None = None,
     turn_index: int | None = None,
     trace_origin: TraceOrigin,
