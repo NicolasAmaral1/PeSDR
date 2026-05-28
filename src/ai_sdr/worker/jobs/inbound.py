@@ -45,6 +45,10 @@ from ai_sdr.models.inbound_message import InboundMessageRow
 from ai_sdr.models.lead import Lead
 from ai_sdr.models.talkflow import TalkFlow
 from ai_sdr.models.tenant import Tenant
+from ai_sdr.observability.outbound_audit import (
+    record_outbound_failed,
+    record_outbound_sent,
+)
 
 log = structlog.get_logger(__name__)
 
@@ -171,6 +175,23 @@ async def process_lead_inbox(ctx: dict[str, Any], tenant_id: str, lead_id: str) 
                         msg_id=str(msg.id),
                         sent_external_id=send_result.external_id,
                     )
+                    # P10: audit outbound (success). provider comes from the inbound
+                    # row (set by the messaging adapter when the webhook landed),
+                    # matching the registry.get(tenant, "whatsapp_cloud") hardcode
+                    # without needing a tenants_dir YAML lookup.
+                    await record_outbound_sent(
+                        db,
+                        tenant=tenant,
+                        talkflow=talkflow,
+                        lead=lead,
+                        provider=msg.provider,
+                        message_type="text",
+                        triggered_by="inbound",
+                        body_text=reply_text,
+                        external_id=send_result.external_id,
+                        sent_at=datetime.fromisoformat(send_result.sent_at_iso),
+                        inbound_message_id=msg.id,
+                    )
                     # P9: agent just spoke — update timestamps + schedule next follow-up.
                     talkflow.last_agent_message_at = datetime.now(UTC)
                     talkflow.last_lead_message_at = msg.received_at
@@ -200,6 +221,19 @@ async def process_lead_inbox(ctx: dict[str, Any], tenant_id: str, lead_id: str) 
                         "worker.recipient_unreachable",
                         lead_id=lead_id,
                         err=str(e),
+                    )
+                    await record_outbound_failed(
+                        db,
+                        tenant=tenant,
+                        talkflow=talkflow,
+                        lead=lead,
+                        provider=msg.provider,
+                        message_type="text",
+                        triggered_by="inbound",
+                        body_text=reply_text,
+                        error_detail=f"{type(e).__name__}: {e}",
+                        sent_at=datetime.now(UTC),
+                        inbound_message_id=msg.id,
                     )
                     await db.commit()
                     return
@@ -265,6 +299,19 @@ async def process_lead_inbox(ctx: dict[str, Any], tenant_id: str, lead_id: str) 
                         err_type=type(e).__name__,
                         err=str(e),
                     )
+                    await record_outbound_failed(
+                        db,
+                        tenant=tenant,
+                        talkflow=talkflow,
+                        lead=lead,
+                        provider=msg.provider,
+                        message_type="text",
+                        triggered_by="inbound",
+                        body_text=reply_text,
+                        error_detail=f"{type(e).__name__}: {e}",
+                        sent_at=datetime.now(UTC),
+                        inbound_message_id=msg.id,
+                    )
                     await db.commit()
                     return
                 except MessagingError as e:
@@ -275,6 +322,19 @@ async def process_lead_inbox(ctx: dict[str, Any], tenant_id: str, lead_id: str) 
                         lead_id=lead_id,
                         err_type=type(e).__name__,
                         err=str(e),
+                    )
+                    await record_outbound_failed(
+                        db,
+                        tenant=tenant,
+                        talkflow=talkflow,
+                        lead=lead,
+                        provider=msg.provider,
+                        message_type="text",
+                        triggered_by="inbound",
+                        body_text=reply_text,
+                        error_detail=f"{type(e).__name__}: {e}",
+                        sent_at=datetime.now(UTC),
+                        inbound_message_id=msg.id,
                     )
                     await db.commit()
                     return
