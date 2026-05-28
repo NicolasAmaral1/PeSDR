@@ -95,10 +95,10 @@ def test_treeflow_with_followup_and_global_objections() -> None:
         "display_name": "X",
         "follow_up": {
             "enabled": True,
-            "max_attempts": 3,
+            "max_attempts": 2,
             "sequence": [
-                {"after": "24h", "template": "Oi {{nome}}!"},
-                {"after": "72h", "template": "Tá aí?"},
+                {"after": "PT24H", "template_ref": "followup_24h_v1"},
+                {"after": "P3D", "template_ref": "followup_72h_v1"},
             ],
         },
         "global_objections": [
@@ -125,8 +125,9 @@ def test_treeflow_with_followup_and_global_objections() -> None:
     }
     tf = TreeFlow.model_validate(data)
     assert tf.follow_up is not None
-    assert tf.follow_up.max_attempts == 3
-    assert tf.follow_up.sequence[0].after == "24h"
+    assert tf.follow_up.max_attempts == 2
+    assert tf.follow_up.sequence[0].after == "PT24H"
+    assert tf.follow_up.sequence[0].template_ref == "followup_24h_v1"
     assert len(tf.global_objections) == 2
 
 

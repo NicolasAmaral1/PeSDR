@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import structlog
+from arq import cron
 from arq.connections import RedisSettings
 
 from ai_sdr.db.engine import build_engine
@@ -21,6 +22,7 @@ from ai_sdr.secrets.sops_loader import SopsLoader
 from ai_sdr.settings import get_settings
 from ai_sdr.tenant_loader.loader import TenantLoader
 from ai_sdr.treeflow.checkpointer import ensure_checkpointer_schema
+from ai_sdr.worker.jobs.follow_up_scanner import follow_up_scanner
 from ai_sdr.worker.jobs.inbound import process_lead_inbox
 
 
@@ -53,6 +55,9 @@ class WorkerSettings:
     """arq looks up class attributes by name."""
 
     functions = [process_lead_inbox]
+    cron_jobs = [
+        cron(follow_up_scanner, minute=set(range(0, 60)), run_at_startup=False),
+    ]
     on_startup = _on_startup
     on_shutdown = _on_shutdown
     max_tries = 3

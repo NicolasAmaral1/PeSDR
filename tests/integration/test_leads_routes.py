@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -56,21 +56,19 @@ async def tenant_with_treeflow(db_session) -> tuple[Tenant, TreeflowVersion]:
     return t, tv
 
 
-async def test_pending_list_returns_only_pending(
-    app, db_session, tenant_with_treeflow
-) -> None:
+async def test_pending_list_returns_only_pending(app, db_session, tenant_with_treeflow) -> None:
     tenant, _ = tenant_with_treeflow
     await set_tenant_context(db_session, tenant.id)
-    db_session.add_all([
-        Lead(tenant_id=tenant.id, whatsapp_e164="+1", status="pending_assignment"),
-        Lead(tenant_id=tenant.id, whatsapp_e164="+2", status="active"),
-        Lead(tenant_id=tenant.id, whatsapp_e164="+3", status="pending_assignment"),
-    ])
+    db_session.add_all(
+        [
+            Lead(tenant_id=tenant.id, whatsapp_e164="+1", status="pending_assignment"),
+            Lead(tenant_id=tenant.id, whatsapp_e164="+2", status="active"),
+            Lead(tenant_id=tenant.id, whatsapp_e164="+3", status="pending_assignment"),
+        ]
+    )
     await db_session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         r = await client.get(f"/tenants/{tenant.slug}/leads/pending")
     assert r.status_code == 200
     bodies = r.json()
@@ -79,14 +77,10 @@ async def test_pending_list_returns_only_pending(
         assert b["status"] == "pending_assignment"
 
 
-async def test_assign_404_on_unknown_lead(
-    app, db_session, tenant_with_treeflow
-) -> None:
+async def test_assign_404_on_unknown_lead(app, db_session, tenant_with_treeflow) -> None:
     tenant, _ = tenant_with_treeflow
     bogus = uuid.uuid4()
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         r = await client.post(
             f"/tenants/{tenant.slug}/leads/{bogus}/assign",
             json={"treeflow_id": "mentoria"},
@@ -94,18 +88,14 @@ async def test_assign_404_on_unknown_lead(
     assert r.status_code == 404
 
 
-async def test_assign_409_when_lead_not_pending(
-    app, db_session, tenant_with_treeflow
-) -> None:
+async def test_assign_409_when_lead_not_pending(app, db_session, tenant_with_treeflow) -> None:
     tenant, _ = tenant_with_treeflow
     await set_tenant_context(db_session, tenant.id)
     lead = Lead(tenant_id=tenant.id, whatsapp_e164="+9", status="active")
     db_session.add(lead)
     await db_session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         r = await client.post(
             f"/tenants/{tenant.slug}/leads/{lead.id}/assign",
             json={"treeflow_id": "mentoria"},
@@ -135,7 +125,7 @@ async def test_assign_happy_path_creates_talkflow_and_enqueues(
                 lead_id=lead.id,
                 from_address="+5511999999999",
                 text=f"msg{i}",
-                received_at=datetime.now(timezone.utc),
+                received_at=datetime.now(UTC),
                 raw={},
             )
         )
@@ -149,9 +139,7 @@ async def test_assign_happy_path_creates_talkflow_and_enqueues(
 
     app.state.arq_pool = FakePool()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         r = await client.post(
             f"/tenants/{tenant.slug}/leads/{lead.id}/assign",
             json={"treeflow_id": "mentoria"},
@@ -167,10 +155,10 @@ async def test_assign_happy_path_creates_talkflow_and_enqueues(
     assert lead.status == "active"
 
     tfs = (
-        await db_session.execute(
-            select(TalkFlow).where(TalkFlow.lead_id == lead.id)
-        )
-    ).scalars().all()
+        (await db_session.execute(select(TalkFlow).where(TalkFlow.lead_id == lead.id)))
+        .scalars()
+        .all()
+    )
     assert len(tfs) == 1
     assert str(tfs[0].id) == body["talkflow_id"]
 

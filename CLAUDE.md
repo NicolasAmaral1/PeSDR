@@ -183,3 +183,65 @@ uv run ai-sdr simulate --tenant example --treeflow example --lead test-1 --show-
 
 - `ai-sdr simulate` continua sendo dev tool — NÃO usa adapter de WhatsApp. Cria/reusa um Lead por `external_label`, marca como `status='active'` automaticamente.
 - Em produção: NUNCA rode `simulate` apontando pra tenant real; use `worker` + webhook.
+
+## Follow-up + HSM templates (Plano 9)
+
+- **Two mechanics**:
+  1. *Proactive scheduled follow-up* — when lead goes silent, `arq.cron follow_up_scanner` (every 60s) fires HSM templates per `treeflow.follow_up.sequence`. Reset when lead responds; mark `talkflow.status='cold'` after `max_attempts`.
+  2. *Reactive WindowExpired recovery* — when `send_text` raises `WindowExpiredError`, worker falls back to `tenant.messaging.reengagement_template`. If absent, marks msg error (P5 baseline).
+
+- **TreeFlow YAML config** (per funnel):
+  ```yaml
+  follow_up:
+    enabled: true
+    max_attempts: 3
+    sequence:
+      - after: "PT24H"                    # ISO-8601 duration
+        template_ref: "followup_24h_v1"   # name registered + approved in Meta Business Manager
+        language: "pt_BR"
+        params:
+          - "{{ collected.nome | default('amigo') }}"
+  ```
+
+  `enabled=true` requires `len(sequence) >= max_attempts`. Templates referenced by name only — Meta is source-of-truth for the actual approved text.
+
+- **Tenant YAML config** (reengagement only):
+  ```yaml
+  messaging:
+    provider: whatsapp_cloud
+    # ...
+    reengagement_template:
+      template_ref: "reengagement_default_v1"
+      language: "pt_BR"
+      params:
+        - "{{ collected.nome | default('amigo') }}"
+  ```
+
+- **Template params**: rendered with Jinja2 `SandboxedEnvironment` against:
+  - `collected.<field>` — TalkFlow's extracted fields (v1 passes `{}` — full LangGraph state lookup wiring may come in P10)
+  - `lead.whatsapp_e164`, `lead.external_label`
+  - `tenant.slug`, `tenant.display_name`
+  - Filters: `default`, `lower`, `upper`, `trim`, `truncate(N)`. `StrictUndefined` forces explicit defaults.
+
+- **Schedule semantics**: timer starts at `talkflow.last_agent_message_at`. Lead inbound resets counter + cancels pending + reactivates cold. Scanner runs every 60s; per-lead `pg_advisory_lock` (same hash as `process_lead_inbox`) serializes scanner vs worker. Race-belt at fire time checks `talkflow.last_lead_message_at > job.scheduled_at`.
+
+- **Schedule-one-at-a-time**: each fired job inserts the next attempt's row. Config changes in `treeflow.yaml` apply to subsequent in-flight schedules naturally. Requires bumping the TreeFlow `version` to publish a new content_hash.
+
+- **CLI ops**:
+  ```bash
+  ai-sdr follow-ups list --tenant <slug> [--lead <uuid>] [--status pending|completed|cancelled|error|all]
+  ai-sdr follow-ups cancel --tenant <slug> --lead <uuid>
+  ai-sdr follow-ups dry-run --tenant <slug> --treeflow <id> --lead <uuid>
+  ```
+
+- **Cold lead reactivation**: a `talkflow.status='cold'` lead that receives an inbound is automatically flipped back to `'active'` by `process_lead_inbox`; attempt counter resets to 0; new follow-up scheduled after agent's reply.
+
+- **WhatsApp HSM payload**: Meta API endpoint `POST /messages` with `type=template`. Body params are positional (`{{1}}, {{2}}, ...` in the Meta-registered template), filled from `params` list at send time. Same retry stack (tenacity 3 attempts, exp backoff) and error classification (`_classify_error`) as `send_text`.
+
+- **Migration**: `0010_follow_up_and_talkflow_columns` — `follow_up_jobs` table (RLS, partial indexes) + 3 columns on `talkflows`.
+
+- **Setting up a tenant for live follow-up**:
+  1. Register HSM templates in Meta Business Manager. Note the exact `name` strings.
+  2. Edit `tenants/<slug>/treeflows/<id>.yaml`: add the `follow_up:` block with matching `template_ref`s. Bump `version` (semver).
+  3. (Optional) Edit `tenants/<slug>/tenant.yaml` `messaging.reengagement_template` for WindowExpired recovery.
+  4. Restart worker: `docker compose up -d --build worker`. The cron registers on startup.
