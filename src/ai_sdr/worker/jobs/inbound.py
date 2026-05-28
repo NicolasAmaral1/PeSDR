@@ -246,13 +246,18 @@ async def process_lead_inbox(ctx: dict[str, Any], tenant_id: str, lead_id: str) 
                     from ai_sdr.tenant_loader.loader import TenantLoader
 
                     tenant_cfg = TenantLoader(Path(get_settings().tenants_dir)).load(tenant.slug)
+                    # If we reached WindowExpiredError, an adapter was built from
+                    # tenant_cfg.messaging earlier in this turn — so messaging
+                    # must be set. Narrow for mypy.
+                    assert tenant_cfg.messaging is not None
+                    messaging_cfg = tenant_cfg.messaging
                     # P10: audit the failed text send first
                     await record_outbound_failed(
                         db,
                         tenant=tenant,
                         talkflow=talkflow,
                         lead=lead,
-                        provider=tenant_cfg.messaging.provider,
+                        provider=messaging_cfg.provider,
                         message_type="text",
                         triggered_by="inbound",
                         body_text=reply_text,
@@ -260,11 +265,7 @@ async def process_lead_inbox(ctx: dict[str, Any], tenant_id: str, lead_id: str) 
                         sent_at=datetime.now(UTC),
                         inbound_message_id=msg.id,
                     )
-                    reeng = (
-                        tenant_cfg.messaging.reengagement_template
-                        if tenant_cfg.messaging is not None
-                        else None
-                    )
+                    reeng = messaging_cfg.reengagement_template
                     if reeng is not None:
                         try:
                             params = render_params(
@@ -293,7 +294,7 @@ async def process_lead_inbox(ctx: dict[str, Any], tenant_id: str, lead_id: str) 
                                 tenant=tenant,
                                 talkflow=talkflow,
                                 lead=lead,
-                                provider=tenant_cfg.messaging.provider,
+                                provider=messaging_cfg.provider,
                                 message_type="template",
                                 triggered_by="window_expired_recovery",
                                 template_ref=reeng.template_ref,
@@ -317,7 +318,7 @@ async def process_lead_inbox(ctx: dict[str, Any], tenant_id: str, lead_id: str) 
                                 tenant=tenant,
                                 talkflow=talkflow,
                                 lead=lead,
-                                provider=tenant_cfg.messaging.provider,
+                                provider=messaging_cfg.provider,
                                 message_type="template",
                                 triggered_by="window_expired_recovery",
                                 template_ref=reeng.template_ref,

@@ -10,7 +10,12 @@ import typer
 from rich.console import Console
 from rich.table import Table
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from ai_sdr.db.rls import set_tenant_context
 from ai_sdr.models.outbound_message import OutboundMessage
@@ -21,12 +26,12 @@ outbound_app = typer.Typer(help="Outbound messages audit query")
 console = Console()
 
 
-def _make_session():
+def _make_session() -> tuple[async_sessionmaker[AsyncSession], AsyncEngine]:
     engine = create_async_engine(get_settings().database_url, future=True)
     return async_sessionmaker(engine, expire_on_commit=False), engine
 
 
-async def _load_tenant(session, slug: str) -> Tenant:
+async def _load_tenant(session: AsyncSession, slug: str) -> Tenant:
     t = (await session.execute(select(Tenant).where(Tenant.slug == slug))).scalar_one_or_none()
     if t is None:
         console.print(f"[red]tenant not found: {slug}[/red]")
