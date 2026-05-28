@@ -246,6 +246,20 @@ async def process_lead_inbox(ctx: dict[str, Any], tenant_id: str, lead_id: str) 
                     from ai_sdr.tenant_loader.loader import TenantLoader
 
                     tenant_cfg = TenantLoader(Path(get_settings().tenants_dir)).load(tenant.slug)
+                    # P10: audit the failed text send first
+                    await record_outbound_failed(
+                        db,
+                        tenant=tenant,
+                        talkflow=talkflow,
+                        lead=lead,
+                        provider=tenant_cfg.messaging.provider,
+                        message_type="text",
+                        triggered_by="inbound",
+                        body_text=reply_text,
+                        error_detail=f"WindowExpiredError: {e}",
+                        sent_at=datetime.now(UTC),
+                        inbound_message_id=msg.id,
+                    )
                     reeng = (
                         tenant_cfg.messaging.reengagement_template
                         if tenant_cfg.messaging is not None
@@ -259,7 +273,7 @@ async def process_lead_inbox(ctx: dict[str, Any], tenant_id: str, lead_id: str) 
                                 tenant=tenant,
                                 collected={},
                             )
-                            await adapter.send_template(
+                            template_result = await adapter.send_template(
                                 to=msg.from_address,
                                 template_ref=reeng.template_ref,
                                 language=reeng.language,
@@ -273,6 +287,22 @@ async def process_lead_inbox(ctx: dict[str, Any], tenant_id: str, lead_id: str) 
                                 "messaging.window_expired_recovered",
                                 lead_id=str(lead.id),
                             )
+                            # P10: audit the successful template send
+                            await record_outbound_sent(
+                                db,
+                                tenant=tenant,
+                                talkflow=talkflow,
+                                lead=lead,
+                                provider=tenant_cfg.messaging.provider,
+                                message_type="template",
+                                triggered_by="window_expired_recovery",
+                                template_ref=reeng.template_ref,
+                                template_language=reeng.language,
+                                template_params=params,
+                                external_id=template_result.external_id,
+                                sent_at=datetime.fromisoformat(template_result.sent_at_iso),
+                                inbound_message_id=msg.id,
+                            )
                         except Exception as e2:
                             msg.status = "error"
                             msg.error_detail = f"window_expired; reengagement failed: {e2}"
@@ -281,6 +311,22 @@ async def process_lead_inbox(ctx: dict[str, Any], tenant_id: str, lead_id: str) 
                                 lead_id=str(lead.id),
                                 err=str(e2),
                             )
+                            # P10: audit the failed template send
+                            await record_outbound_failed(
+                                db,
+                                tenant=tenant,
+                                talkflow=talkflow,
+                                lead=lead,
+                                provider=tenant_cfg.messaging.provider,
+                                message_type="template",
+                                triggered_by="window_expired_recovery",
+                                template_ref=reeng.template_ref,
+                                template_language=reeng.language,
+                                template_params=params,
+                                error_detail=f"reengagement_failed: {e2}",
+                                sent_at=datetime.now(UTC),
+                                inbound_message_id=msg.id,
+                            )
                     else:
                         msg.status = "error"
                         msg.error_detail = f"window_expired: {e}"
@@ -288,6 +334,8 @@ async def process_lead_inbox(ctx: dict[str, Any], tenant_id: str, lead_id: str) 
                             "messaging.window_expired_no_template",
                             lead_id=str(lead.id),
                         )
+                        # No second audit row — the original text failure
+                        # already covers the window_expired_no_template case.
                     await db.commit()
                     return
                 except (AuthError, PolicyError) as e:
