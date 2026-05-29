@@ -50,7 +50,7 @@ services:
       LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
       LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-pesdr-dev}
     ports:
-      - "8000:8000"
+      - "8200:8000"          # VPS: 8000 already taken by portainer
     volumes:
       - ./tenants:/app/tenants:ro
       - ./.sops:/app/.sops:ro
