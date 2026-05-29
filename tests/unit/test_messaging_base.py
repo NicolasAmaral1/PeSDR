@@ -47,6 +47,11 @@ def test_concrete_subclass_can_be_instantiated() -> None:
         async def send_text(self, to: str, text: str) -> SendResult:
             return SendResult(external_id="x", sent_at_iso="now")
 
+        async def send_template(
+            self, to: str, template_ref: str, language: str, params: list[str]
+        ) -> SendResult:
+            return SendResult(external_id="t", sent_at_iso="now")
+
         def verification_challenge(self, params: Mapping[str, str]) -> str | None:
             return None
 

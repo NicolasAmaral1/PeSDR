@@ -57,6 +57,21 @@ class GuardrailsConfig(BaseModel):
         return self
 
 
+class ReengagementTemplate(BaseModel):
+    """Tenant-level default template used by WindowExpiredError recovery.
+
+    When the worker's send_text raises WindowExpiredError (lead silent >24h),
+    the worker falls back to send_template with this config. If the tenant
+    omits this block, recovery falls back to plain error logging.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    template_ref: str = Field(min_length=1)
+    language: str = "pt_BR"
+    params: list[str] = Field(default_factory=list)
+
+
 class MessagingConfig(BaseModel):
     """Messaging provider config. provider is free-form; factory dispatches.
 
@@ -72,6 +87,7 @@ class MessagingConfig(BaseModel):
     webhook_verify_token_ref: str | None = None
     app_secret_ref: str | None = None
     api_version: str = "v21.0"
+    reengagement_template: ReengagementTemplate | None = None
 
     @model_validator(mode="after")
     def _check_provider_fields(self) -> Self:
@@ -102,6 +118,20 @@ class ObjectionsConfig(BaseModel):
     history_window: int = Field(default=4, ge=1, le=20)
 
 
+class ConsoleConfig(BaseModel):
+    """Operator console toggle per tenant (Plano 11).
+
+    enabled=true exposes /console/{slug}/... for this tenant. Credentials
+    do NOT live here — see the users table + user_tenant_access in
+    migration 0009 + spec §5. Tenants that use Vialum Tasks Inbox as
+    their HITL surface should set enabled=false (or omit the block).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+
+
 class TenantConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -110,6 +140,7 @@ class TenantConfig(BaseModel):
     timezone: str
     schedule: ScheduleConfig | None = None
     conversation: ConversationConfig | None = None
+    console: ConsoleConfig | None = None  # Plan 11
     llm: LLMDefaults | None = None
     messaging: MessagingConfig | None = None
     guardrails: GuardrailsConfig | None = None

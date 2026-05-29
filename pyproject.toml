@@ -11,6 +11,8 @@ dependencies = [
     "asyncpg>=0.30",
     "alembic>=1.14",
     "arq>=0.26",
+    "isodate>=0.6",
+    "jinja2>=3.1",
     "pgvector>=0.3.6",
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
@@ -31,6 +33,10 @@ dependencies = [
     "simpleeval>=1.0.3",
     "tiktoken>=0.8",
     "typer>=0.15",
+    "bcrypt>=4.0",
+    "itsdangerous>=2.0",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.29",
 ]
 
 [project.scripts]
@@ -91,6 +97,10 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "pgvector.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "isodate.*"
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

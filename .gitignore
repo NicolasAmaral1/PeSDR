@@ -45,3 +45,4 @@ secrets.yaml
 # age private keys (never commit)
 keys.txt
 *.age
+.superpowers/

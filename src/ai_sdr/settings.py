@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     redis_url: str
     app_env: Literal["development", "test", "production"]
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+    console_secret_key: str | None = None
     tenants_dir: str = "tenants"
     sops_age_key_file: str
 

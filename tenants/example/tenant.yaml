@@ -49,9 +49,20 @@ messaging:
   # webhook_verify_token_ref: secrets/wa_verify
   # app_secret_ref: secrets/wa_app_secret
   # api_version: v21.0
+  #
+  # Plano 9: reengagement template (WindowExpiredError recovery).
+  # Uncomment when a real HSM template is registered in Meta Business Manager.
+  # reengagement_template:
+  #   template_ref: "reengagement_default_v1"
+  #   language: "pt_BR"
+  #   params:
+  #     - "{{ collected.nome | default('amigo') }}"
 
 objections:
   enabled: true
   min_confidence: 0.6
   max_handled_per_lead: 10
   history_window: 4
+
+console:
+  enabled: true
