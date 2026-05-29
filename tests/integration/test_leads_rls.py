@@ -6,6 +6,7 @@ import uuid
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from ai_sdr.db.rls import set_tenant_context
 from ai_sdr.models.lead import Lead
@@ -52,7 +53,7 @@ async def test_lead_external_label_unique_per_tenant(db_session) -> None:
 
     # Same label, same tenant → conflict
     db_session.add(Lead(tenant_id=tenant.id, external_label="test-1"))
-    with pytest.raises(Exception):  # IntegrityError or wrapped
+    with pytest.raises(IntegrityError):
         await db_session.commit()
     await db_session.rollback()
 
@@ -63,6 +64,6 @@ async def test_lead_status_check_constraint(db_session) -> None:
     await set_tenant_context(db_session, tenant.id)
 
     db_session.add(Lead(tenant_id=tenant.id, status="nonsense_status"))
-    with pytest.raises(Exception):
+    with pytest.raises(IntegrityError):
         await db_session.commit()
     await db_session.rollback()

@@ -53,12 +53,32 @@ def _validate_console_secret_key_if_needed(settings: Settings) -> None:
             return  # one is enough — secret will be reused for all tenants
 
 
+def _validate_langsmith_config(settings: Settings) -> None:
+    """Warn if LangSmith tracing is half-configured. Does NOT raise — the
+    app boots either way; langchain just silently skips emitting traces
+    if the API key is missing."""
+    if not settings.langchain_tracing_v2:
+        return
+    if not settings.langsmith_api_key:
+        structlog.get_logger().warning(
+            "langsmith.misconfigured",
+            reason=(
+                "LANGCHAIN_TRACING_V2=true but LANGSMITH_API_KEY is unset — "
+                "langchain will silently no-op tracing. Either unset "
+                "LANGCHAIN_TRACING_V2 or provide a valid LANGSMITH_API_KEY "
+                "(from https://smith.langchain.com → API Keys)."
+            ),
+            project=settings.langchain_project,
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     configure_logging(level=settings.log_level)
     log = structlog.get_logger()
     log.info("app.starting", env=settings.app_env)
+    _validate_langsmith_config(settings)
     await ensure_checkpointer_schema()
     log.info("checkpointer.ready")
 

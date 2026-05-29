@@ -1,7 +1,7 @@
 """follow_up_jobs table (with RLS + partial indexes) + TalkFlow timing columns
 
 Revision ID: 0010_follow_up_and_talkflow_columns
-Revises: 0008_talkflows_lead_id_fk
+Revises: 0009_users_and_access
 Create Date: 2026-05-27 00:00:00
 """
 
@@ -10,7 +10,7 @@ from alembic import op
 from sqlalchemy.dialects.postgresql import UUID
 
 revision = "0010_follow_up_and_talkflow_columns"
-down_revision = "0008_talkflows_lead_id_fk"
+down_revision = "0009_users_and_access"
 branch_labels = None
 depends_on = None
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import structlog
 from langchain_core.language_models import BaseChatModel
@@ -20,6 +20,7 @@ from ai_sdr.kb.retriever import RetrievedChunk, retrieve
 from ai_sdr.llm.extractor import build_structured_model, extract
 from ai_sdr.llm.factory import build_llm as _default_build_llm
 from ai_sdr.llm.messages import build_system_messages
+from ai_sdr.observability.tracing import build_trace_metadata
 from ai_sdr.schemas.llm_yaml import LLMConfig, LLMDefaults
 from ai_sdr.schemas.tenant_yaml import GuardrailsConfig, ObjectionsConfig
 from ai_sdr.schemas.treeflow_yaml import (
@@ -36,6 +37,11 @@ from ai_sdr.treeflow.classifier import classify as default_classify
 from ai_sdr.treeflow.expressions import eval_bool
 from ai_sdr.treeflow.objection_response import build_inline_objection_messages
 from ai_sdr.treeflow.state import Message, ObjectionRecord, TalkFlowState
+
+if TYPE_CHECKING:
+    from ai_sdr.models.lead import Lead
+    from ai_sdr.models.talkflow import TalkFlow
+    from ai_sdr.models.tenant import Tenant
 
 logger = structlog.get_logger(__name__)
 
@@ -140,6 +146,9 @@ def compile_treeflow(
     guardrails: GuardrailsConfig | None = None,
     objections: ObjectionsConfig | None = None,
     tenant_id: uuid.UUID | None = None,
+    tenant: Tenant | None = None,
+    talkflow: TalkFlow | None = None,
+    lead: Lead | None = None,
     llm_factory: LLMFactory | None = None,
     embedder_factory: EmbedderFactory | None = None,
     kb_session_factory: KbSessionFactory | None = None,
@@ -153,6 +162,10 @@ def compile_treeflow(
       objections: tenant.objections block; when None defaults are used (enabled=True).
       tenant_id, embedder_factory, kb_session_factory: required when any node has
         a non-empty `knowledge_base`; raise ValueError at compile time if missing.
+      tenant/talkflow/lead: optional ORM rows used purely to enrich LangSmith
+        trace metadata on the classifier/extractor/critic sub-traces. Tests
+        leave them None — the metadata helper just emits trace_origin in that
+        case, and ainvoke is invoked without a metadata config.
       classify_fn: test seam for the objection classifier; defaults to
         ai_sdr.treeflow.classifier.classify in production.
       checkpointer: pass to enable per-thread state persistence.
@@ -222,8 +235,34 @@ def compile_treeflow(
             # 3) Build structured model + inner caller
             model = build_structured_model(node.collects, guardrails=guardrails)
 
+            turn_index = len(state.get("messages", []) or [])
+            extractor_metadata = (
+                build_trace_metadata(
+                    tenant=tenant,
+                    talkflow=talkflow,
+                    lead=lead,
+                    node=node.id,
+                    turn_index=turn_index,
+                    trace_origin="field_extractor",
+                )
+                if (tenant is not None or talkflow is not None or lead is not None)
+                else None
+            )
+            critic_metadata = (
+                build_trace_metadata(
+                    tenant=tenant,
+                    talkflow=talkflow,
+                    lead=lead,
+                    node=node.id,
+                    turn_index=turn_index,
+                    trace_origin="guardrails_critic",
+                )
+                if (tenant is not None or talkflow is not None or lead is not None)
+                else None
+            )
+
             async def _invoke_inner(msgs: list[Any]) -> Any:
-                return await extract(llm, model, msgs)
+                return await extract(llm, model, msgs, trace_metadata=extractor_metadata)
 
             # 4) Run with guardrails (passthrough when guardrails is None)
             recent_history: list[Message] = state.get("messages", [])[-4:]
@@ -237,6 +276,7 @@ def compile_treeflow(
                 tenant_llm=tenant_llm,
                 secrets=secrets,
                 llm_factory=llm_fn,
+                critic_trace_metadata=critic_metadata,
             )
 
             collected_after = {**state.get("collected", {}), **result.collected}
@@ -308,6 +348,19 @@ def compile_treeflow(
                 r["objection_id"] for r in state.get("objections_handled", []) or []
             ]
 
+            classifier_metadata = (
+                build_trace_metadata(
+                    tenant=tenant,
+                    talkflow=talkflow,
+                    lead=lead,
+                    node=node.id,
+                    turn_index=len(state.get("messages", []) or []),
+                    trace_origin="objection_classifier",
+                )
+                if (tenant is not None or talkflow is not None or lead is not None)
+                else None
+            )
+
             try:
                 result = await classify_impl(
                     llm=classifier_llm,
@@ -315,6 +368,7 @@ def compile_treeflow(
                     conversation=conversation,
                     previously_handled=previously_handled,
                     history_window=objections_cfg.history_window,
+                    trace_metadata=classifier_metadata,
                 )
             except ValidationError as exc:
                 logger.warning(
@@ -506,8 +560,34 @@ def compile_treeflow(
 
             model = build_structured_model(node.collects, guardrails=guardrails)
 
+            turn_index = len(state.get("messages", []) or [])
+            extractor_metadata = (
+                build_trace_metadata(
+                    tenant=tenant,
+                    talkflow=talkflow,
+                    lead=lead,
+                    node=node.id,
+                    turn_index=turn_index,
+                    trace_origin="field_extractor",
+                )
+                if (tenant is not None or talkflow is not None or lead is not None)
+                else None
+            )
+            critic_metadata = (
+                build_trace_metadata(
+                    tenant=tenant,
+                    talkflow=talkflow,
+                    lead=lead,
+                    node=node.id,
+                    turn_index=turn_index,
+                    trace_origin="guardrails_critic",
+                )
+                if (tenant is not None or talkflow is not None or lead is not None)
+                else None
+            )
+
             async def _invoke_inner(msgs: list[Any]) -> Any:
-                return await extract(llm, model, msgs)
+                return await extract(llm, model, msgs, trace_metadata=extractor_metadata)
 
             recent_history = state.get("messages", [])[-4:]
             result = await run_with_guardrails(
@@ -520,6 +600,7 @@ def compile_treeflow(
                 tenant_llm=tenant_llm,
                 secrets=secrets,
                 llm_factory=llm_fn,
+                critic_trace_metadata=critic_metadata,
             )
 
             record: ObjectionRecord = {
