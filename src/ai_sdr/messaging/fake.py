@@ -21,7 +21,9 @@ class FakeMessagingAdapter(MessagingAdapter):
     def __init__(self) -> None:
         self._inbound_queue: deque[InboundMessage] = deque()
         self._pending_failure: TerminalError | None = None
+        self._pending_template_failure: TerminalError | None = None
         self.sent_messages: list[tuple[str, str]] = []
+        self.sent_templates: list[tuple[str, str, str, list[str]]] = []
 
     # --- scripting hooks --------------------------------------------------
 
@@ -35,6 +37,11 @@ class FakeMessagingAdapter(MessagingAdapter):
         """Make the next (single) send_text() raise this. Subsequent sends
         succeed normally."""
         self._pending_failure = exc
+
+    def fail_next_template_send(self, exc: TerminalError) -> None:
+        """Make the next (single) send_template() raise this. Subsequent
+        template sends succeed normally."""
+        self._pending_template_failure = exc
 
     # --- adapter interface ------------------------------------------------
 
@@ -53,6 +60,23 @@ class FakeMessagingAdapter(MessagingAdapter):
         self.sent_messages.append((to, text))
         return SendResult(
             external_id=f"fake_{uuid.uuid4().hex[:12]}",
+            sent_at_iso=datetime.now(UTC).isoformat(),
+        )
+
+    async def send_template(
+        self,
+        to: str,
+        template_ref: str,
+        language: str,
+        params: list[str],
+    ) -> SendResult:
+        if self._pending_template_failure is not None:
+            exc = self._pending_template_failure
+            self._pending_template_failure = None
+            raise exc
+        self.sent_templates.append((to, template_ref, language, list(params)))
+        return SendResult(
+            external_id=f"faketmpl_{uuid.uuid4().hex[:12]}",
             sent_at_iso=datetime.now(UTC).isoformat(),
         )
 

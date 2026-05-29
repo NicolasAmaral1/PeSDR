@@ -57,6 +57,21 @@ class GuardrailsConfig(BaseModel):
         return self
 
 
+class ReengagementTemplate(BaseModel):
+    """Tenant-level default template used by WindowExpiredError recovery.
+
+    When the worker's send_text raises WindowExpiredError (lead silent >24h),
+    the worker falls back to send_template with this config. If the tenant
+    omits this block, recovery falls back to plain error logging.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    template_ref: str = Field(min_length=1)
+    language: str = "pt_BR"
+    params: list[str] = Field(default_factory=list)
+
+
 class MessagingConfig(BaseModel):
     """Messaging provider config. provider is free-form; factory dispatches.
 
@@ -72,6 +87,7 @@ class MessagingConfig(BaseModel):
     webhook_verify_token_ref: str | None = None
     app_secret_ref: str | None = None
     api_version: str = "v21.0"
+    reengagement_template: ReengagementTemplate | None = None
 
     @model_validator(mode="after")
     def _check_provider_fields(self) -> Self:

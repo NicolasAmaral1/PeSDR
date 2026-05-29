@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import typer
 
+from ai_sdr.cli.follow_ups import follow_ups_app
 from ai_sdr.cli.leads import leads_app
 from ai_sdr.cli.reindex_kb import reindex_kb_app
 from ai_sdr.cli.simulate import simulate

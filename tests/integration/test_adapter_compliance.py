@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import json
 from pathlib import Path
 
 import httpx
@@ -18,7 +17,6 @@ from ai_sdr.messaging.errors import (
     AuthError,
     RecipientUnreachable,
     SignatureError,
-    TransientError,
 )
 from ai_sdr.messaging.fake import FakeMessagingAdapter
 from ai_sdr.messaging.whatsapp_cloud import WhatsAppCloudAPIAdapter
@@ -157,3 +155,77 @@ def test_verification_challenge_signature(adapter_under_test) -> None:
     adapter, _ = adapter_under_test
     out = adapter.verification_challenge({})
     assert out is None or isinstance(out, str)
+
+
+async def test_send_template_returns_external_id(adapter_under_test, monkeypatch) -> None:
+    adapter, helpers = adapter_under_test
+    if isinstance(adapter, WhatsAppCloudAPIAdapter):
+        monkeypatch.setattr(
+            "ai_sdr.messaging.whatsapp_cloud._build_http_client",
+            lambda: httpx.AsyncClient(
+                transport=httpx.MockTransport(
+                    lambda req: httpx.Response(
+                        200,
+                        json={"messages": [{"id": "wamid.TPL_OUT="}]},
+                    )
+                ),
+                timeout=15.0,
+            ),
+        )
+    r = await adapter.send_template(
+        to=helpers["expected_from_address"],
+        template_ref="any_template_v1",
+        language="pt_BR",
+        params=["x"],
+    )
+    assert isinstance(r, SendResult)
+    assert r.external_id
+
+
+async def test_send_template_raises_recipient_unreachable(adapter_under_test, monkeypatch) -> None:
+    adapter, helpers = adapter_under_test
+    if isinstance(adapter, FakeMessagingAdapter):
+        adapter.fail_next_template_send(RecipientUnreachable("not on WA"))
+    else:
+        monkeypatch.setattr(
+            "ai_sdr.messaging.whatsapp_cloud._build_http_client",
+            lambda: httpx.AsyncClient(
+                transport=httpx.MockTransport(
+                    lambda req: httpx.Response(
+                        400,
+                        json={"error": {"code": 131026, "message": "not on WA"}},
+                    )
+                ),
+                timeout=15.0,
+            ),
+        )
+    with pytest.raises(RecipientUnreachable):
+        await adapter.send_template(
+            to=helpers["expected_from_address"],
+            template_ref="x",
+            language="pt_BR",
+            params=[],
+        )
+
+
+async def test_send_template_raises_auth_error_on_401(adapter_under_test, monkeypatch) -> None:
+    adapter, helpers = adapter_under_test
+    if isinstance(adapter, FakeMessagingAdapter):
+        adapter.fail_next_template_send(AuthError("bad token"))
+    else:
+        monkeypatch.setattr(
+            "ai_sdr.messaging.whatsapp_cloud._build_http_client",
+            lambda: httpx.AsyncClient(
+                transport=httpx.MockTransport(
+                    lambda req: httpx.Response(401, json={"error": {"code": 190}})
+                ),
+                timeout=15.0,
+            ),
+        )
+    with pytest.raises(AuthError):
+        await adapter.send_template(
+            to=helpers["expected_from_address"],
+            template_ref="x",
+            language="pt_BR",
+            params=[],
+        )

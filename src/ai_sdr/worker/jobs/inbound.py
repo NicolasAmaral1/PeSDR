@@ -28,6 +28,12 @@ from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_sdr.db.rls import set_tenant_context
+from ai_sdr.follow_up.duration import parse_duration
+from ai_sdr.follow_up.scheduler import (
+    cancel_pending_for_lead,
+    schedule_next_followup,
+)
+from ai_sdr.follow_up.treeflow_loader import load_treeflow_follow_up
 from ai_sdr.messaging.errors import (
     AuthError,
     MessagingError,
@@ -138,6 +144,16 @@ async def process_lead_inbox(ctx: dict[str, Any], tenant_id: str, lead_id: str) 
 
             adapter = registry.get(tenant, "whatsapp_cloud")
 
+            # P9: lead responded — cancel pending follow-ups, reset counter,
+            # reactivate cold talkflow.
+            cancelled = await cancel_pending_for_lead(db, lead.id, reason="lead responded")
+            if cancelled:
+                log.info("follow_up.cancelled_on_inbound", lead_id=str(lead.id), n=cancelled)
+            talkflow.follow_up_attempt_number = 0
+            if talkflow.status == "cold":
+                talkflow.status = "active"
+                log.info("follow_up.cold_reactivated", talkflow_id=str(talkflow.id))
+
             while True:
                 msg = await _fetch_next_queued(db, lead.id)
                 if msg is None:
@@ -155,6 +171,26 @@ async def process_lead_inbox(ctx: dict[str, Any], tenant_id: str, lead_id: str) 
                         msg_id=str(msg.id),
                         sent_external_id=send_result.external_id,
                     )
+                    # P9: agent just spoke — update timestamps + schedule next follow-up.
+                    talkflow.last_agent_message_at = datetime.now(UTC)
+                    talkflow.last_lead_message_at = msg.received_at
+                    tf_config = await load_treeflow_follow_up(db, talkflow)
+                    if tf_config and tf_config.enabled and tf_config.sequence:
+                        await schedule_next_followup(
+                            db,
+                            talkflow,
+                            lead,
+                            tenant,
+                            tf_config,
+                            next_attempt_number=1,
+                        )
+                        log.info(
+                            "follow_up.first_scheduled",
+                            lead_id=str(lead.id),
+                            at=(
+                                datetime.now(UTC) + parse_duration(tf_config.sequence[0].after)
+                            ).isoformat(),
+                        )
                 except RecipientUnreachable as e:
                     lead.status = "unreachable"
                     lead.unreachable_reason = f"unreachable: {e}"
@@ -168,13 +204,56 @@ async def process_lead_inbox(ctx: dict[str, Any], tenant_id: str, lead_id: str) 
                     await db.commit()
                     return
                 except WindowExpiredError as e:
-                    msg.status = "error"
-                    msg.error_detail = f"window_expired: {e}"
-                    log.warning(
-                        "worker.window_expired",
-                        lead_id=lead_id,
-                        err=str(e),
+                    # P9: try the tenant's reengagement_template fallback.
+                    from pathlib import Path
+
+                    from ai_sdr.follow_up.jinja import render_params
+                    from ai_sdr.settings import get_settings
+                    from ai_sdr.tenant_loader.loader import TenantLoader
+
+                    tenant_cfg = TenantLoader(Path(get_settings().tenants_dir)).load(tenant.slug)
+                    reeng = (
+                        tenant_cfg.messaging.reengagement_template
+                        if tenant_cfg.messaging is not None
+                        else None
                     )
+                    if reeng is not None:
+                        try:
+                            params = render_params(
+                                reeng.params,
+                                lead=lead,
+                                tenant=tenant,
+                                collected={},
+                            )
+                            await adapter.send_template(
+                                to=msg.from_address,
+                                template_ref=reeng.template_ref,
+                                language=reeng.language,
+                                params=params,
+                            )
+                            msg.status = "processed"
+                            msg.processed_at = datetime.now(UTC)
+                            msg.error_detail = "window_expired; recovered via reengagement template"
+                            talkflow.last_agent_message_at = datetime.now(UTC)
+                            log.info(
+                                "messaging.window_expired_recovered",
+                                lead_id=str(lead.id),
+                            )
+                        except Exception as e2:
+                            msg.status = "error"
+                            msg.error_detail = f"window_expired; reengagement failed: {e2}"
+                            log.warning(
+                                "messaging.reengagement_failed",
+                                lead_id=str(lead.id),
+                                err=str(e2),
+                            )
+                    else:
+                        msg.status = "error"
+                        msg.error_detail = f"window_expired: {e}"
+                        log.warning(
+                            "messaging.window_expired_no_template",
+                            lead_id=str(lead.id),
+                        )
                     await db.commit()
                     return
                 except (AuthError, PolicyError) as e:

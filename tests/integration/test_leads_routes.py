@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -125,7 +125,7 @@ async def test_assign_happy_path_creates_talkflow_and_enqueues(
                 lead_id=lead.id,
                 from_address="+5511999999999",
                 text=f"msg{i}",
-                received_at=datetime.now(timezone.utc),
+                received_at=datetime.now(UTC),
                 raw={},
             )
         )
