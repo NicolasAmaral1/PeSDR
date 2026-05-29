@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}PeSDR Console{% endblock %}</title>
+  <script src="https://unpkg.com/htmx.org@2.0.3" integrity="sha384-0895/pl2MU10Hqc6jd4RvrAumzVZCG7yh32k4Z+wnZZbq8Cf9SeT3HumA9eBpkn" crossorigin="anonymous"></script>
+  <style>
+    :root {
+      --bg: #f7f8fa;
+      --surface: #ffffff;
+      --border: #e5e7eb;
+      --border-strong: #d1d5db;
+      --text: #111827;
+      --text-muted: #4b5563;
+      --text-subtle: #6b7280;
+      --text-faint: #9ca3af;
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --primary-soft: #eff6ff;
+      --accent-amber-bg: #fef3c7;
+      --accent-amber-fg: #92400e;
+      --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+      --radius-sm: 4px;
+      --radius-md: 6px;
+      --shadow-sm: 0 1px 2px rgba(17, 24, 39, 0.04);
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Roboto, "Helvetica Neue", Arial, sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+    .app-header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: var(--shadow-sm);
+    }
+    .brand {
+      font-weight: 600;
+      font-size: 14px;
+      letter-spacing: -0.01em;
+      color: var(--text);
+    }
+    .tenant-tag {
+      background: #f3f4f6;
+      padding: 3px 8px;
+      border-radius: var(--radius-sm);
+      font-size: 11px;
+      color: var(--text-muted);
+      font-family: var(--mono);
+      margin-left: 12px;
+      border: 1px solid var(--border);
+    }
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+    .header-user { font-weight: 500; color: var(--text); }
+    .admin-badge {
+      background: var(--accent-amber-bg);
+      color: var(--accent-amber-fg);
+      padding: 2px 7px;
+      border-radius: 3px;
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .logout-link {
+      color: var(--text-subtle);
+      text-decoration: none;
+      font-size: 12px;
+      padding: 4px 8px;
+      border-radius: var(--radius-sm);
+      transition: color 120ms ease, background-color 120ms ease;
+    }
+    .logout-link:hover { color: var(--text); background: #f3f4f6; }
+    .logout-link:focus-visible {
+      outline: 2px solid var(--primary);
+      outline-offset: 2px;
+    }
+    .app-body { padding: 0; }
+    .app-footer {
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      padding: 8px 24px;
+      font-size: 11px;
+      color: var(--text-faint);
+    }
+    select.tenant-picker {
+      background: var(--surface);
+      border: 1px solid var(--border-strong);
+      padding: 4px 8px;
+      border-radius: var(--radius-sm);
+      font-size: 12px;
+      color: var(--text);
+      cursor: pointer;
+      transition: border-color 120ms ease, box-shadow 120ms ease;
+    }
+    select.tenant-picker:hover { border-color: #9ca3af; }
+    select.tenant-picker:focus-visible {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18);
+    }
+  </style>
+  {% block head %}{% endblock %}
+</head>
+<body>
+  <div class="app-header">
+    <div>
+      <span class="brand">PeSDR Console</span>
+      {% if current_tenant %}<span class="tenant-tag">{{ current_tenant.slug }}</span>{% endif %}
+    </div>
+    <div class="header-right">
+      {% if tenants_available and tenants_available | length > 1 %}
+        <select class="tenant-picker" onchange="window.location.href='/console/' + this.value + '/leads'">
+          {% for t in tenants_available %}
+            <option value="{{ t.slug }}" {% if current_tenant and t.slug == current_tenant.slug %}selected{% endif %}>{{ t.slug }}</option>
+          {% endfor %}
+        </select>
+      {% endif %}
+      {% if current_user %}
+        <span class="header-user">{{ current_user.username }}</span>
+        {% if current_user.is_platform_admin %}<span class="admin-badge">admin</span>{% endif %}
+      {% endif %}
+      <a class="logout-link" href="/console/logout">Logout</a>
+    </div>
+  </div>
+  <div class="app-body">
+    {% block body %}{% endblock %}
+  </div>
+  <div class="app-footer">
+    {% block footer %}P11 v1 — operator console{% endblock %}
+  </div>
+</body>
+</html>

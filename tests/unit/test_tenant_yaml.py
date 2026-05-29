@@ -189,3 +189,34 @@ def test_messaging_unknown_provider_allowed_at_schema_level() -> None:
     assert cfg.messaging is not None
     assert cfg.messaging.provider == "vialum_chat"
     assert cfg.messaging.phone_number_id_ref is None
+
+
+def test_console_block_optional() -> None:
+    cfg = TenantConfig.model_validate(_minimal_tenant_data())
+    assert cfg.console is None
+
+
+def test_console_disabled_by_default_when_block_present() -> None:
+    data = _minimal_tenant_data()
+    data["console"] = {}
+    cfg = TenantConfig.model_validate(data)
+    assert cfg.console is not None
+    assert cfg.console.enabled is False
+
+
+def test_console_enabled_true() -> None:
+    data = _minimal_tenant_data()
+    data["console"] = {"enabled": True}
+    cfg = TenantConfig.model_validate(data)
+    assert cfg.console is not None
+    assert cfg.console.enabled is True
+
+
+def test_console_rejects_extra_fields_for_forward_compat() -> None:
+    """Spec keeps ConsoleConfig minimal — no per-tenant credentials in YAML.
+    If someone tries the old `username`/`password_hash` shape, it must be
+    rejected loudly (the right place is the users table)."""
+    data = _minimal_tenant_data()
+    data["console"] = {"enabled": True, "username": "joana", "password_hash": "x"}
+    with pytest.raises(ValidationError):
+        TenantConfig.model_validate(data)

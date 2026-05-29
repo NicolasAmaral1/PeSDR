@@ -63,3 +63,6 @@ objections:
   min_confidence: 0.6
   max_handled_per_lead: 10
   history_window: 4
+
+console:
+  enabled: true

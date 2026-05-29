@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block title %}Leads pendentes — {{ current_tenant.slug }}{% endblock %}
+{% block head %}
+<style>
+  .master-detail {
+    display: flex;
+    height: calc(100vh - 80px);
+  }
+  .master {
+    width: 38%;
+    min-width: 320px;
+    border-right: 1px solid var(--border);
+    background: var(--surface);
+    overflow-y: auto;
+  }
+  .master-header {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding: 12px 16px;
+    font-size: 11px;
+    color: var(--text-subtle);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    font-weight: 600;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .polling-tag {
+    font-size: 11px;
+    color: var(--text-faint);
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 400;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .polling-tag::before {
+    content: "";
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #10b981;
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.5);
+    animation: pulse 2s ease-out infinite;
+  }
+  @keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.45); }
+    70% { box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+  }
+  .detail {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px 28px;
+  }
+  .lead-card {
+    padding: 14px 16px;
+    border-bottom: 1px solid #f3f4f6;
+    cursor: pointer;
+    transition: background-color 120ms ease, border-left-color 120ms ease;
+    border-left: 3px solid transparent;
+  }
+  .lead-card:hover { background: #f9fafb; }
+  .lead-card.selected {
+    background: var(--primary-soft);
+    border-left-color: var(--primary);
+  }
+  .lead-card-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .lead-card-title {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text);
+    letter-spacing: -0.005em;
+  }
+  .lead-card-time {
+    font-size: 11px;
+    color: var(--text-subtle);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .lead-card-sub {
+    font-size: 12px;
+    color: var(--text-subtle);
+    margin-top: 4px;
+  }
+  .lead-card-preview {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 8px;
+    line-height: 1.45;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+</style>
+{% endblock %}
+{% block body %}
+<div class="master-detail">
+  <div class="master">
+    <div class="master-header">
+      <span>Leads pendentes</span>
+      <span class="polling-tag" title="Atualiza automaticamente">a cada 10s</span>
+    </div>
+    <div id="leads-list"
+         hx-get="/console/{{ current_tenant.slug }}/leads/list"
+         hx-trigger="load, every 10s, leadAssigned from:body"
+         hx-swap="innerHTML">
+      {# initial render is empty; polling fires immediately via 'load' #}
+    </div>
+  </div>
+  <div id="lead-detail" class="detail">
+    {% include "_empty_state.html" %}
+  </div>
+</div>
+{% endblock %}

@@ -118,6 +118,20 @@ class ObjectionsConfig(BaseModel):
     history_window: int = Field(default=4, ge=1, le=20)
 
 
+class ConsoleConfig(BaseModel):
+    """Operator console toggle per tenant (Plano 11).
+
+    enabled=true exposes /console/{slug}/... for this tenant. Credentials
+    do NOT live here — see the users table + user_tenant_access in
+    migration 0009 + spec §5. Tenants that use Vialum Tasks Inbox as
+    their HITL surface should set enabled=false (or omit the block).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+
+
 class TenantConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -126,6 +140,7 @@ class TenantConfig(BaseModel):
     timezone: str
     schedule: ScheduleConfig | None = None
     conversation: ConversationConfig | None = None
+    console: ConsoleConfig | None = None  # Plan 11
     llm: LLMDefaults | None = None
     messaging: MessagingConfig | None = None
     guardrails: GuardrailsConfig | None = None
