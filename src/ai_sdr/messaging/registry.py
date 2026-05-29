@@ -56,6 +56,19 @@ class AdapterRegistry:
             self._cache[key] = adapter
             return adapter
 
+    def get_for_tenant(self, tenant: Tenant) -> MessagingAdapter:
+        """Resolve the adapter for whatever provider the tenant has configured.
+
+        Use this in worker paths (inbound, scanner) where the caller doesn't
+        know or care which provider — it just wants to send via the tenant's
+        configured channel. `get(tenant, provider)` is for the webhook path
+        where the requested provider must match for validation.
+        """
+        tenant_cfg = self._tenant_loader.load(tenant.slug)
+        if tenant_cfg.messaging is None:
+            raise ValueError(f"tenant {tenant.slug} has no `messaging` block in tenant.yaml")
+        return self.get(tenant, tenant_cfg.messaging.provider)
+
     def clear(self) -> None:
         with self._lock:
             self._cache.clear()

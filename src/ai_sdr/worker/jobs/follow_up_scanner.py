@@ -151,7 +151,7 @@ async def _fire_follow_up(
                 tenant=tenant,
                 collected={},
             )
-            adapter = registry.get(tenant, "whatsapp_cloud")
+            adapter = registry.get_for_tenant(tenant)
 
             try:
                 result = await adapter.send_template(
