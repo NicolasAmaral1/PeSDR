@@ -184,38 +184,32 @@ uv run ai-sdr simulate --tenant example --treeflow example --lead test-1 --show-
 - `ai-sdr simulate` continua sendo dev tool — NÃO usa adapter de WhatsApp. Cria/reusa um Lead por `external_label`, marca como `status='active'` automaticamente.
 - Em produção: NUNCA rode `simulate` apontando pra tenant real; use `worker` + webhook.
 
-## Follow-up + HSM templates (Plano 9)
+## HITL Console (Plano 11)
 
-- **Two mechanics**:
-  1. *Proactive scheduled follow-up* — when lead goes silent, `arq.cron follow_up_scanner` (every 60s) fires HSM templates per `treeflow.follow_up.sequence`. Reset when lead responds; mark `talkflow.status='cold'` after `max_attempts`.
-  2. *Reactive WindowExpired recovery* — when `send_text` raises `WindowExpiredError`, worker falls back to `tenant.messaging.reengagement_template`. If absent, marks msg error (P5 baseline).
-
-- **TreeFlow YAML config** (per funnel):
-  ```yaml
-  follow_up:
-    enabled: true
-    max_attempts: 3
-    sequence:
-      - after: "PT24H"                    # ISO-8601 duration
-        template_ref: "followup_24h_v1"   # name registered + approved in Meta Business Manager
-        language: "pt_BR"
-        params:
-          - "{{ collected.nome | default('amigo') }}"
+- Operator console at `/console/{tenant_slug}/leads`. Stack: FastAPI + Jinja2 + HTMX (no build step, no new container).
+- Per-tenant enable: `tenant.yaml > console.enabled: true`. Default `false` (block omitted or explicitly false) returns 404 on the console URLs.
+- Credentials in `users` table (NOT in tenant.yaml). Schema: `users(id, username, password_hash, is_platform_admin, ...)` + `user_tenant_access(user_id, tenant_id, role)`. Both global (no RLS — they serve the auth mechanism).
+- Auth: signed cookie (`pesdr_session`) via `itsdangerous` URLSafeTimedSerializer with `CONSOLE_SECRET_KEY` env var. 12h sliding expiration. Cookie scoped to `/console`.
+- RBAC: operator with grant accesses their tenant; `is_platform_admin=true` bypasses the grant check.
+- Provisioning via CLI:
+  - `ai-sdr users add --username X [--admin] [--password ...]` (prompts password if absent)
+  - `ai-sdr users grant --username X --tenant slug --role operator`
+  - `ai-sdr users revoke --username X --tenant slug`
+  - `ai-sdr users passwd --username X` (prompts new password)
+  - `ai-sdr users list [--tenant slug]`
+  - `ai-sdr users set-admin --username X --admin true|false`
+- Polling: master list re-fetches every 10s via HTMX `hx-trigger="every 10s"`. Assign POST returns the updated master list + an OOB swap that resets the detail panel.
+- Provider-agnostic display: lead identifier is `whatsapp_e164` formatted, else `external_label`, else `#<id[:8]>`. Works for Vialum Chat tenants in the future without code changes.
+- Vialum tenants: set `console.enabled: false` and use Vialum Tasks Inbox as the HITL surface.
+- Treeflow enumeration for the dropdown: filesystem-based (`tenants/<slug>/treeflows/*.yaml` filenames). Not a tenant.yaml field.
+- ENV var required when any tenant has `console.enabled: true`:
   ```
-
-  `enabled=true` requires `len(sequence) >= max_attempts`. Templates referenced by name only — Meta is source-of-truth for the actual approved text.
-
-- **Tenant YAML config** (reengagement only):
-  ```yaml
-  messaging:
-    provider: whatsapp_cloud
-    # ...
-    reengagement_template:
-      template_ref: "reengagement_default_v1"
-      language: "pt_BR"
-      params:
-        - "{{ collected.nome | default('amigo') }}"
+  CONSOLE_SECRET_KEY=<32+ chars random>  # python -c "import secrets; print(secrets.token_urlsafe(48))"
   ```
+- Local smoke:
+  1. `ai-sdr users add --username joana` (set a password)
+  2. `ai-sdr users grant --username joana --tenant example --role operator`
+  3. Open `http://localhost:8200/console/login`, log in, get redirected to `/console/example/leads`.
 
 - **Template params**: rendered with Jinja2 `SandboxedEnvironment` against:
   - `collected.<field>` — TalkFlow's extracted fields (v1 passes `{}` — full LangGraph state lookup wiring may come in P10)
