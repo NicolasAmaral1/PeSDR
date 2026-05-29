@@ -56,3 +56,39 @@ def test_clear_resets_cache() -> None:
     registry.clear()
     b = registry.get(tenant, "fake")
     assert a is not b
+
+
+def test_get_for_tenant_uses_configured_provider() -> None:
+    tenant_loader, sops_loader = _stub_loader("fake")
+    registry = AdapterRegistry(tenant_loader=tenant_loader, sops_loader=sops_loader)
+    tenant = _make_tenant()
+    a = registry.get_for_tenant(tenant)
+    assert isinstance(a, FakeMessagingAdapter)
+
+
+def test_get_for_tenant_matches_explicit_get() -> None:
+    """Both paths must resolve to the same cached instance — guards against
+    a future bug where worker (get_for_tenant) and webhook (get) end up
+    holding different adapter instances for the same tenant+provider."""
+    tenant_loader, sops_loader = _stub_loader("fake")
+    registry = AdapterRegistry(tenant_loader=tenant_loader, sops_loader=sops_loader)
+    tenant = _make_tenant()
+    a = registry.get(tenant, "fake")
+    b = registry.get_for_tenant(tenant)
+    assert a is b
+
+
+def test_get_for_tenant_raises_if_no_messaging_block() -> None:
+    tenant_cfg = MagicMock()
+    tenant_cfg.messaging = None
+    tenant_loader = MagicMock()
+    tenant_loader.load.return_value = tenant_cfg
+    sops_loader = MagicMock()
+    registry = AdapterRegistry(tenant_loader=tenant_loader, sops_loader=sops_loader)
+    tenant = _make_tenant()
+    try:
+        registry.get_for_tenant(tenant)
+    except ValueError as e:
+        assert "no `messaging` block" in str(e)
+    else:
+        raise AssertionError("expected ValueError")

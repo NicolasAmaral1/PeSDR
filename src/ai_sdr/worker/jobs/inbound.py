@@ -146,7 +146,7 @@ async def process_lead_inbox(ctx: dict[str, Any], tenant_id: str, lead_id: str) 
                 )
                 return
 
-            adapter = registry.get(tenant, "whatsapp_cloud")
+            adapter = registry.get_for_tenant(tenant)
 
             # P9: lead responded — cancel pending follow-ups, reset counter,
             # reactivate cold talkflow.
@@ -175,10 +175,11 @@ async def process_lead_inbox(ctx: dict[str, Any], tenant_id: str, lead_id: str) 
                         msg_id=str(msg.id),
                         sent_external_id=send_result.external_id,
                     )
-                    # P10: audit outbound (success). provider comes from the inbound
-                    # row (set by the messaging adapter when the webhook landed),
-                    # matching the registry.get(tenant, "whatsapp_cloud") hardcode
-                    # without needing a tenants_dir YAML lookup.
+                    # P10: audit outbound (success). provider comes from the
+                    # inbound row (set by the messaging adapter when the
+                    # webhook landed); the webhook validates it against
+                    # tenant_cfg.messaging.provider at ingestion, so it
+                    # matches the adapter just resolved via get_for_tenant().
                     await record_outbound_sent(
                         db,
                         tenant=tenant,
