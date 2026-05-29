@@ -49,6 +49,7 @@ services:
       LANGCHAIN_TRACING_V2: ${LANGCHAIN_TRACING_V2:-false}
       LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
       LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-pesdr-dev}
+      CONSOLE_SECRET_KEY: ${CONSOLE_SECRET_KEY:-}
     ports:
       - "8200:8000"          # VPS: 8000 already taken by portainer
     volumes:
@@ -75,6 +76,7 @@ services:
       LANGCHAIN_TRACING_V2: ${LANGCHAIN_TRACING_V2:-false}
       LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
       LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-pesdr-dev}
+      CONSOLE_SECRET_KEY: ${CONSOLE_SECRET_KEY:-}
     volumes:
       - ./tenants:/app/tenants:ro
       - ./.sops:/app/.sops:ro
