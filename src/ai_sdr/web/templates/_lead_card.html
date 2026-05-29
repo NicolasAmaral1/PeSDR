@@ -1,0 +1,18 @@
+{# Renders ALL pending lead cards. Used as polling response and by initial 'load' trigger. #}
+{% if leads %}
+  {% for lead in leads %}
+    <div class="lead-card {% if selected_lead_id and lead.id == selected_lead_id %}selected{% endif %}"
+         hx-get="/console/{{ current_tenant.slug }}/leads/{{ lead.id }}/detail"
+         hx-target="#lead-detail"
+         hx-swap="innerHTML">
+      <div class="lead-card-row">
+        <div class="lead-card-title">{{ lead.display_label }}</div>
+        <div class="lead-card-time">{{ lead.created_at_short }}</div>
+      </div>
+      <div class="lead-card-sub">{{ lead.queued_count }} mensage{{ 'ns' if lead.queued_count != 1 else 'm' }} em fila</div>
+      {% if lead.preview %}<div class="lead-card-preview">&ldquo;{{ lead.preview }}&rdquo;</div>{% endif %}
+    </div>
+  {% endfor %}
+{% else %}
+  {% include "_empty_state.html" %}
+{% endif %}

@@ -38,14 +38,15 @@ def _build_whatsapp_mocked(monkeypatch) -> tuple[MessagingAdapter, dict]:
         app_secret_ref="secrets/wa_app_secret",
     )
     secrets = {
-        "wa_phone_id": "999", "wa_token": "EAA",
-        "wa_verify": "vt", "wa_app_secret": "appsecret",
+        "wa_phone_id": "999",
+        "wa_token": "EAA",
+        "wa_verify": "vt",
+        "wa_app_secret": "appsecret",
     }
     adapter = WhatsAppCloudAPIAdapter(cfg, secrets)
     import tenacity
-    monkeypatch.setattr(
-        "ai_sdr.messaging.whatsapp_cloud._WAIT_STRATEGY", tenacity.wait_none()
-    )
+
+    monkeypatch.setattr("ai_sdr.messaging.whatsapp_cloud._WAIT_STRATEGY", tenacity.wait_none())
     helpers = {
         "app_secret": "appsecret",
         "build_inbound_body": lambda: (FIXTURES / "inbound_text.json").read_bytes(),
@@ -85,9 +86,8 @@ def _sign(body: bytes, secret: str | None) -> dict:
     if secret is None:
         return {}
     return {
-        "x-hub-signature-256": "sha256=" + hmac.new(
-            secret.encode(), body, hashlib.sha256
-        ).hexdigest()
+        "x-hub-signature-256": "sha256="
+        + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
     }
 
 
@@ -111,23 +111,17 @@ async def test_handle_inbound_raises_signature_error_on_tampered_payload(
         pytest.skip("fake adapter does not enforce HMAC")
     body = helpers["build_inbound_body"]()
     with pytest.raises(SignatureError):
-        await adapter.handle_inbound(
-            body, headers={"x-hub-signature-256": "sha256=" + "0" * 64}
-        )
+        await adapter.handle_inbound(body, headers={"x-hub-signature-256": "sha256=" + "0" * 64})
 
 
-async def test_send_text_returns_external_id(
-    adapter_under_test, monkeypatch
-) -> None:
+async def test_send_text_returns_external_id(adapter_under_test, monkeypatch) -> None:
     adapter, helpers = adapter_under_test
     if isinstance(adapter, WhatsAppCloudAPIAdapter):
         monkeypatch.setattr(
             "ai_sdr.messaging.whatsapp_cloud._build_http_client",
             lambda: httpx.AsyncClient(
                 transport=httpx.MockTransport(
-                    lambda req: httpx.Response(
-                        200, json={"messages": [{"id": "wamid.OUT_X="}]}
-                    )
+                    lambda req: httpx.Response(200, json={"messages": [{"id": "wamid.OUT_X="}]})
                 ),
                 timeout=15.0,
             ),
@@ -137,9 +131,7 @@ async def test_send_text_returns_external_id(
     assert r.external_id
 
 
-async def test_send_text_raises_recipient_unreachable(
-    adapter_under_test, monkeypatch
-) -> None:
+async def test_send_text_raises_recipient_unreachable(adapter_under_test, monkeypatch) -> None:
     adapter, helpers = adapter_under_test
     if isinstance(adapter, FakeMessagingAdapter):
         adapter.fail_next_send(RecipientUnreachable("number not on WA"))
