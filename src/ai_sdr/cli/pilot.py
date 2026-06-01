@@ -11,23 +11,22 @@ Scope and non-goals: see docs/superpowers/specs/2026-06-01-pilot-harness-design.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import secrets
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import typer
 from rich.console import Console
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ai_sdr.models.lead import Lead
 from ai_sdr.models.outbound_message import OutboundMessage
-
-if TYPE_CHECKING:
-    from ai_sdr.models.lead import Lead
-    from ai_sdr.models.talkflow import TalkFlow
-
+from ai_sdr.models.talkflow import TalkFlow
+from ai_sdr.models.tenant import Tenant
+from ai_sdr.models.treeflow_version import TreeflowVersion
 
 pilot_app = typer.Typer(help="Drive the worker pipeline via terminal — fake adapter, real LLM.")
 console = Console()
@@ -107,3 +106,72 @@ async def poll_for_outbound(
         await asyncio.sleep(interval_seconds)
         elapsed += interval_seconds
     return None
+
+
+async def _seed_session(
+    session: AsyncSession,
+    *,
+    tenants_dir: Path,
+    slug: str,
+    treeflow_id: str,
+    from_address: str,
+) -> tuple[Tenant, Lead, TalkFlow]:
+    """Set up a fresh pilot session: tenant lookup, treeflow_version, lead, talkflow.
+
+    Caller is responsible for setting RLS context BEFORE this runs (the
+    helper does its own commits but does not switch tenant). Returns
+    (tenant, lead, talkflow) for the caller to use in the REPL loop.
+
+    Raises:
+        ValueError: tenant slug not found in DB.
+        FileNotFoundError: treeflow YAML file missing.
+    """
+    # 1. Look up tenant.
+    tenant = (await session.execute(select(Tenant).where(Tenant.slug == slug))).scalar_one_or_none()
+    if tenant is None:
+        # The INSERT snippet is operator guidance shown in the error message —
+        # it is never executed as SQL.
+        msg = f"tenant '{slug}' not in DB. Add it via psql before piloting: INSERT INTO tenants (slug, display_name) VALUES ('{slug}', '<name>');"  # noqa: S608, E501
+        raise ValueError(msg)
+
+    # 2. Load YAML, compute content_hash, find-or-create TreeflowVersion.
+    yaml_path = tenants_dir / slug / "treeflows" / f"{treeflow_id}.yaml"
+    if not yaml_path.is_file():
+        raise FileNotFoundError(f"treeflow YAML not found: {yaml_path}")
+    content = yaml_path.read_text()
+    content_hash = hashlib.sha256(content.encode()).hexdigest()
+
+    tv = (
+        await session.execute(
+            select(TreeflowVersion).where(
+                TreeflowVersion.tenant_id == tenant.id,
+                TreeflowVersion.treeflow_id == treeflow_id,
+                TreeflowVersion.content_hash == content_hash,
+            )
+        )
+    ).scalar_one_or_none()
+    if tv is None:
+        tv = TreeflowVersion(
+            tenant_id=tenant.id,
+            treeflow_id=treeflow_id,
+            version="pilot",
+            content_hash=content_hash,
+            content_yaml=content,
+        )
+        session.add(tv)
+        await session.flush()
+
+    # 3. Create fresh lead + talkflow.
+    lead = Lead(tenant_id=tenant.id, whatsapp_e164=from_address, status="active")
+    session.add(lead)
+    await session.flush()
+
+    talkflow = TalkFlow(
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        treeflow_version_id=tv.id,
+        thread_id=f"{tenant.id}:{uuid.uuid4()}",
+    )
+    session.add(talkflow)
+    await session.commit()
+    return tenant, lead, talkflow
