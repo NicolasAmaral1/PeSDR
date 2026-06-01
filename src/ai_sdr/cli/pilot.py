@@ -154,7 +154,7 @@ async def _seed_session(
         tv = TreeflowVersion(
             tenant_id=tenant.id,
             treeflow_id=treeflow_id,
-            version="pilot",
+            version=f"pilot-{content_hash[:8]}",
             content_hash=content_hash,
             content_yaml=content,
         )

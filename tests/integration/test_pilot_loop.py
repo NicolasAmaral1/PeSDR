@@ -95,3 +95,40 @@ async def test_seed_session_fails_when_tenant_missing(db_session, tmp_path: Path
             from_address="+5511990aaaaaa",
         )
     assert "does-not-exist" in str(exc.value)
+
+
+async def test_seed_session_handles_yaml_edit_between_runs(db_session, tmp_path: Path) -> None:
+    """Editing the YAML between two pilot runs must not blow up on the
+    TreeflowVersion unique constraint (tenant_id, treeflow_id, version)."""
+    tenant = Tenant(slug=f"pilot_{uuid.uuid4().hex[:6]}", display_name="Pilot")
+    db_session.add(tenant)
+    await db_session.flush()
+    await set_tenant_context(db_session, tenant.id)
+
+    yaml_dir = tmp_path / tenant.slug / "treeflows"
+    yaml_dir.mkdir(parents=True)
+    yaml_path = yaml_dir / "pilot_test.yaml"
+    yaml_path.write_text(_YAML)
+    await db_session.commit()
+
+    # First run with content A.
+    _, _, tf_a = await _seed_session(
+        db_session,
+        tenants_dir=tmp_path,
+        slug=tenant.slug,
+        treeflow_id="pilot_test",
+        from_address="+5511990aaa111",
+    )
+
+    # Edit the YAML — content B.
+    yaml_path.write_text(_YAML + "# edited\n")
+
+    # Second run must succeed (different content_hash → different version slot).
+    _, _, tf_b = await _seed_session(
+        db_session,
+        tenants_dir=tmp_path,
+        slug=tenant.slug,
+        treeflow_id="pilot_test",
+        from_address="+5511990bbb222",
+    )
+    assert tf_a.treeflow_version_id != tf_b.treeflow_version_id
