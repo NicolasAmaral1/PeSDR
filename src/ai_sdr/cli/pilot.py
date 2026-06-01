@@ -14,14 +14,17 @@ import asyncio
 import hashlib
 import secrets
 import uuid
-from datetime import datetime
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
 from rich.console import Console
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from ai_sdr.db.rls import set_tenant_context
+from ai_sdr.models.inbound_message import InboundMessageRow
 from ai_sdr.models.lead import Lead
 from ai_sdr.models.outbound_message import OutboundMessage
 from ai_sdr.models.talkflow import TalkFlow
@@ -175,3 +178,103 @@ async def _seed_session(
     session.add(talkflow)
     await session.commit()
     return tenant, lead, talkflow
+
+
+# --- Loop ---
+
+
+async def _run_loop(
+    *,
+    session_factory: async_sessionmaker,
+    pool,  # arq pool; duck-typed so tests can pass a MagicMock with .enqueue_job
+    tenant: Tenant,
+    lead: Lead,
+    talkflow: TalkFlow,
+    input_fn: Callable[[str], str],
+    output_fn: Callable[[str], None],
+) -> int:
+    """REPL loop. Returns the exit code per spec §4.4.
+
+    Test-friendly: input_fn(prompt) -> str (production wraps stdin's input)
+    and output_fn(line) -> None (production wraps console.print). Per-turn
+    flow per spec §4.2; end signals checked in the order from §4.4.
+    """
+    turn_count = 0
+
+    while True:
+        user_text = input_fn("> ").strip()
+
+        if user_text == ":quit":
+            output_fn("[encerrado]")
+            return 0
+
+        if user_text == ":status":
+            async with session_factory() as db:
+                await set_tenant_context(db, tenant.id)
+                refreshed_lead = (
+                    await db.execute(select(Lead).where(Lead.id == lead.id))
+                ).scalar_one()
+                refreshed_tf = (
+                    await db.execute(select(TalkFlow).where(TalkFlow.id == talkflow.id))
+                ).scalar_one()
+                output_fn(format_status_line(refreshed_lead, refreshed_tf, turn_count))
+            continue
+
+        if not user_text:
+            continue
+
+        # 1. INSERT inbound, COMMIT, capture timestamp.
+        before_send = datetime.now(UTC)
+        async with session_factory() as db:
+            await set_tenant_context(db, tenant.id)
+            db.add(
+                InboundMessageRow(
+                    tenant_id=tenant.id,
+                    provider="fake",
+                    external_id=f"pilot_{uuid.uuid4().hex}",
+                    lead_id=lead.id,
+                    from_address=lead.whatsapp_e164,
+                    text=user_text,
+                    received_at=datetime.now(UTC),
+                    raw={},
+                )
+            )
+            await db.commit()
+
+        # 2. Enqueue arq job. (Production: real arq pool. Tests: MagicMock that
+        # simulates the worker by writing the outbound row directly.)
+        await pool.enqueue_job("process_lead_inbox", str(tenant.id), str(lead.id))
+
+        # 3. Poll for the new outbound row + check end signals.
+        async with session_factory() as db:
+            await set_tenant_context(db, tenant.id)
+            row = await poll_for_outbound(db, lead.id, before_send)
+
+            if row is None:
+                output_fn(
+                    "[timeout — worker não respondeu em 30s. "
+                    "Verifica `docker compose ps` e `docker compose logs worker`.]"
+                )
+                return 1
+
+            if row.status == "failed":
+                output_fn(
+                    f"[falha no processamento — {row.error_detail}. Verifica logs do worker.]"
+                )
+                return 1
+
+            # End-signal check order per spec §4.4:
+            refreshed_lead = (await db.execute(select(Lead).where(Lead.id == lead.id))).scalar_one()
+            refreshed_tf = (
+                await db.execute(select(TalkFlow).where(TalkFlow.id == talkflow.id))
+            ).scalar_one()
+
+            output_fn(f"agente: {row.body_text}")
+            turn_count += 1
+
+            if refreshed_lead.status == "pending_assignment":
+                output_fn("[lead encaminhado pro operador humano — status=pending_assignment]")
+                return 0
+            if refreshed_tf.status == "cold":
+                output_fn("[talkflow esfriou — sem mais respostas]")
+                return 0

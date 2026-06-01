@@ -3,13 +3,20 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from ai_sdr.cli.pilot import _seed_session
+from ai_sdr.cli.pilot import _run_loop, _seed_session
 from ai_sdr.db.rls import set_tenant_context
+from ai_sdr.models.inbound_message import InboundMessageRow
+from ai_sdr.models.lead import Lead
+from ai_sdr.models.outbound_message import OutboundMessage
+from ai_sdr.models.talkflow import TalkFlow
 from ai_sdr.models.tenant import Tenant
 from ai_sdr.models.treeflow_version import TreeflowVersion
 
@@ -132,3 +139,230 @@ async def test_seed_session_handles_yaml_edit_between_runs(db_session, tmp_path:
         from_address="+5511990bbb222",
     )
     assert tf_a.treeflow_version_id != tf_b.treeflow_version_id
+
+
+async def _make_eco_pool(session_factory, tenant_id, lead_id):
+    """Build a MagicMock pool whose enqueue_job simulates the worker by
+    reading the latest inbound and writing an eco outbound row. Returns
+    the pool and a list that captures every text the 'agent' produced."""
+    pool = MagicMock()
+    agent_replies: list[str] = []
+
+    async def fake_enqueue(name, *args, **kwargs):
+        # name == "process_lead_inbox"; args == (str(tenant.id), str(lead.id))
+        async with session_factory() as db:
+            await set_tenant_context(db, tenant_id)
+            latest = (
+                await db.execute(
+                    select(InboundMessageRow)
+                    .where(InboundMessageRow.lead_id == lead_id)
+                    .order_by(InboundMessageRow.received_at.desc())
+                    .limit(1)
+                )
+            ).scalar_one()
+            reply = f"eco: {latest.text}"
+            agent_replies.append(reply)
+            tf = (
+                await db.execute(select(TalkFlow).where(TalkFlow.lead_id == lead_id))
+            ).scalar_one()
+            db.add(
+                OutboundMessage(
+                    tenant_id=tenant_id,
+                    talkflow_id=tf.id,
+                    lead_id=lead_id,
+                    provider="fake",
+                    message_type="text",
+                    body_text=reply,
+                    status="sent",
+                    external_id=f"fake_{uuid.uuid4().hex[:8]}",
+                    triggered_by="inbound",
+                    sent_at=datetime.now(UTC),
+                )
+            )
+            await db.commit()
+
+    pool.enqueue_job = fake_enqueue
+    return pool, agent_replies
+
+
+async def test_run_loop_quit_immediately(db_session, tmp_path) -> None:
+    # User types :quit on the very first prompt — no turns happen.
+    tenant = Tenant(slug=f"p_{uuid.uuid4().hex[:6]}", display_name="P")
+    db_session.add(tenant)
+    await db_session.flush()
+    await set_tenant_context(db_session, tenant.id)
+    (tmp_path / tenant.slug / "treeflows").mkdir(parents=True)
+    (tmp_path / tenant.slug / "treeflows" / "pilot_test.yaml").write_text(_YAML)
+    await db_session.commit()
+
+    _, lead, talkflow = await _seed_session(
+        db_session,
+        tenants_dir=tmp_path,
+        slug=tenant.slug,
+        treeflow_id="pilot_test",
+        from_address="+5511990quit01",
+    )
+
+    # session_factory wraps a fresh session per loop tick.
+    # Use the test fixture's engine via the existing db_session machinery.
+    sf = async_sessionmaker(db_session.bind, expire_on_commit=False)
+    pool, _ = await _make_eco_pool(sf, tenant.id, lead.id)
+
+    outputs: list[str] = []
+    inputs = iter([":quit"])
+
+    code = await _run_loop(
+        session_factory=sf,
+        pool=pool,
+        tenant=tenant,
+        lead=lead,
+        talkflow=talkflow,
+        input_fn=lambda _prompt: next(inputs),
+        output_fn=outputs.append,
+    )
+
+    assert code == 0
+    assert any("encerrado" in o for o in outputs)
+
+
+async def test_run_loop_two_turn_eco(db_session, tmp_path) -> None:
+    tenant = Tenant(slug=f"p_{uuid.uuid4().hex[:6]}", display_name="P")
+    db_session.add(tenant)
+    await db_session.flush()
+    await set_tenant_context(db_session, tenant.id)
+    (tmp_path / tenant.slug / "treeflows").mkdir(parents=True)
+    (tmp_path / tenant.slug / "treeflows" / "pilot_test.yaml").write_text(_YAML)
+    await db_session.commit()
+
+    _, lead, talkflow = await _seed_session(
+        db_session,
+        tenants_dir=tmp_path,
+        slug=tenant.slug,
+        treeflow_id="pilot_test",
+        from_address="+5511990two001",
+    )
+
+    sf = async_sessionmaker(db_session.bind, expire_on_commit=False)
+    pool, agent_replies = await _make_eco_pool(sf, tenant.id, lead.id)
+
+    outputs: list[str] = []
+    inputs = iter(["Oi", "Tudo bem?", ":quit"])
+
+    code = await _run_loop(
+        session_factory=sf,
+        pool=pool,
+        tenant=tenant,
+        lead=lead,
+        talkflow=talkflow,
+        input_fn=lambda _prompt: next(inputs),
+        output_fn=outputs.append,
+    )
+
+    assert code == 0
+    assert agent_replies == ["eco: Oi", "eco: Tudo bem?"]
+    # Each agent reply appears in outputs, prefixed with "agente:".
+    assert sum(1 for o in outputs if o.startswith("agente:")) == 2
+
+
+async def test_run_loop_handles_status_command(db_session, tmp_path) -> None:
+    tenant = Tenant(slug=f"p_{uuid.uuid4().hex[:6]}", display_name="P")
+    db_session.add(tenant)
+    await db_session.flush()
+    await set_tenant_context(db_session, tenant.id)
+    (tmp_path / tenant.slug / "treeflows").mkdir(parents=True)
+    (tmp_path / tenant.slug / "treeflows" / "pilot_test.yaml").write_text(_YAML)
+    await db_session.commit()
+
+    _, lead, talkflow = await _seed_session(
+        db_session,
+        tenants_dir=tmp_path,
+        slug=tenant.slug,
+        treeflow_id="pilot_test",
+        from_address="+5511990stat01",
+    )
+
+    sf = async_sessionmaker(db_session.bind, expire_on_commit=False)
+    pool, _ = await _make_eco_pool(sf, tenant.id, lead.id)
+
+    outputs: list[str] = []
+    inputs = iter([":status", ":quit"])
+
+    code = await _run_loop(
+        session_factory=sf,
+        pool=pool,
+        tenant=tenant,
+        lead=lead,
+        talkflow=talkflow,
+        input_fn=lambda _prompt: next(inputs),
+        output_fn=outputs.append,
+    )
+
+    assert code == 0
+    # :status output contains the marker fields.
+    assert any("turns=0" in o for o in outputs)
+    assert any("lead.status=active" in o for o in outputs)
+
+
+async def test_run_loop_handoff_ends_conversation(db_session, tmp_path) -> None:
+    """When lead.status becomes 'pending_assignment', loop ends with code 0."""
+    tenant = Tenant(slug=f"p_{uuid.uuid4().hex[:6]}", display_name="P")
+    db_session.add(tenant)
+    await db_session.flush()
+    await set_tenant_context(db_session, tenant.id)
+    (tmp_path / tenant.slug / "treeflows").mkdir(parents=True)
+    (tmp_path / tenant.slug / "treeflows" / "pilot_test.yaml").write_text(_YAML)
+    await db_session.commit()
+
+    _, lead, talkflow = await _seed_session(
+        db_session,
+        tenants_dir=tmp_path,
+        slug=tenant.slug,
+        treeflow_id="pilot_test",
+        from_address="+5511990hand01",
+    )
+
+    sf = async_sessionmaker(db_session.bind, expire_on_commit=False)
+    # Custom pool: write outbound AND flip lead.status to pending_assignment.
+    pool = MagicMock()
+
+    async def handoff_enqueue(name, *args, **kwargs):
+        async with sf() as db:
+            await set_tenant_context(db, tenant.id)
+            tf = (
+                await db.execute(select(TalkFlow).where(TalkFlow.lead_id == lead.id))
+            ).scalar_one()
+            db.add(
+                OutboundMessage(
+                    tenant_id=tenant.id,
+                    talkflow_id=tf.id,
+                    lead_id=lead.id,
+                    provider="fake",
+                    message_type="text",
+                    body_text="Vou te conectar com um humano.",
+                    status="sent",
+                    external_id=f"fake_{uuid.uuid4().hex[:8]}",
+                    triggered_by="inbound",
+                    sent_at=datetime.now(UTC),
+                )
+            )
+            db_lead = (await db.execute(select(Lead).where(Lead.id == lead.id))).scalar_one()
+            db_lead.status = "pending_assignment"
+            await db.commit()
+
+    pool.enqueue_job = handoff_enqueue
+
+    outputs: list[str] = []
+    inputs = iter(["Quero falar com humano"])
+
+    code = await _run_loop(
+        session_factory=sf,
+        pool=pool,
+        tenant=tenant,
+        lead=lead,
+        talkflow=talkflow,
+        input_fn=lambda _prompt: next(inputs),
+        output_fn=outputs.append,
+    )
+
+    assert code == 0
+    assert any("pending_assignment" in o for o in outputs)
