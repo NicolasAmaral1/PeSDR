@@ -17,11 +17,14 @@ import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Annotated
 
 import typer
+from arq import create_pool
+from arq.connections import RedisSettings
 from rich.console import Console
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from ai_sdr.db.rls import set_tenant_context
 from ai_sdr.models.inbound_message import InboundMessageRow
@@ -30,6 +33,7 @@ from ai_sdr.models.outbound_message import OutboundMessage
 from ai_sdr.models.talkflow import TalkFlow
 from ai_sdr.models.tenant import Tenant
 from ai_sdr.models.treeflow_version import TreeflowVersion
+from ai_sdr.settings import get_settings
 
 pilot_app = typer.Typer(help="Drive the worker pipeline via terminal — fake adapter, real LLM.")
 console = Console()
@@ -278,3 +282,84 @@ async def _run_loop(
             if refreshed_tf.status == "cold":
                 output_fn("[talkflow esfriou — sem mais respostas]")
                 return 0
+
+
+# --- Entry point ---
+
+
+@pilot_app.command("pilot")
+def pilot(
+    tenant: Annotated[str, typer.Option("--tenant", help="Tenant slug (required)")],
+    treeflow: Annotated[
+        str | None,
+        typer.Option("--treeflow", help="Treeflow id (yaml basename, no .yaml)"),
+    ] = None,
+    from_address: Annotated[
+        str | None,
+        typer.Option("--from-address", help="Lead whatsapp_e164 (default: random)"),
+    ] = None,
+) -> None:
+    """Run a multi-turn pilot conversation against the live worker pipeline."""
+    asyncio.run(_main(tenant, treeflow, from_address))
+
+
+async def _main(tenant_slug: str, treeflow_arg: str | None, from_address_arg: str | None) -> None:
+    settings = get_settings()
+    tenants_dir = Path(settings.tenants_dir)
+
+    # Resolve treeflow id (filesystem only — no DB yet).
+    try:
+        treeflow_id = resolve_treeflow(tenants_dir, tenant_slug, treeflow_arg)
+    except (FileNotFoundError, ValueError) as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from e
+
+    from_address = from_address_arg or generate_whatsapp_e164()
+
+    engine = create_async_engine(settings.database_url, future=True)
+    sf = async_sessionmaker(engine, expire_on_commit=False)
+    pool = None
+    try:
+        # Seed and grab the rows.
+        async with sf() as db:
+            try:
+                tenant_row, lead, talkflow = await _seed_session(
+                    db,
+                    tenants_dir=tenants_dir,
+                    slug=tenant_slug,
+                    treeflow_id=treeflow_id,
+                    from_address=from_address,
+                )
+            except (ValueError, FileNotFoundError) as e:
+                console.print(f"[red]{e}[/red]")
+                raise typer.Exit(1) from e
+
+        # Open the arq pool (Redis must be reachable).
+        pool = await create_pool(RedisSettings.from_dsn(settings.redis_url))
+
+        # Header.
+        console.print(
+            f"[cyan]Piloto {tenant_slug} · lead {from_address} · treeflow={treeflow_id}[/cyan]"
+        )
+        console.print("[dim](:quit ou Ctrl+C pra sair, :status pra ver estado)[/dim]")
+
+        # Run the REPL. KeyboardInterrupt is caught here for clean teardown.
+        try:
+            exit_code = await _run_loop(
+                session_factory=sf,
+                pool=pool,
+                tenant=tenant_row,
+                lead=lead,
+                talkflow=talkflow,
+                input_fn=input,
+                output_fn=console.print,
+            )
+        except KeyboardInterrupt:
+            console.print("\n[dim][encerrado][/dim]")
+            exit_code = 0
+
+        raise typer.Exit(exit_code)
+    finally:
+        if pool is not None:
+            await pool.aclose()
+        await engine.dispose()
