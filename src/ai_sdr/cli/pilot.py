@@ -53,14 +53,10 @@ def resolve_treeflow(tenants_dir: Path, slug: str, requested: str | None) -> str
     if len(files) == 1:
         return files[0].stem
     if len(files) == 0:
-        raise FileNotFoundError(
-            f"No treeflow YAML in {tf_dir}. "
-            f"Add one or pass --treeflow <id>."
-        )
+        raise FileNotFoundError(f"No treeflow YAML in {tf_dir}. Add one or pass --treeflow <id>.")
     names = ", ".join(f.stem for f in files)
     raise ValueError(
-        f"Multiple treeflows in {tf_dir}: {names}. "
-        f"Pass --treeflow <id> to disambiguate."
+        f"Multiple treeflows in {tf_dir}: {names}. Pass --treeflow <id> to disambiguate."
     )
 
 
