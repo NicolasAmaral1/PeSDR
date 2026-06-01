@@ -5,9 +5,10 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import typer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -366,3 +367,40 @@ async def test_run_loop_handoff_ends_conversation(db_session, tmp_path) -> None:
 
     assert code == 0
     assert any("pending_assignment" in o for o in outputs)
+
+
+async def test_main_runs_end_to_end_with_stubbed_pool(db_session, tmp_path, monkeypatch) -> None:
+    """End-to-end smoke: _main creates engine, opens pool, runs loop, tears down."""
+    from ai_sdr.cli import pilot as pilot_mod
+
+    tenant = Tenant(slug=f"e2e_{uuid.uuid4().hex[:6]}", display_name="E2E")
+    db_session.add(tenant)
+    await db_session.flush()
+    await set_tenant_context(db_session, tenant.id)
+    (tmp_path / tenant.slug / "treeflows").mkdir(parents=True)
+    (tmp_path / tenant.slug / "treeflows" / "pilot_test.yaml").write_text(_YAML)
+    await db_session.commit()
+
+    # Point settings.tenants_dir at our tmp_path.
+    settings = pilot_mod.get_settings()
+    monkeypatch.setattr(settings, "tenants_dir", str(tmp_path))
+
+    # Stub create_pool — production opens a Redis connection; tests don't need it.
+    pool_inst = MagicMock()
+    pool_inst.enqueue_job = AsyncMock()
+    pool_inst.aclose = AsyncMock()
+
+    async def fake_create_pool(*args, **kwargs):
+        return pool_inst
+
+    monkeypatch.setattr(pilot_mod, "create_pool", fake_create_pool)
+
+    # Inject :quit so the loop exits immediately.
+    inputs = iter([":quit"])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
+
+    with pytest.raises(typer.Exit) as exc:
+        await pilot_mod._main(tenant.slug, None, "+5511990e2e000")
+
+    assert exc.value.exit_code == 0
+    pool_inst.aclose.assert_awaited()  # cleanup happened
