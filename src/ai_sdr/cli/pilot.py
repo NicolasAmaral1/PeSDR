@@ -10,12 +10,19 @@ Scope and non-goals: see docs/superpowers/specs/2026-06-01-pilot-harness-design.
 
 from __future__ import annotations
 
+import asyncio
 import secrets
+import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import typer
 from rich.console import Console
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ai_sdr.models.outbound_message import OutboundMessage
 
 if TYPE_CHECKING:
     from ai_sdr.models.lead import Lead
@@ -68,3 +75,35 @@ def format_status_line(lead: Lead, talkflow: TalkFlow, turn_count: int) -> str:
         f"talkflow.status={talkflow.status} · "
         f"turns={turn_count}"
     )
+
+
+# --- Async DB helpers ---
+
+
+async def poll_for_outbound(
+    session: AsyncSession,
+    lead_id: uuid.UUID,
+    after: datetime,
+    max_seconds: float = 30.0,
+    interval_seconds: float = 0.5,
+) -> OutboundMessage | None:
+    """Poll outbound_messages for the first row with created_at > after.
+
+    Returns the row when found, or None after max_seconds. The caller is
+    responsible for setting tenant RLS context on the session before calling.
+    """
+    elapsed = 0.0
+    while elapsed < max_seconds:
+        result = await session.execute(
+            select(OutboundMessage)
+            .where(OutboundMessage.lead_id == lead_id)
+            .where(OutboundMessage.created_at > after)
+            .order_by(OutboundMessage.created_at.asc())
+            .limit(1)
+        )
+        row = result.scalar_one_or_none()
+        if row is not None:
+            return row
+        await asyncio.sleep(interval_seconds)
+        elapsed += interval_seconds
+    return None

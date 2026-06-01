@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import re
+import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
 from ai_sdr.cli.pilot import (
     format_status_line,
     generate_whatsapp_e164,
+    poll_for_outbound,
     resolve_treeflow,
 )
 
@@ -81,3 +85,61 @@ def test_format_status_line_includes_all_fields() -> None:
     assert "2d404cfb" in line
     assert "active" in line
     assert "turns=4" in line
+
+
+# --- poll_for_outbound ---
+
+
+def _mock_session_returning(rows_per_call: list[object | None]) -> MagicMock:
+    """Build a session whose .execute() returns scalar_one_or_none() = rows_per_call[i]
+    on call i. Use None to simulate 'no row yet'."""
+    s = MagicMock()
+    calls = iter(rows_per_call)
+
+    async def execute(_stmt):
+        result = MagicMock()
+        result.scalar_one_or_none = MagicMock(return_value=next(calls))
+        return result
+
+    s.execute = execute
+    return s
+
+
+async def test_poll_returns_first_row() -> None:
+    sentinel = MagicMock()
+    session = _mock_session_returning([sentinel])
+    row = await poll_for_outbound(
+        session,
+        lead_id=uuid.uuid4(),
+        after=datetime.now(UTC),
+        max_seconds=1.0,
+        interval_seconds=0.01,
+    )
+    assert row is sentinel
+
+
+async def test_poll_returns_none_on_timeout() -> None:
+    # Always returns None — should hit timeout and return None.
+    session = _mock_session_returning([None] * 1000)
+    row = await poll_for_outbound(
+        session,
+        lead_id=uuid.uuid4(),
+        after=datetime.now(UTC),
+        max_seconds=0.1,
+        interval_seconds=0.01,
+    )
+    assert row is None
+
+
+async def test_poll_waits_then_finds() -> None:
+    # First 3 calls return None, then a row.
+    sentinel = MagicMock()
+    session = _mock_session_returning([None, None, None, sentinel])
+    row = await poll_for_outbound(
+        session,
+        lead_id=uuid.uuid4(),
+        after=datetime.now(UTC),
+        max_seconds=1.0,
+        interval_seconds=0.01,
+    )
+    assert row is sentinel
