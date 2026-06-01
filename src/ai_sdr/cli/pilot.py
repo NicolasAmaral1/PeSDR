@@ -17,7 +17,7 @@ import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 from arq import create_pool
@@ -189,8 +189,8 @@ async def _seed_session(
 
 async def _run_loop(
     *,
-    session_factory: async_sessionmaker,
-    pool,  # arq pool; duck-typed so tests can pass a MagicMock with .enqueue_job
+    session_factory: async_sessionmaker[AsyncSession],
+    pool: Any,  # arq pool; duck-typed so tests can pass a MagicMock with .enqueue_job
     tenant: Tenant,
     lead: Lead,
     talkflow: TalkFlow,
