@@ -13,7 +13,7 @@ The current treeflow engine (Plano 2) uses LangGraph to orchestrate one LLM call
 - **No "agent navigator" awareness**: each node sees only its own prompt + history. The LLM can't compose natural transitions between nodes because it has no view of the funnel as a whole.
 - **TalkFlow state split** between Postgres (metadata) and LangGraph checkpointer (state), complicating debugging, SQL inspection, and migration.
 - **LangGraph dependency overhead** (3 deps, 2 extra Postgres tables, opinionated state model) for features (sequence, routing, persistence) that we can implement directly in ~300-400 LOC with full control.
-- **No first-class concepts** for many things now identified as essential: Talk lifecycle, User long-term memory, escalation queue, A/B variants, Sentinel pattern, voice messages, content policy, adapter generalization.
+- **No first-class concepts** for many things now identified as essential: Talk lifecycle, Lead long-term memory, escalation queue, A/B variants, Sentinel pattern, voice messages, content policy, adapter generalization.
 
 This spec proposes a redesigned **FlowEngine** that addresses all of the above as a coherent architectural ground. After implementation: a single LLM call per turn orchestrates the conversation; the LLM has dense local awareness (current node + immediate next nodes) to compose natural transitions; Talk lifecycle is explicit; integrations (CRM, calendar, notifications, voice) plug in via generalized adapters; A/B testing, metrics, and HITL approval have reserved seats in the model.
 
@@ -28,7 +28,7 @@ Out of scope for this spec (acknowledged as future):
 - **Operator UI / console implementation** (Chatwoot-style integration built separately consumes the API surface defined here).
 - **Concrete adapter implementations** beyond the framework (KommoAdapter, ElevenLabsAdapter implementation, etc. are separate plans).
 - **Statistical analysis automation for A/B tests** (Bayesian inference, multi-armed bandits, holdout groups). V1 is operator-driven analysis via raw events.
-- **Long-term User memory implementation** (slot reserved, mechanism TBD in dedicated plan).
+- **Long-term Lead memory implementation** (slot reserved, mechanism TBD in dedicated plan).
 - **Conversation summarization** for long histories (slot reserved).
 - **Knowledge graph for extracted_facts** (kept as simple dict).
 - **Real-time streaming response generation** (typing indicator + chunked send fulfills UX).
@@ -39,14 +39,29 @@ Out of scope for this spec (acknowledged as future):
 
 ## 3. Core conceptual model
 
-### 3.1. User
+### 3.0. Terminology — `Lead` vs `users` (operators)
 
-The lead identity. Long-lived across multiple Talks. New table `users` (separate from `leads`):
+This system uses two distinct identity concepts that must NEVER be conflated:
+
+| Concept | Pydantic class | Table | What it represents |
+|---|---|---|---|
+| **Lead identity** | `Lead` | `leads` (existing, extended) | The prospect — the person being qualified by the SDR. Long-lived across multiple Talks. |
+| **System user (operator)** | existing P11 `User` | `users` (P11, untouched) | Team members of the tenant (operators, admins, viewers) who use the system. |
+
+An earlier draft of this spec called the lead identity `User`. That conflicted with the existing P11 `users` table that holds operators. **Final naming: lead identity is `Lead`** (extending the existing `leads` table with long-lived identity fields). Anywhere in this spec, in code, in tables, in events, or in API endpoints, `Lead` means the prospect, and `users` (lowercase plural, P11) means the operators. The two terms are never interchangeable.
+
+### 3.1. Lead
+
+The lead identity. Long-lived across multiple Talks. Extends existing `leads` table with new fields:
 
 ```python
-class User:
+class Lead:
+    # Existing fields (preserved from current leads table)
     id: uuid.UUID
     tenant_id: uuid.UUID
+    # ... (phone, name, existing fields preserved)
+
+    # New fields added by FE-01:
     
     # Channel identifiers — multi-channel ready
     channel_identifiers: dict[str, str]  # {"whatsapp": "+5511...", "telegram": "@id", ...}
@@ -71,17 +86,17 @@ class User:
     created_at: datetime
 ```
 
-A User can have many Talks (over time and concurrently, though v1 restricts to one active per tenant).
+A Lead can have many Talks (over time and concurrently, though v1 restricts to one active per tenant).
 
 ### 3.2. Talk
 
-A conversation session — a discrete period of agent-lead interaction. Multiple Talks per User across time. Each Talk lives in exactly one TreeFlow (immutable per Talk).
+A conversation session — a discrete period of agent-lead interaction. Multiple Talks per Lead across time. Each Talk lives in exactly one TreeFlow (immutable per Talk).
 
 ```python
 class Talk:
     id: uuid.UUID
     tenant_id: uuid.UUID
-    user_id: uuid.UUID
+    lead_id: uuid.UUID
     
     # Bound TreeFlow (immutable for the Talk's lifetime)
     treeflow_id: str
@@ -201,7 +216,7 @@ Stored as before in `treeflow_versions` (no schema change to that table). The YA
 - **TreeFlow**: versioned by content_hash. Multiple versions can coexist.
 - **TreeFlow version**: immutable snapshot.
 - **Talk**: bound to a specific TreeFlow version (snapshot at creation).
-- **User**: long-lived, many Talks.
+- **Lead**: long-lived, many Talks.
 
 Updating a TreeFlow YAML creates a new version. Existing Talks keep their snapshot; new Talks use the latest. No mid-Talk migration.
 
@@ -212,19 +227,19 @@ Inbound message arrives
   ↓
 [1] Webhook ingestion (existing): InboundMessageRow saved, arq job enqueued
   ↓
-[2] Worker.process_lead_inbox picks up. Acquires per-(tenant, user) advisory lock.
+[2] Worker.process_lead_inbox picks up. Acquires per-(tenant, lead) advisory lock.
   ↓
 [3] Preprocessing (Python — fast, deterministic):
-    - Resolve User from inbound message
-    - Detect bloqueio (user.risk_level == 'banned' → silent)
+    - Resolve Lead from inbound message
+    - Detect bloqueio (lead.risk_level == 'banned' → silent)
     - Detect opt-out keywords → close Talk as closed_optout
-    - Resolve active Talk for this User (lookup function)
+    - Resolve active Talk for this Lead (lookup function)
     - If Talk.handling_mode == 'human' → just store message in history, emit event, return
     - If Talk.handling_mode == 'auto_with_approval' → main LLM proceeds but response goes to review queue
   ↓
 [4] Sentinel layer:
     - Heuristic checks (length, suspicious patterns, history of flags)
-    - If user.risk_level == 'elevated' → Sentinel LLM called always
+    - If lead.risk_level == 'elevated' → Sentinel LLM called always
     - If heuristic flagged → Sentinel LLM called
     - Otherwise skip
     - Verdict: safe | suspicious | attack → action determined
@@ -514,7 +529,7 @@ Max 1 corrective retry; on second failure, force stay in current_node + log warn
 
 If any rule fires → flagged.
 
-**Stage 2 — Sentinel LLM** (runs if flagged OR if `user.risk_level == 'elevated'`):
+**Stage 2 — Sentinel LLM** (runs if flagged OR if `lead.risk_level == 'elevated'`):
 
 Sentinel LLM uses dedicated config in `tenant.security.sentinel.llm` (probably cheap model). Receives:
 
@@ -535,12 +550,12 @@ class SentinelVerdict(BaseModel):
 ### 8.2. Sentinel Mode (elevated risk_level)
 
 When verdict is `suspicious` or `attack` (or LLM principal flagged via `suspect_injection_attempt`):
-- User.risk_level → `elevated`
+- Lead.risk_level → `elevated`
 - All subsequent inbound messages run through Sentinel LLM (no heuristic gating)
 - Cleared after N consecutive `safe` verdicts (default 20) OR after time-based clear (default 60 days) OR manual operator clear
 
 When verdict is `attack`:
-- User.risk_level → `banned`
+- Lead.risk_level → `banned`
 - Talk status → `closed_banned`
 - All inbound silenced
 - Audit + alert operator
@@ -772,7 +787,7 @@ on_collected:
       - adapter: calendar
         operation: book_slot
         args:
-          attendee: "{{ user.display_name }}"
+          attendee: "{{ lead.display_name }}"
           duration_minutes: 30
           slot_hint: "{{ collected.melhor_horario }}"
       
@@ -1001,8 +1016,8 @@ For hard validation failures, max 1 retry then escalate to operator review queue
 ### 16.1. Open
 
 A Talk opens when:
-- New User sends inbound and no active Talk exists → `talks` row created with TreeFlow per tenant routing rule (v1: tenant default)
-- (V2) Outbound-initiated trigger fires for a User
+- New Lead sends inbound and no active Talk exists → `talks` row created with TreeFlow per tenant routing rule (v1: tenant default)
+- (V2) Outbound-initiated trigger fires for a Lead
 - (V2) Operator creates manually via API
 
 ### 16.2. Operating modes
@@ -1026,7 +1041,7 @@ A Talk closes when ANY of:
 
 Closure_by field records which mechanism triggered. Talk status → appropriate `closed_*` value.
 
-On closure: events emitted, extracted_facts available for User profile promotion (v2), Talk preserved as historical record.
+On closure: events emitted, extracted_facts available for Lead profile promotion (v2), Talk preserved as historical record.
 
 ## 17. Memory
 
@@ -1038,11 +1053,11 @@ Emitted in `TurnDecision.extracted_facts`. Accumulates across turns. Injected in
 
 When Talk closes:
 - V1: extracted_facts remain on the closed Talk record (queryable but not auto-promoted)
-- V2: promotion mechanism (operator or LLM judge) moves subset to User.profile
+- V2: promotion mechanism (operator or LLM judge) moves subset to Lead.profile
 
-### 17.2. Long-term (User-scoped, slot v1)
+### 17.2. Long-term (Lead-scoped, slot v1)
 
-`User.profile: dict[str, Any]` + `User.long_term_memory_enabled: bool = False`.
+`Lead.profile: dict[str, Any]` + `Lead.long_term_memory_enabled: bool = False`.
 
 V1: schema present, runtime ignores. V2: when enabled, profile is part of system prompt cached layer ("Sobre este lead na história: ...").
 
@@ -1084,7 +1099,7 @@ V1 ships without warming; v2 optimizes when needed.
 | Persistent failures (after retries) | Talk.status → requires_review. Console queue. Lead receives graceful fallback after M minutes. |
 | LLM next_node_suggestion invalid | Ignore suggestion, stay in current_node, response_text sent as-is. Log warning. |
 | Sentinel LLM timeout | Fail-safe 5s max. 3 consecutive failures in window → circuit breaker, disable Sentinel for tenant + alert. |
-| Sentinel verdict `attack` | User.risk_level → banned. Talk closed_banned. Silent. Audit logged. |
+| Sentinel verdict `attack` | Lead.risk_level → banned. Talk closed_banned. Silent. Audit logged. |
 | Adapter send timeout/rate limit | Audit failed. Re-enqueue arq +30s with idempotency_key (same response_text). After 3 failures: alert + fallback. |
 | DB transaction fail mid-turn | Rollback. Advisory lock releases. Queue re-delivers. Idempotent via inbound_message_id. |
 | Worker crash mid-turn | Advisory lock releases. Queue re-delivers. Idempotency key on OutboundMessage prevents duplicate send. |
@@ -1146,7 +1161,7 @@ CREATE TABLE events (
     payload jsonb NOT NULL,
     
     talk_id uuid,
-    user_id uuid,
+    lead_id uuid,
     
     experiment_id uuid,
     experiment_variant text,
@@ -1175,7 +1190,7 @@ CREATE POLICY events_tenant_isolation ON events
 - `message.received` (inbound), `message.sent` (outbound)
 - `objection.detected`, `objection.resolved`, `objection.exhausted`
 - `node.transitioned`
-- `user.created`, `user.risk_level_changed`, `user.banned`
+- `lead.created`, `lead.risk_level_changed`, `lead.banned`
 - `sentinel.reviewed`
 - `review.created`, `review.approved`, `review.rejected`, `review.edited`
 - `adapter.call.completed`, `adapter.call.failed`
@@ -1232,7 +1247,7 @@ Designed for the future Chatwoot-style operator UI to consume. v1 implements min
 
 - `GET /api/v1/tenants/{slug}/talks?status=...&limit=...&cursor=...`
 - `GET /api/v1/talks/{id}` — full Talk + TalkFlowState + recent history
-- `GET /api/v1/users/{id}` — User with profile + Talks summary
+- `GET /api/v1/leads/{id}` — Lead with profile + Talks summary
 - `GET /api/v1/talks/{id}/messages?cursor=...&before=...&after=...`
 - `GET /api/v1/tenants/{slug}/reviews?status=pending` — review queue
 - `GET /api/v1/tenants/{slug}/escalations?urgency=...` — escalation queue
@@ -1247,7 +1262,7 @@ Designed for the future Chatwoot-style operator UI to consume. v1 implements min
 - `POST /api/v1/reviews/{id}/approve` — approve AI response
 - `POST /api/v1/reviews/{id}/edit` — edit AI response
 - `POST /api/v1/reviews/{id}/reject` — reject AI response with reason → triggers correction
-- `POST /api/v1/users/{id}/risk-level` — elevate/lower
+- `POST /api/v1/leads/{id}/risk-level` — elevate/lower
 - `POST /api/v1/tenants/{slug}/experiments` — create experiment
 - `POST /api/v1/experiments/{id}/status` — start/pause/conclude
 
@@ -1283,11 +1298,11 @@ Required by Brazilian privacy law (LGPD) and similar regulations. Implementation
 
 **Data export (right to portability):**
 
-- `GET /api/v1/users/{id}/export?format=json` — returns ALL data associated with the User in machine-readable format. Includes: User profile, all Talks (active and closed), full conversation histories, extracted_facts, audit events. Tenant-scoped auth. Returns 200 with downloadable JSON.
+- `GET /api/v1/leads/{id}/export?format=json` — returns ALL data associated with the Lead in machine-readable format. Includes: Lead profile, all Talks (active and closed), full conversation histories, extracted_facts, audit events. Tenant-scoped auth. Returns 200 with downloadable JSON.
 
 **Data deletion (right to erasure):**
 
-- `DELETE /api/v1/users/{id}?cascade=true` — permanently deletes the User and all data linked to it. Cascades through: Talks → TalkFlowStates → InboundMessages → OutboundMessages → ResponseReviews → SentinelReviews → Events (the User's events) → AdapterCalls. Tenant-scoped auth. Returns 204 on success.
+- `DELETE /api/v1/leads/{id}?cascade=true` — permanently deletes the Lead and all data linked to it. Cascades through: Talks → TalkFlowStates → InboundMessages → OutboundMessages → ResponseReviews → SentinelReviews → Events (the Lead's events) → AdapterCalls. Tenant-scoped auth. Returns 204 on success.
 
 Cascading is implemented via FK `ON DELETE CASCADE` declared in migrations. Audit-relevant aggregates (tenant-level metrics) survive because they don't reference individual Users.
 
@@ -1420,7 +1435,7 @@ class Experiment:
     
     status: Literal["draft", "running", "paused", "concluded"]
     
-    eligibility_rules: list[str]  # Python expressions evaluated on User
+    eligibility_rules: list[str]  # Python expressions evaluated on Lead
     
     started_at: datetime | None
     expected_end: datetime | None
@@ -1459,19 +1474,19 @@ SuccessMetric = Literal[
 
 ### 25.2. Assignment
 
-When new Talk opens for User:
+When new Talk opens for Lead:
 
 ```python
-def assign_experiments(user, tenant):
+def assign_experiments(lead, tenant):
     active_exps = list_active_experiments(tenant)
     
-    if user.is_in_experiment:
-        # Deterministic recall — same user always same variant
-        return user.current_experiment_assignment
+    if lead.is_in_experiment:
+        # Deterministic recall — same lead always same variant
+        return lead.current_experiment_assignment
     
     eligible_exps = []
     for exp in active_exps:
-        if eval_eligibility(exp.eligibility_rules, user):
+        if eval_eligibility(exp.eligibility_rules, lead):
             eligible_exps.append(exp)
     
     if not eligible_exps:
@@ -1482,7 +1497,7 @@ def assign_experiments(user, tenant):
     chosen_exp = eligible_exps[0]
     
     # Bucket via hash
-    bucket = sha256(f"{user.id}:{chosen_exp.id}".encode()).digest()[0] / 255.0
+    bucket = sha256(f"{lead.id}:{chosen_exp.id}".encode()).digest()[0] / 255.0
     cum = 0.0
     for variant_name, variant in chosen_exp.variants.items():
         cum += variant.split
@@ -1540,7 +1555,7 @@ V1 uses naive statistics (proportion z-test for rates, t-test for averages). V2 
 TurnCompletedEvent.payload = {
     "talk_id": str,
     "tenant_id": str,
-    "user_id": str,
+    "lead_id": str,
     "turn_index": int,
     
     "current_node_before": str,
@@ -1745,19 +1760,19 @@ privacy:
 Schema migrations introduce:
 
 ```
-12_create_users_table_v2.py        — User (new model, separate from Lead)
-13_create_talks_table.py
-14_create_talkflow_states_table.py
-15_create_events_table.py
-16_create_experiments_table.py
-17_create_response_reviews_table.py
-18_create_sentinel_reviews_table.py
-19_create_adapter_calls_table.py
-20_create_treeflow_improvement_suggestions_table.py
-21_extend_outbound_messages_with_media.py
-22_extend_inbound_messages_with_media.py
-23_drop_langgraph_checkpointer_tables.py
-24_create_operator_actions_table.py    -- future, when HITL spec lands
+0012_extend_leads_with_identity_fields.py  — Lead long-lived identity fields (channel_identifiers, profile, risk_level, acquisition_metadata) added to existing leads table
+0013_create_talks_table.py                  — Talk row (FK: tenant_id, lead_id, treeflow_version_id)
+0014_create_talkflow_states_table.py        — runtime state, 1:1 with Talk
+0015_create_events_table.py                 — event sourcing audit + BI
+0016_create_experiments_table.py            — A/B testing
+0017_create_response_reviews_table.py       — HITL approval queue (reserved terreno)
+0018_create_sentinel_reviews_table.py       — Sentinel audit
+0019_create_adapter_calls_table.py          — adapter call audit
+0020_create_treeflow_improvement_suggestions_table.py — operator feedback loop
+0021_extend_outbound_messages_with_media.py — voice/audio fields on outbound
+0022_extend_inbound_messages_with_media.py  — voice/audio fields on inbound
+0023_drop_langgraph_checkpointer_tables.py  — executed in FE-02 (not FE-01)
+0024_create_operator_actions_table.py       — future, when HITL spec lands
 ```
 
 All new tables: RLS enabled, tenant_id-scoped, indexes for common queries, partial indexes where useful.
@@ -1884,7 +1899,7 @@ Currently OutboundMessage has `triggered_by` indicating source. When HITL approv
 
 ### 32.2. Lead acquisition metadata
 
-User schema reserves `acquisition_metadata` JSONB. When attribution analytics or campaign tracking is needed, populate at webhook ingestion (UTM params, source, medium, campaign_id). Drives BI attribution analysis.
+Lead schema reserves `acquisition_metadata` JSONB. When attribution analytics or campaign tracking is needed, populate at webhook ingestion (UTM params, source, medium, campaign_id). Drives BI attribution analysis.
 
 ### 32.3. Conversation summarization
 
@@ -1892,7 +1907,7 @@ When `len(messages) > 30`, run summarization LLM call to compact messages 16..N 
 
 ### 32.4. Cross-channel identity resolution
 
-When multiple messaging adapters are active (WhatsApp + Telegram + Instagram), mechanism to detect same person across channels and merge User records. Complex — needs careful design.
+When multiple messaging adapters are active (WhatsApp + Telegram + Instagram), mechanism to detect same person across channels and merge Lead records. Complex — needs careful design.
 
 ### 32.5. Content policy enforcement (regulated industries)
 
@@ -1905,11 +1920,11 @@ Schema slot `tenant.content_policy.prohibited_topics` exists. When first regulat
 
 Schema slot `node.initiated_by: scheduled | event | manual` reserved. When drip campaigns or proactive re-engagement is built, TreeFlows can have nodes that initiate conversations (not just respond). Triggered by cron, CRM event, or manual action.
 
-### 32.7. Long-term memory (User profile)
+### 32.7. Long-term memory (Lead profile)
 
 Schema slot exists. When activated:
-- Promotion mechanism: rule-based or LLM-decided which facts go to User.profile from closed Talks
-- System prompt cached layer includes User.profile when present
+- Promotion mechanism: rule-based or LLM-decided which facts go to Lead.profile from closed Talks
+- System prompt cached layer includes Lead.profile when present
 - Privacy: respect LGPD with TTL/deletion on demand
 
 ### 32.8. Voice cloning
@@ -1933,17 +1948,17 @@ Schema slot `tenant.language: pt-BR` reserved. When non-pt-BR tenant comes:
 The architecture reserves hooks for LGPD compliance (Brazilian data protection law); implementation timeline aligns with Pedro's Onda 2.1 plan.
 
 **Hooks already in place (this spec):**
-- API endpoints `GET /api/v1/users/{id}/export` and `DELETE /api/v1/users/{id}?cascade=true` (§23.6)
+- API endpoints `GET /api/v1/leads/{id}/export` and `DELETE /api/v1/leads/{id}?cascade=true` (§23.6)
 - Tenant config slot `privacy` with retention policy + consent notice + data subject rights (§27)
-- FK cascading: all new tables (talks, talkflow_states, response_reviews, sentinel_reviews, adapter_calls) declare `ON DELETE CASCADE` from `users.id`. Events table retains tenant-level rows but the User's events cascade-delete via user_id.
+- FK cascading: all new tables (talks, talkflow_states, response_reviews, sentinel_reviews, adapter_calls) declare `ON DELETE CASCADE` from `leads.id`. Events table retains tenant-level rows but the Lead's events cascade-delete via lead_id.
 - Consent notice mechanism in pipeline: when `tenant.privacy.consent_notice_enabled = true`, first outbound of a new Talk receives the configured notice (prepended or as separate message based on `consent_notice_mode`).
 
 **Implementation pending (Pedro Onda 2.1 plan):**
-- Concrete export endpoint that gathers User data across all tables (Talks + TalkFlowStates + messages + facts + events + audit)
+- Concrete export endpoint that gathers Lead data across all tables (Talks + TalkFlowStates + messages + facts + events + audit)
 - Scheduled retention job: nightly cron that deletes data exceeding `tenant.privacy.retention_policy.*` thresholds
 - Operator notification flow when data subject request arrives
 - PII encryption at rest:
-  - Column-level encryption with pgcrypto for `User.profile`, `extracted_facts`, `Message.content`
+  - Column-level encryption with pgcrypto for `Lead.profile`, `extracted_facts`, `Message.content`
   - Or full-disk encryption at Postgres level (TDE)
   - Key management via Vault, AWS KMS, or similar
 - Disclaimer copy review by legal counsel before activation
