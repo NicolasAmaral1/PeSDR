@@ -1258,6 +1258,43 @@ Designed for the future Chatwoot-style operator UI to consume. v1 implements min
 
 Authentication via token in query string or header.
 
+### 23.5. Health check
+
+- `GET /healthz` — liveness/readiness probe for the API process. Returns 200 with structured JSON describing component status: DB (Postgres connectivity + migration head), Redis (arq pool reachable), critical adapters (LLM provider reachable). 503 if any critical dependency is down. No auth required (internal infrastructure endpoint).
+
+Example response:
+
+```json
+{
+  "status": "healthy",
+  "checks": {
+    "postgres": {"status": "ok", "migration_head": "0023_..."},
+    "redis": {"status": "ok"},
+    "llm_provider_openai": {"status": "ok", "latency_ms": 142},
+    "llm_provider_anthropic": {"status": "skipped", "reason": "not configured"}
+  },
+  "timestamp": "2026-06-08T14:32:00Z"
+}
+```
+
+### 23.6. LGPD endpoints (data subject rights)
+
+Required by Brazilian privacy law (LGPD) and similar regulations. Implementation timeline aligns with Pedro Onda 2.1, but API endpoints are reserved here so the architecture supports them from day one.
+
+**Data export (right to portability):**
+
+- `GET /api/v1/users/{id}/export?format=json` — returns ALL data associated with the User in machine-readable format. Includes: User profile, all Talks (active and closed), full conversation histories, extracted_facts, audit events. Tenant-scoped auth. Returns 200 with downloadable JSON.
+
+**Data deletion (right to erasure):**
+
+- `DELETE /api/v1/users/{id}?cascade=true` — permanently deletes the User and all data linked to it. Cascades through: Talks → TalkFlowStates → InboundMessages → OutboundMessages → ResponseReviews → SentinelReviews → Events (the User's events) → AdapterCalls. Tenant-scoped auth. Returns 204 on success.
+
+Cascading is implemented via FK `ON DELETE CASCADE` declared in migrations. Audit-relevant aggregates (tenant-level metrics) survive because they don't reference individual Users.
+
+**Disclaimer / consent notice (slot):**
+
+When `tenant.privacy.consent_notice_enabled = true`, the first outbound message of a new Talk is prepended (or split into a separate message) with the configured consent text. See §27 for tenant config slot.
+
 ## 24. HITL approval workflow (reserved terreno)
 
 Future feature: when Talk.handling_mode == `auto_with_approval`, AI generates → goes to review queue → operator approves/edits/rejects.
@@ -1676,6 +1713,31 @@ budget:
   monthly_usd_ceiling: null
   on_exceeded: degrade_to_text
   alerts_at: [0.7, 0.9]
+
+# Privacy / LGPD (slot for Pedro Onda 2.1)
+privacy:
+  # Consent notice prepended to first message of new Talks
+  consent_notice_enabled: false
+  consent_notice_text: |
+    Para te atender, vamos guardar nossa conversa e algumas informações que você
+    compartilhar. Isso é usado só para te qualificar e te ajudar. Você pode pedir
+    para apagar tudo a qualquer momento.
+  consent_notice_mode: prepend  # prepend | separate_message
+
+  # Retention policy per data category (days)
+  retention_policy:
+    closed_talk_messages: 365      # mensagens de Talks fechadas
+    extracted_facts: 365            # facts de Talks fechadas
+    audit_events: 730               # eventos pra auditoria
+    sentinel_reviews: 1095          # auditoria de segurança (3 anos)
+    user_profile_inactive: null     # null = não deletar automaticamente
+
+  # Data subject rights (LGPD direitos do titular)
+  data_subject_rights:
+    enabled: true
+    export_format: json             # formato pra export
+    deletion_cascade: true          # delete em cascata
+    operator_notification_on_request: true
 ```
 
 ## 28. New tables (consolidated)
@@ -1866,12 +1928,25 @@ Schema slot `tenant.language: pt-BR` reserved. When non-pt-BR tenant comes:
 - TreeFlow YAML supports language declaration
 - Date/currency/number formatting helpers
 
-### 32.10. PII encryption at rest
+### 32.10. LGPD baseline + PII encryption at rest (Pedro Onda 2.1)
 
-Sensitive fields (phone numbers, extracted_facts containing demographics) currently plain in Postgres. When compliance requires:
-- Column-level encryption with pgcrypto
-- OR full-disk encryption at Postgres level
-- Key management strategy
+The architecture reserves hooks for LGPD compliance (Brazilian data protection law); implementation timeline aligns with Pedro's Onda 2.1 plan.
+
+**Hooks already in place (this spec):**
+- API endpoints `GET /api/v1/users/{id}/export` and `DELETE /api/v1/users/{id}?cascade=true` (§23.6)
+- Tenant config slot `privacy` with retention policy + consent notice + data subject rights (§27)
+- FK cascading: all new tables (talks, talkflow_states, response_reviews, sentinel_reviews, adapter_calls) declare `ON DELETE CASCADE` from `users.id`. Events table retains tenant-level rows but the User's events cascade-delete via user_id.
+- Consent notice mechanism in pipeline: when `tenant.privacy.consent_notice_enabled = true`, first outbound of a new Talk receives the configured notice (prepended or as separate message based on `consent_notice_mode`).
+
+**Implementation pending (Pedro Onda 2.1 plan):**
+- Concrete export endpoint that gathers User data across all tables (Talks + TalkFlowStates + messages + facts + events + audit)
+- Scheduled retention job: nightly cron that deletes data exceeding `tenant.privacy.retention_policy.*` thresholds
+- Operator notification flow when data subject request arrives
+- PII encryption at rest:
+  - Column-level encryption with pgcrypto for `User.profile`, `extracted_facts`, `Message.content`
+  - Or full-disk encryption at Postgres level (TDE)
+  - Key management via Vault, AWS KMS, or similar
+- Disclaimer copy review by legal counsel before activation
 
 ### 32.11. Real phone calls (voice over PSTN)
 
@@ -1952,14 +2027,30 @@ ElevenLabs at scale could become a notable cost line. Monitor `voice_synthesis_c
 
 ### 33.5. Coordinating with Pedro's roadmap
 
-Several items in this spec overlap with Pedro Onda 0/1/2:
-- Backup automation (Pedro Onda 0.3) — preserved in §31.2
-- Cost ceiling (Onda 1.1) — slot reserved (§27, §32.18)
-- LangFuse (Onda 1.2) — adapter slot (§32.20)
-- LGPD baseline (Onda 2.1) — slots reserved (§32.10)
-- Plano 4b validation matrix — not directly addressed
+This spec overlaps with Pedro's PR #4 roadmap (Ondas 0, 1, 2). For each overlapping item, we identify what's addressed here (architectural hooks/slots) vs what stays in Pedro's plan (implementation).
 
-When implementation begins, coordinate with Pedro's plans to avoid duplication.
+**Onda 0 — Foundation Infra:**
+- 0.1 Pin versions in young libs (langgraph/langchain) — **N/A**: LangGraph removed; LangChain pinning stays in Pedro's plan
+- 0.2 CI/CD via GitHub Actions — stays in Pedro's plan (no architectural impact)
+- 0.3 Backup automatizado + restore testado — addressed in §31.2 as discipline rule; implementation in Pedro's plan
+
+**Onda 1 — Safety & Observability:**
+- 1.1 Cost ceiling enforcement — slot reserved in `tenant.budget` (§27); slot in §32.18; implementation in Pedro's plan
+- 1.2 LangFuse integration — `AnalyticsForwarderAdapter` slot (§13.1) + plan slot in §32.20; implementation in Pedro's plan
+- 1.3 Rate limiting nos webhooks — stays in Pedro's plan (webhook ingestion layer, not pipeline)
+- 1.4 HTTPS via Traefik — stays in Pedro's plan (infrastructure, not application)
+
+**Onda 2 — Compliance & Readiness:**
+- 2.1 LGPD baseline (disclaimer + retention + delete endpoint) — **hooks added here:**
+  - API endpoints `GET /api/v1/users/{id}/export` and `DELETE /api/v1/users/{id}?cascade=true` (§23.6)
+  - `tenant.privacy` config slot (§27) with consent_notice + retention_policy + data_subject_rights
+  - FK cascading declared in new table migrations
+  - Implementation of scheduled retention job, export logic, consent notice rendering: Pedro's plan
+- 2.2 Plano 4b validation matrix multi-provider — **N/A here**: stays as Pedro's testing/QA plan; FlowEngine spec provides `init_chat_model` abstraction (§29.2) but validation across providers is separate work
+- 2.3 Runbook operacional + health check completo — **hook added here:** `GET /healthz` endpoint (§23.5) with structured component status; runbook documentation stays in Pedro's plan
+- 2.4 Security review final — **N/A here**: one-time activity, stays in Pedro's plan
+
+**Coordination principle:** when both this spec and Pedro's plan touch the same area, the API/schema slot defined here is authoritative; Pedro's plan fills in implementation. If Pedro's plan requires changes to the slot definition, escalate as a spec amendment.
 
 ---
 
