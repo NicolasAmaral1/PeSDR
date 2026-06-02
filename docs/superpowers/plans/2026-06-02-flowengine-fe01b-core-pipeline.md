@@ -133,14 +133,14 @@ This plan has 22 tasks across 6 phases. Each task is one focused change (file or
 15. **Send response via MessagingAdapter** — call existing `MessagingAdapter.send_text(lead, response_text)` (no chunking yet — humanization comes in FE-03). Capture send result (external_id, status) for audit. Voice path (`response_format=voice|both`) is rejected in FE-01b with a fallback to text + warning log (FE-05 implements voice).
 16. **Audit OutboundMessage row** — write `OutboundMessage` row with `media_type=text`, `triggered_by="inbound"`, all FK references, `inbound_message_id` link, idempotency_key. Uses existing P10 `outbound_audit` helpers — extend signature if needed to accept Talk instead of Talkflow.
 
-### Phase 6 — Orchestration + Integration + Cutover (5 tasks)
+### Phase 6 — Orchestration + Integration + Cutover (6 tasks)
 
-17. **Pipeline orchestrator** — `flowengine/pipeline.py::run_turn(tenant, inbound_message_row) -> RunTurnResult` composes the 12 steps from spec §4. Handles advisory lock, error paths (LLM timeout retry, malformed JSON retry, etc. — minimal version of §20). Idempotency: if OutboundMessage with same `(turn_index, chunk_index)` already exists, no-op early. Tests cover end-to-end with FakeListChatModel + FakeMessagingAdapter.
-18. **process_lead_inbox feature flag branch** — `worker/jobs/inbound.py` gains: if `tenant.architecture_version == 2` → `await run_turn(tenant, inbound_message)`; else → existing LangGraph path unchanged. Tests verify routing decision based on tenant config.
-19. **Tenant loader: architecture_version + sdr_persona slot** — `tenant_loader/loader.py` parses `architecture_version` (default 1) and accepts `sdr_persona` block (without enforcing schema yet — passed as raw dict to TreeflowLoader). Updates `TenantConfig` Pydantic. Tests cover backward compat (tenants without these fields parse fine).
-20. **Avelum test fixture v2** — `tests/fixtures/avelum_treeflow_v2.yaml` (minimal 2-node TreeFlow: saudacao → qualificacao_simples) + `tests/fixtures/avelum_tenant_v2.yaml` (architecture_version=2, sdr_persona pointing at the TreeFlow). Used by integration tests.
-21. **Pilot harness v2 path** — `cli/simulate.py` gains `--arch-v2` flag that runs through `run_turn` instead of the LangGraph runtime. Same REPL UX; just dispatches differently. Smoke verification: drive a 3-turn conversation manually against FakeMessagingAdapter.
-22. **Smoke E2E + cutover docs** — `tests/integration/test_pipeline_smoke_end_to_end.py` runs a 3-turn happy-path conversation through `run_turn` with FakeListChatModel returning canned TurnDecisions. Verify: state mutations, OutboundMessage rows, no crashes. Also: write a 1-paragraph cutover note in `docs/superpowers/notes/2026-06-02-fe01b-cutover.md` describing how to flip a tenant from v1 to v2.
+17. **Pipeline orchestrator** — `flowengine/pipeline.py::run_turn(tenant, inbound_message_row) -> RunTurnResult` composes the 12 steps from spec §4. Handles advisory lock, error paths (LLM timeout retry, malformed JSON retry, etc. — minimal version of §20). Idempotency: if OutboundMessage with same `(turn_id, chunk_index)` already exists, no-op early. Tests cover end-to-end with FakeListChatModel + FakeMessagingAdapter.
+18. **process_lead_inbox feature flag branch** — `worker/jobs/inbound.py` gains: if `tenant.architecture_version == 2` → `await run_turn(tenant, inbound_message)`; else → existing LangGraph path unchanged. The tenant flag is read from the `tenants` DB row (DB column is the authoritative source of truth — YAML does NOT carry this field). Tests verify routing decision based on the DB column.
+19. **Tenant loader: `sdr_persona` slot pass-through** — `tenant_loader/loader.py` accepts an optional `sdr_persona` block in `tenant.yaml` and passes it through as a raw dict (no schema enforcement; that lives in the TreeFlow YAML in FE-03+). `architecture_version` is NOT parsed from YAML — it lives only in the `tenants.architecture_version` DB column. Tests cover backward compat (tenants without `sdr_persona` parse fine) + a smoke test that the slot makes it through to the loader output untouched.
+20. **Avelum test fixture v2** — `tests/fixtures/avelum_treeflow_v2.yaml` (minimal 2-node TreeFlow: saudacao → qualificacao_simples) + `tests/fixtures/avelum_tenant_v2.yaml` (sdr_persona pointing at the TreeFlow; no `architecture_version` field). Used by integration tests. Avelum's row in the dev DB is also flipped to `architecture_version=2` via a one-line SQL stamped into the test fixture's conftest setup.
+21. **Pilot harness v2 path** — `cli/simulate.py` gains `--arch-v2` flag that runs through `run_turn` instead of the LangGraph runtime. Same REPL UX; just dispatches differently. The flag is a CLI override (doesn't require flipping the DB row); useful for local development. Smoke verification: drive a 3-turn conversation manually against FakeMessagingAdapter.
+22. **Smoke E2E + cutover docs** — `tests/integration/test_pipeline_smoke_end_to_end.py` runs a 3-turn happy-path conversation through `run_turn` with FakeListChatModel returning canned TurnDecisions. Verify: state mutations, OutboundMessage rows, no crashes. Also: write a 1-paragraph cutover note in `docs/superpowers/notes/2026-06-02-fe01b-cutover.md` describing how to flip a tenant from v1 to v2 (the SQL update on `tenants.architecture_version`, plus what to monitor in the first hour after flip).
 
 ---
 
@@ -153,12 +153,24 @@ This plan has 22 tasks across 6 phases. Each task is one focused change (file or
 - Avelum tenant in dev DB (`ai_sdr_fe01a`) can be flipped to `architecture_version=2` and an inbound message routes through `run_turn` correctly.
 - Wider test suite shows no NEW regressions vs the FE-01a baseline (38 pre-existing failures should stay at 38, not grow).
 
-## Risks / Open questions to confirm before execution
+## Resolved design decisions (read before executing)
 
-1. **LangChain `with_structured_output` quirks across providers.** The contract differs slightly between Anthropic (tool-use) and OpenAI (json_mode). Task 8's `main_llm_for_tenant` should normalize. Confirm by smoke-testing with both providers in a follow-up live_llm test (optional).
-2. **Prompt cache_control marker format.** Anthropic expects `{"type": "ephemeral"}` on the content block. The exact LangChain wrapper for this is `additional_kwargs={"cache_control": {"type": "ephemeral"}}` on `SystemMessage`. Task 7 needs to verify this against the langchain-anthropic version pinned in pyproject.toml.
-3. **Tenant.architecture_version reads.** The `tenants` SQLAlchemy model exposes `architecture_version` (FE-01a). `tenant_loader.loader.TenantConfig` Pydantic doesn't yet. Task 19 wires the YAML side (`tenant.yaml`), but the worker reads from the DB row — pick one source of truth. Plan: DB column is authoritative; YAML can override at load time (so a YAML change doesn't require DB update for a single-tenant dev).
-4. **Idempotency key for OutboundMessage when no chunking.** FE-01b sends one message per turn (no chunks). Idempotency key = `f"{tenant_id}:{talk_id}:{turn_index}:0"`. Document this in Task 16.
+These four risks were flagged in the initial draft and resolved before execution begins. Tasks below assume these decisions are locked.
+
+1. **`with_structured_output` across providers — use `method="function_calling"` explicitly.** LangChain's structured-output binding is provider-agnostic at the API level, but the default method varies (Anthropic uses tool-use, OpenAI uses function-calling, json_mode is older and less strict). Pass `method="function_calling"` explicitly when building the structured LLM in Task 8 — Pydantic schema maps to a tool definition, both providers parse uniformly, schema-level enforcement is guaranteed. Avoid `method="json_mode"`.
+
+2. **Anthropic prompt cache_control — use per-block structured content list.** Place `cache_control` on individual content blocks inside the `SystemMessage` content list, not on `additional_kwargs`. The format is:
+   ```python
+   SystemMessage(content=[
+       {"type": "text", "text": cached_persona,
+        "cache_control": {"type": "ephemeral"}},
+   ])
+   ```
+   This is the raw Anthropic API format, supported by every recent `langchain-anthropic` version including the one pinned in pyproject.toml. The `additional_kwargs` pattern is less version-stable.
+
+3. **`architecture_version` is DB-authoritative; YAML does NOT carry it.** Worker reads from the `tenants.architecture_version` column directly. Flipping a tenant v1→v2 is an operational decision with an `updated_at` audit trail. YAML stays focused on human-editable runtime config (persona, llm provider, integrations). Task 19 only adds the `sdr_persona` pass-through slot; `architecture_version` parsing is intentionally absent.
+
+4. **OutboundMessage idempotency_key format = `f"{tenant_id}:{talk_id}:{turn_index}:{chunk_index}"`.** FE-01b emits one message per turn, so `chunk_index=0` always. FE-03 (humanization) extends to multiple chunks per turn (`:1, :2, ...`). The trailing `:0` in FE-01b is forward-compatible; documented in Task 16.
 
 ---
 
