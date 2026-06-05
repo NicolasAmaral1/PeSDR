@@ -12,7 +12,7 @@ state mutations and escalation persistence.
 
 from __future__ import annotations
 
-from typing import Callable
+from typing import Any, Callable
 
 from langchain_core.runnables import Runnable
 
@@ -80,3 +80,46 @@ async def run_guardrails_retry(
     raise CorrectionEscalation(
         f"guardrails retry failed: {retry_validation.violation}"
     )
+
+
+async def run_transition_retry(
+    *,
+    initial_decision: TurnDecision,
+    initial_target: str,
+    initial_failure: str | None,
+    bound_llm: Runnable,
+    cached: CachedLayer,
+    fresh_builder: Callable[[CorrectionContext], FreshLayer],
+    inbound_text: str,
+    revalidate: Callable[[TurnDecision], tuple[str, str | None]],
+    current_node: str,
+) -> tuple[TurnDecision, str]:
+    """One corrective retry on invalid transition. Returns (decision, target).
+
+    Falls back to (original decision, current_node) if the retry also fails.
+    Unlike run_guardrails_retry, this does NOT raise — invalid routing is a
+    soft failure: the original response_text is still sent to the lead.
+    """
+    if initial_failure is None:
+        return initial_decision, initial_target
+
+    correction = CorrectionContext(
+        previous_response=(
+            f"suggested transition to {initial_decision.next_node_suggestion!r}"
+        ),
+        rejection_reason=(
+            f"transition failed: {initial_failure}. Reconsider: either complete "
+            "the missing collection or do not advance."
+        ),
+        category=initial_failure,
+    )
+    new_fresh = fresh_builder(correction)
+    messages = assemble_prompt(cached, new_fresh, inbound_text=inbound_text)
+    retry_decision: TurnDecision = await bound_llm.ainvoke(messages)
+
+    retry_target, retry_failure = revalidate(retry_decision)
+    if retry_failure is None:
+        return retry_decision, retry_target
+
+    # Soft fallback: keep original response_text, stay in current_node.
+    return initial_decision, current_node
