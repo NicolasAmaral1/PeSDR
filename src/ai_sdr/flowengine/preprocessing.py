@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ai_sdr.flowengine.state import Message
 from ai_sdr.flowengine.treeflow_loader import TreeflowDef
 from ai_sdr.models.inbound_message import InboundMessageRow
 from ai_sdr.models.lead import Lead
@@ -20,6 +22,7 @@ from ai_sdr.models.tenant import Tenant
 from ai_sdr.models.treeflow_version import TreeflowVersion
 from ai_sdr.repositories.lead_repository import LeadRepository
 from ai_sdr.repositories.talk_repository import TalkRepository
+from ai_sdr.repositories.talkflow_state_repository import TalkFlowStateRepository
 
 
 class OptOutDetected(Exception):
@@ -80,6 +83,22 @@ async def resolve_pipeline_context(
         treeflow_version_id=treeflow_version.id,
     )
     await session.flush()
+
+    # Bootstrap the runtime state with the first message.
+    states = TalkFlowStateRepository(session)
+    state = await states.initialize(
+        talk_id=talk.id, tenant_id=tenant.id, entry_node=treeflow.entry_node
+    )
+    first_msg = Message(
+        role="user",
+        content=(inbound.text or inbound.transcription or "").strip(),
+        source="lead",
+        turn_index=1,
+        timestamp=inbound.received_at or datetime.now(timezone.utc),
+    )
+    await states.append_message(state, first_msg, max_window=15)
+    await session.flush()
+
     return PipelineContext(lead=lead, talk=talk, inbound=inbound, is_new_talk=True)
 
 
