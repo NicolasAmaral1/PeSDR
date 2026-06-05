@@ -1,0 +1,84 @@
+"""Transition validation for the FlowEngine.
+
+Pure function per spec §7. Decides whether the LLM's next_node_suggestion
+is a valid advance from the current node, given the collected state and
+the TreeFlow definition.
+
+Returns (resolved_target_node_id, failure_reason). failure_reason is None
+on success; on failure the target stays at current_node and the reason
+is one of: invalid_target | condition_false | exit_not_satisfied.
+
+The orchestrator (Task 17) uses the failure reason to drive corrective
+retries via run_transition_retry (Task 13).
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from simpleeval import SimpleEval
+
+from ai_sdr.flowengine.treeflow_loader import (
+    TreeflowDef,
+    TreeflowExitCondition,
+    TreeflowNode,
+)
+
+
+def validate_transition(
+    *,
+    current_node: str,
+    next_node_suggestion: str | None,
+    collected: dict[str, Any],
+    treeflow: TreeflowDef,
+) -> tuple[str, str | None]:
+    """Validate a transition. See module docstring."""
+    if next_node_suggestion is None or next_node_suggestion in ("current", current_node):
+        return current_node, None
+
+    node = treeflow.nodes.get(current_node)
+    if node is None:
+        return current_node, "invalid_target"
+
+    matching = [t for t in node.next_nodes if t.target == next_node_suggestion]
+    if not matching:
+        return current_node, "invalid_target"
+
+    transition = matching[0]
+    if transition.condition.strip() != "true":
+        if not _eval_bool(transition.condition, collected):
+            return current_node, "condition_false"
+
+    if not _exit_satisfied(node, collected):
+        return current_node, "exit_not_satisfied"
+
+    return next_node_suggestion, None
+
+
+def _exit_satisfied(node: TreeflowNode, collected: dict[str, Any]) -> bool:
+    ec: TreeflowExitCondition = node.exit_condition
+    if ec.type == "all_fields_filled":
+        for c in node.collects:
+            if c.required and collected.get(c.field) in (None, ""):
+                return False
+        return True
+    if ec.type == "rule_expression":
+        return _eval_bool(ec.expression or "false", collected)
+    if ec.type == "combined":
+        for c in node.collects:
+            if c.required and collected.get(c.field) in (None, ""):
+                return False
+        return _eval_bool(ec.expression or "false", collected)
+    if ec.type == "llm_judge":
+        # Reserved for FE-03+. In FE-01b, default to "not satisfied" so the
+        # LLM is nudged to stay (matches the conservative spec §11.2).
+        return False
+    return False
+
+
+def _eval_bool(expression: str, collected: dict[str, Any]) -> bool:
+    try:
+        return bool(SimpleEval(names=collected).eval(expression))
+    except Exception:
+        # Any evaluation error -> treat as false (conservative).
+        return False
