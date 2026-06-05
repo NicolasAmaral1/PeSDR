@@ -53,6 +53,27 @@ from ai_sdr.observability.outbound_audit import (
 log = structlog.get_logger(__name__)
 
 
+async def _run_legacy_pipeline(*args, **kwargs):
+    """Indirection point so tests can mock the v1 path."""
+    # Lazy import to avoid pulling LangGraph at module load.
+    from ai_sdr.treeflow.runtime import step as legacy_step
+    return await legacy_step(*args, **kwargs)
+
+
+async def _run_v2_pipeline(*args, **kwargs):
+    """Indirection point for the FlowEngine v2 path (run_turn)."""
+    from ai_sdr.flowengine.pipeline import run_turn
+    return await run_turn(*args, **kwargs)
+
+
+async def process_lead_inbox_for_test_routing(session, *, tenant, inbound):
+    """Test-only entrypoint that exercises the architecture_version branch."""
+    if tenant.architecture_version == 2:
+        await _run_v2_pipeline(session, tenant=tenant, inbound=inbound)
+    else:
+        await _run_legacy_pipeline(session, tenant=tenant, inbound=inbound)
+
+
 def _stable_lock_key(tenant_id: str, lead_id: str) -> int:
     """Compress (tenant, lead) into a signed int8 for pg_advisory_lock."""
     h = hashlib.sha256(f"{tenant_id}:{lead_id}".encode()).digest()
@@ -147,6 +168,22 @@ async def process_lead_inbox(ctx: dict[str, Any], tenant_id: str, lead_id: str) 
                 return
 
             adapter = registry.get_for_tenant(tenant)
+
+            # FE-01b feature flag: route to FlowEngine v2 when architecture_version == 2.
+            if tenant.architecture_version == 2:
+                # NOTE: full wiring of run_turn deps is non-trivial. For now, log + skip
+                # if the dependencies aren't easily available. Real cutover requires
+                # passing treeflow + treeflow_version + llm + adapter + guardrail_cfg
+                # + opt_out_keywords. Will be filled in during operator-led cutover.
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(
+                    "fe01b_v2_route_stub tenant=%s inbound=%s — full wiring TODO; "
+                    "see docs/superpowers/notes/2026-06-02-fe01b-cutover.md",
+                    tenant.id, getattr(talkflow, 'id', None),
+                )
+                return
+            # else: fall through to existing v1 path unchanged
 
             # P9: lead responded — cancel pending follow-ups, reset counter,
             # reactivate cold talkflow.
