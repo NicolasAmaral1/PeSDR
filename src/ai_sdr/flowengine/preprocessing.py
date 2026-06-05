@@ -1,0 +1,93 @@
+"""Preprocessing stage of the FlowEngine pipeline.
+
+Resolves Lead + Talk for an incoming inbound message. Performs opt-out
+detection (raises OptOutDetected if matched). Does NOT call the LLM —
+this stage runs cheaply before any LLM cost is incurred.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ai_sdr.flowengine.treeflow_loader import TreeflowDef
+from ai_sdr.models.inbound_message import InboundMessageRow
+from ai_sdr.models.lead import Lead
+from ai_sdr.models.talk import Talk
+from ai_sdr.models.tenant import Tenant
+from ai_sdr.models.treeflow_version import TreeflowVersion
+from ai_sdr.repositories.lead_repository import LeadRepository
+from ai_sdr.repositories.talk_repository import TalkRepository
+
+
+class OptOutDetected(Exception):
+    """Raised when the inbound contains an opt-out keyword (case-insensitive)."""
+
+
+@dataclass
+class PipelineContext:
+    """Carried through run_turn — Lead, Talk, inbound, and origin flag."""
+
+    lead: Lead
+    talk: Talk
+    inbound: InboundMessageRow
+    is_new_talk: bool
+
+
+async def resolve_pipeline_context(
+    session: AsyncSession,
+    *,
+    tenant: Tenant,
+    inbound: InboundMessageRow,
+    treeflow: TreeflowDef,
+    treeflow_version: TreeflowVersion,
+    opt_out_keywords: list[str],
+) -> PipelineContext:
+    """Resolve Lead + Talk, detect opt-out, return PipelineContext.
+
+    Lead resolution: find by ('whatsapp', from_address); create if missing.
+    Talk resolution: find_active_for_lead; create if missing.
+    """
+    text = (inbound.text or inbound.transcription or "").strip()
+    if text and _match_opt_out(text, opt_out_keywords):
+        raise OptOutDetected(f"inbound matched opt-out keyword in {opt_out_keywords!r}")
+
+    leads = LeadRepository(session)
+    lead = await leads.find_by_channel_identifier(
+        tenant.id, "whatsapp", inbound.from_address
+    )
+    if lead is None:
+        lead = Lead(
+            tenant_id=tenant.id,
+            channel_identifiers={"whatsapp": inbound.from_address},
+            whatsapp_e164=inbound.from_address,
+            status="active",
+        )
+        session.add(lead)
+        await session.flush()
+
+    talks = TalkRepository(session)
+    existing = await talks.find_active_for_lead(tenant.id, lead.id)
+    if existing is not None:
+        return PipelineContext(lead=lead, talk=existing, inbound=inbound, is_new_talk=False)
+
+    talk = await talks.create(
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        treeflow_id=treeflow.id,
+        treeflow_version_id=treeflow_version.id,
+    )
+    await session.flush()
+    return PipelineContext(lead=lead, talk=talk, inbound=inbound, is_new_talk=True)
+
+
+def _match_opt_out(text: str, keywords: list[str]) -> bool:
+    """Whole-word, case-insensitive match against any keyword."""
+    lowered = text.lower()
+    for kw in keywords:
+        pattern = rf"\b{re.escape(kw.lower())}\b"
+        if re.search(pattern, lowered):
+            return True
+    return False
