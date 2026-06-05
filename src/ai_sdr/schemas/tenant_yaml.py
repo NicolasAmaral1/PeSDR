@@ -7,7 +7,7 @@ Later plans extend with crm, messaging, llm, media, guardrails, treeflows.
 from __future__ import annotations
 
 import re
-from typing import Literal, Self
+from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -145,6 +145,7 @@ class TenantConfig(BaseModel):
     messaging: MessagingConfig | None = None
     guardrails: GuardrailsConfig | None = None
     objections: ObjectionsConfig | None = None  # Plan 4a
+    sdr_persona: dict[str, Any] | None = None  # FE-01b: pass-through slot (architecture_version stays in DB)
 
     @field_validator("id")
     @classmethod
