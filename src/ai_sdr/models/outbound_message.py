@@ -35,8 +35,8 @@ class OutboundMessage(Base):
     )
     talkflow_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("talkflows.id", ondelete="CASCADE"),
         nullable=False,
+        comment="v1: talkflows.id (FK dropped in 0024); v2: talks.id reuse",
     )
     lead_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
