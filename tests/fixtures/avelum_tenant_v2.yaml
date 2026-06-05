@@ -1,0 +1,29 @@
+slug: avelum
+display_name: "Avelum"
+
+schedule:
+  timezone: "America/Sao_Paulo"
+
+conversation:
+  opt_out_keywords: ["sair", "parar", "remover"]
+
+console:
+  enabled: false
+
+llm:
+  default:
+    provider: openai
+    model: gpt-5-mini
+    api_key_ref: secrets/openai_key
+
+guardrails:
+  disallowed_price_pattern: "R\\$\\s?\\d+"
+  allowed_prices: []
+
+sdr_persona:
+  voice: |
+    Tom PT-BR informal, frases curtas, sem emoji excessivo.
+  conduct: |
+    1. Sempre reconheca o que o lead disse antes de perguntar.
+    2. Nunca invente precos ou produtos fora do whitelist.
+  examples: []
