@@ -3,17 +3,26 @@
 from __future__ import annotations
 
 import asyncio
+import sys
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated
 
 import typer
 from sqlalchemy import delete, select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from ai_sdr.db.rls import set_tenant_context
+from ai_sdr.flowengine.pipeline import run_turn
+from ai_sdr.flowengine.treeflow_loader import load_treeflow_v2
+from ai_sdr.guardrails.validator import GuardrailConfig
+from ai_sdr.messaging.fake import FakeMessagingAdapter
+from ai_sdr.models.inbound_message import InboundMessageRow
 from ai_sdr.models.lead import Lead
 from ai_sdr.models.talkflow import TalkFlow
 from ai_sdr.models.tenant import Tenant
+from ai_sdr.models.treeflow_version import TreeflowVersion
 from ai_sdr.schemas.tenant_yaml import ObjectionsConfig
 from ai_sdr.secrets.sops_loader import SopsLoader
 from ai_sdr.settings import get_settings
@@ -21,6 +30,53 @@ from ai_sdr.tenant_loader.loader import TenantLoader
 from ai_sdr.treeflow.checkpointer import ensure_checkpointer_schema
 from ai_sdr.treeflow.loader import TreeFlowLoader
 from ai_sdr.treeflow.runtime import TalkFlowRuntime
+
+
+def _llm_for_simulate(tenant: Tenant):
+    """Factory hook — tests patch this to inject a fake LLM."""
+    from ai_sdr.flowengine.llm_client import main_llm_for_tenant
+    return main_llm_for_tenant(tenant.llm.default)
+
+
+def _adapter_for_simulate(tenant: Tenant) -> FakeMessagingAdapter:
+    """Factory hook — tests patch this. Returns a FakeMessagingAdapter."""
+    return FakeMessagingAdapter()
+
+
+async def simulate_v2_turn(
+    *,
+    session: AsyncSession,
+    tenant: Tenant,
+    treeflow_version: TreeflowVersion,
+    lead_phone: str,
+    inbound_text: str,
+    stdout=sys.stdout,
+) -> None:
+    """Drive one v2 turn for the simulate REPL."""
+    treeflow = load_treeflow_v2(treeflow_version.content_yaml)
+    inbound = InboundMessageRow(
+        tenant_id=tenant.id, provider="fake",
+        external_id=f"sim-{uuid.uuid4().hex[:6]}",
+        from_address=lead_phone,
+        text=inbound_text,
+        raw={"body": inbound_text},
+        media_type="text",
+        received_at=datetime.now(timezone.utc),
+    )
+    session.add(inbound)
+    await session.flush()
+
+    llm = _llm_for_simulate(tenant)
+    adapter = _adapter_for_simulate(tenant)
+    result = await run_turn(
+        session,
+        tenant=tenant, treeflow=treeflow, treeflow_version=treeflow_version,
+        inbound=inbound, llm=llm, adapter=adapter,
+        opt_out_keywords=["sair", "parar"],
+        guardrail_cfg=GuardrailConfig(disallowed_price_pattern=r"R\$\d+", allowed_prices=[]),
+    )
+    if result.response_text:
+        print(result.response_text, file=stdout)
 
 
 def simulate(
