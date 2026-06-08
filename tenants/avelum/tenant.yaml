@@ -1,0 +1,56 @@
+id: "avelum"
+display_name: "Avelum"
+timezone: "America/Sao_Paulo"
+
+schedule:
+  mon-fri: "08:00-22:00"
+  sat: "09:00-18:00"
+  sun: "off"
+  off_hours_behavior: "queue"
+
+conversation:
+  debounce_ms: 5000
+  optout_stop_words: ["sair", "parar", "remover", "stop"]
+  optout_action: "end_conversation_silent"
+
+llm:
+  default:
+    provider: openai
+    model: gpt-5-mini
+    temperature: 0.7
+    api_key_ref: secrets/openai_key
+  classifier:
+    provider: openai
+    model: gpt-5-mini
+    api_key_ref: secrets/openai_key
+  embeddings:
+    provider: openai
+    model: text-embedding-3-small
+    api_key_ref: secrets/openai_key
+  cache_enabled: true
+
+guardrails:
+  enabled: true
+  allowed_prices: []
+  allowed_products: ["sdr_avelum"]
+  disallowed_price_pattern: "R\\$\\s?\\d+"
+  critic_enabled: false
+  fallback_text: "Deixa eu confirmar esse valor com o time e já te respondo."
+  max_retries: 2
+
+messaging:
+  provider: fake
+
+objections:
+  enabled: false
+
+console:
+  enabled: false
+
+sdr_persona:
+  voice: |
+    Tom PT-BR informal, frases curtas, sem emoji excessivo.
+  conduct: |
+    1. Sempre reconheca o que o lead disse antes de perguntar.
+    2. Nunca invente precos ou produtos fora do whitelist.
+  examples: []

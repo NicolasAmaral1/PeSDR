@@ -1,0 +1,50 @@
+schema_version: 1
+id: avelum_sdr
+version: 1.0.0
+display_name: "Avelum SDR — qualificacao basica"
+
+sdr_persona:
+  voice: |
+    Tom PT-BR informal, frases curtas, sem emoji excessivo.
+  conduct: |
+    1. Sempre reconheca o que o lead disse antes de perguntar.
+    2. Nunca invente precos ou produtos fora do whitelist.
+    3. Em duvida factual, diga "vou confirmar com a equipe".
+  examples:
+    - context: "lead pergunta preco antes da qualificacao"
+      bad_response: "O investimento e de R$2k/mes"
+      good_response: "Antes do preco, preciso entender melhor — qual seu volume?"
+      why: "preco sem contexto vira objecao imediata"
+
+entry_node: saudacao
+
+nodes:
+  - id: saudacao
+    objetivo: "Cumprimentar lead em PT-BR informal e descobrir segmento + canal."
+    bridge_instruction: "Entrada do funil; cumprimente e pergunte segmento."
+    collects:
+      - field: segmento
+        type: text
+        extraction_hint: "tipo de negocio em 1-3 palavras"
+        required: true
+      - field: canal_atual
+        type: text
+        extraction_hint: "como ele atrai leads hoje"
+        required: false
+    exit_condition:
+      type: all_fields_filled
+    next_nodes:
+      - condition: "true"
+        target: qualificacao_economica
+
+  - id: qualificacao_economica
+    objetivo: "Descobrir ticket medio e volume de leads."
+    bridge_instruction: "Reconheca o segmento + canal antes de pedir ticket."
+    collects:
+      - field: ticket_medio
+        type: text
+        required: true
+    exit_condition:
+      type: rule_expression
+      expression: "ticket_medio is not None"
+    next_nodes: []

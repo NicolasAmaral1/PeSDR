@@ -85,6 +85,116 @@ async def _mark_queued_as_skipped(db: AsyncSession, lead_id: uuid.UUID, reason: 
     )
 
 
+async def _run_v2_inbox(
+    db: AsyncSession,
+    *,
+    tenant: Tenant,
+    lead: Lead,
+    adapter,
+    tenant_uuid: uuid.UUID,
+) -> None:
+    """Drain queued inbound messages through FlowEngine run_turn (FE-01b).
+
+    Resolves tenant config + latest TreeflowVersion + LLM + GuardrailConfig
+    once per drain, then loops over queued rows in received_at ASC order.
+    """
+    from pathlib import Path
+
+    from ai_sdr.flowengine.llm_client import main_llm_for_tenant
+    from ai_sdr.flowengine.pipeline import run_turn
+    from ai_sdr.flowengine.treeflow_loader import load_treeflow_v2
+    from ai_sdr.guardrails.validator import GuardrailConfig
+    from ai_sdr.models.treeflow_version import TreeflowVersion
+    from ai_sdr.secrets.sops_loader import SopsLoader
+    from ai_sdr.settings import get_settings
+    from ai_sdr.tenant_loader.loader import TenantLoader
+
+    tdir = Path(get_settings().tenants_dir)
+    tenant_cfg = TenantLoader(tdir).load(tenant.slug)
+    secrets = SopsLoader(tdir).load(tenant.slug)
+
+    tfv = (
+        await db.execute(
+            select(TreeflowVersion)
+            .where(TreeflowVersion.tenant_id == tenant.id)
+            .order_by(TreeflowVersion.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if tfv is None:
+        log.error(
+            "worker.v2_no_treeflow_version",
+            tenant_id=str(tenant.id),
+            lead_id=str(lead.id),
+        )
+        return
+
+    treeflow = load_treeflow_v2(tfv.content_yaml)
+    llm = main_llm_for_tenant(tenant_cfg.llm.default, secrets=secrets)
+
+    opt_out_keywords = (
+        list(tenant_cfg.conversation.optout_stop_words)
+        if tenant_cfg.conversation
+        else []
+    )
+    gcfg = tenant_cfg.guardrails
+    guardrail_cfg = GuardrailConfig(
+        disallowed_price_pattern=(gcfg.disallowed_price_pattern if gcfg else ""),
+        allowed_prices=[str(p) for p in (gcfg.allowed_prices if gcfg else [])],
+    )
+
+    while True:
+        msg = await _fetch_next_queued(db, lead.id)
+        if msg is None:
+            break
+        try:
+            result = await run_turn(
+                db,
+                tenant=tenant,
+                treeflow=treeflow,
+                treeflow_version=tfv,
+                inbound=msg,
+                llm=llm,
+                adapter=adapter,
+                opt_out_keywords=opt_out_keywords,
+                guardrail_cfg=guardrail_cfg,
+            )
+        except RecipientUnreachable as e:
+            lead.status = "unreachable"
+            lead.unreachable_reason = f"unreachable: {e}"
+            msg.status = "error"
+            msg.error_detail = f"unreachable: {e}"
+            log.warning("worker.v2.recipient_unreachable", lead_id=str(lead.id), err=str(e))
+            await db.commit()
+            return
+        except (AuthError, PolicyError, WindowExpiredError, MessagingError) as e:
+            msg.status = "error"
+            msg.error_detail = f"{type(e).__name__}: {e}"
+            log.error(
+                "worker.v2.messaging_error",
+                lead_id=str(lead.id),
+                err_type=type(e).__name__,
+                err=str(e),
+            )
+            await db.commit()
+            return
+
+        if result.outcome == "sent":
+            msg.status = "processed"
+            msg.processed_at = datetime.now(UTC)
+        elif result.outcome in ("opt_out", "lead_banned", "escalated"):
+            msg.status = "processed"
+            msg.processed_at = datetime.now(UTC)
+            msg.error_detail = f"v2_outcome: {result.outcome}"
+        else:
+            msg.status = "error"
+            msg.error_detail = f"v2_outcome: {result.outcome}"
+
+        await db.commit()
+        # Tenant context is transaction-local; re-set so the next fetch sees RLS rows.
+        await set_tenant_context(db, tenant_uuid)
+
+
 async def process_lead_inbox(ctx: dict[str, Any], tenant_id: str, lead_id: str) -> None:
     session_factory = ctx["session_factory"]
     registry = ctx["adapter_registry"]
@@ -147,6 +257,14 @@ async def process_lead_inbox(ctx: dict[str, Any], tenant_id: str, lead_id: str) 
                 return
 
             adapter = registry.get_for_tenant(tenant)
+
+            # FE-01b feature flag: route to FlowEngine v2 when architecture_version == 2.
+            if tenant.architecture_version == 2:
+                await _run_v2_inbox(
+                    db, tenant=tenant, lead=lead, adapter=adapter, tenant_uuid=tenant_uuid,
+                )
+                return
+            # else: fall through to existing v1 path unchanged
 
             # P9: lead responded — cancel pending follow-ups, reset counter,
             # reactivate cold talkflow.
