@@ -31,6 +31,10 @@ from ai_sdr.models.follow_up_job import FollowUpJob
 from ai_sdr.models.lead import Lead
 from ai_sdr.models.talkflow import TalkFlow
 from ai_sdr.models.tenant import Tenant
+from ai_sdr.observability.outbound_audit import (
+    record_outbound_failed,
+    record_outbound_sent,
+)
 
 log = structlog.get_logger(__name__)
 
@@ -147,7 +151,7 @@ async def _fire_follow_up(
                 tenant=tenant,
                 collected={},
             )
-            adapter = registry.get(tenant, "whatsapp_cloud")
+            adapter = registry.get_for_tenant(tenant)
 
             try:
                 result = await adapter.send_template(
@@ -170,6 +174,21 @@ async def _fire_follow_up(
                 job.status = "error"
                 job.error_detail = f"unreachable: {e}"
                 log.warning("follow_up.recipient_unreachable", lead_id=str(lead.id))
+                await record_outbound_failed(
+                    db,
+                    tenant=tenant,
+                    talkflow=talkflow,
+                    lead=lead,
+                    provider="whatsapp_cloud",
+                    message_type="template",
+                    triggered_by="follow_up_scanner",
+                    template_ref=step.template_ref,
+                    template_language=step.language,
+                    template_params=params,
+                    error_detail=f"{type(e).__name__}: {e}",
+                    sent_at=datetime.now(UTC),
+                    follow_up_job_id=job.id,
+                )
                 await db.commit()
                 return
             except (AuthError, PolicyError, MessagingError) as e:
@@ -181,10 +200,43 @@ async def _fire_follow_up(
                     err_type=type(e).__name__,
                     err=str(e),
                 )
+                await record_outbound_failed(
+                    db,
+                    tenant=tenant,
+                    talkflow=talkflow,
+                    lead=lead,
+                    provider="whatsapp_cloud",
+                    message_type="template",
+                    triggered_by="follow_up_scanner",
+                    template_ref=step.template_ref,
+                    template_language=step.language,
+                    template_params=params,
+                    error_detail=f"{type(e).__name__}: {e}",
+                    sent_at=datetime.now(UTC),
+                    follow_up_job_id=job.id,
+                )
                 await db.commit()
                 return
 
             # Success
+            # P10: audit the successful template send. provider hardcoded to
+            # "whatsapp_cloud" — templates only work through that adapter in v1;
+            # Vialum adapter (future) will refactor to read tenant_cfg.
+            await record_outbound_sent(
+                db,
+                tenant=tenant,
+                talkflow=talkflow,
+                lead=lead,
+                provider="whatsapp_cloud",
+                message_type="template",
+                triggered_by="follow_up_scanner",
+                template_ref=step.template_ref,
+                template_language=step.language,
+                template_params=params,
+                external_id=result.external_id,
+                sent_at=datetime.fromisoformat(result.sent_at_iso),
+                follow_up_job_id=job.id,
+            )
             job.status = "completed"
             job.fired_at = datetime.now(UTC)
             job.sent_external_id = result.external_id

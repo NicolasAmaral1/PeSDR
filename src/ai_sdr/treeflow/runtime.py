@@ -14,9 +14,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_sdr.db.rls import set_tenant_context
+from ai_sdr.models.lead import Lead
 from ai_sdr.models.talkflow import TalkFlow
 from ai_sdr.models.tenant import Tenant
 from ai_sdr.models.treeflow_version import TreeflowVersion
+from ai_sdr.observability.tracing import build_trace_metadata
 from ai_sdr.schemas.llm_yaml import LLMDefaults
 from ai_sdr.schemas.tenant_yaml import ObjectionsConfig
 from ai_sdr.schemas.treeflow_yaml import TreeFlow
@@ -183,6 +185,8 @@ class TalkFlowRuntime:
             )
         ).scalar_one()
 
+        lead = (await session.execute(select(Lead).where(Lead.id == talkflow.lead_id))).scalar_one()
+
         tf = TreeFlow.model_validate(yaml.safe_load(version.content_yaml))
         tenant_cfg = self._tenants.load(tenant.slug)
         if tenant_cfg.llm is None:
@@ -205,6 +209,9 @@ class TalkFlowRuntime:
                 guardrails=tenant_cfg.guardrails,
                 objections=objections_cfg,
                 tenant_id=tenant.id,
+                tenant=tenant,
+                talkflow=talkflow,
+                lead=lead,
                 llm_factory=self._llm_factory,
                 kb_session_factory=lambda: _session_factory(session),
                 checkpointer=saver,
@@ -230,6 +237,15 @@ class TalkFlowRuntime:
                 }
             else:
                 input_state = {"last_user_input": user_input}
+
+            cfg["metadata"] = build_trace_metadata(
+                tenant=tenant,
+                talkflow=talkflow,
+                lead=lead,
+                node=input_state.get("current_node"),
+                turn_index=len(input_state.get("messages", [])),
+                trace_origin="process_lead_inbox",
+            )
 
             out = await graph.ainvoke(input_state, config=cfg)
 

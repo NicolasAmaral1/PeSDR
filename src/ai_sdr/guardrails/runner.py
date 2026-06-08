@@ -81,8 +81,14 @@ async def run_with_guardrails(
     secrets: dict[str, str],
     llm_factory: Any,
     critic_pass_fn: CriticPassFn | None = None,
+    critic_trace_metadata: dict[str, Any] | None = None,
 ) -> GuardrailsRunResult:
-    """Run inner, validate, retry with feedback, fallback if exhausted."""
+    """Run inner, validate, retry with feedback, fallback if exhausted.
+
+    `critic_trace_metadata`, when provided, is forwarded to ``critic_pass``
+    as its ``trace_metadata`` kwarg so the critic's LangSmith sub-trace is
+    tagged with tenant/talkflow/lead/node + trace_origin.
+    """
     cp_fn = critic_pass_fn or _default_critic_pass
     guardrails_active = guardrails is not None and guardrails.enabled
     critic_active = (
@@ -123,6 +129,7 @@ async def run_with_guardrails(
                 kb_chunks=kb_chunks,
                 recent_history=recent_history,
                 guardrails=guardrails,
+                trace_metadata=critic_trace_metadata,
             )
             if not v_c.passed:
                 logger.info("critic.flagged", attempt=attempt, reason=v_c.reason)

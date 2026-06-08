@@ -210,3 +210,95 @@ uv run ai-sdr simulate --tenant example --treeflow example --lead test-1 --show-
   1. `ai-sdr users add --username joana` (set a password)
   2. `ai-sdr users grant --username joana --tenant example --role operator`
   3. Open `http://localhost:8200/console/login`, log in, get redirected to `/console/example/leads`.
+
+- **Template params**: rendered with Jinja2 `SandboxedEnvironment` against:
+  - `collected.<field>` — TalkFlow's extracted fields (v1 passes `{}` — full LangGraph state lookup wiring may come in P10)
+  - `lead.whatsapp_e164`, `lead.external_label`
+  - `tenant.slug`, `tenant.display_name`
+  - Filters: `default`, `lower`, `upper`, `trim`, `truncate(N)`. `StrictUndefined` forces explicit defaults.
+
+- **Schedule semantics**: timer starts at `talkflow.last_agent_message_at`. Lead inbound resets counter + cancels pending + reactivates cold. Scanner runs every 60s; per-lead `pg_advisory_lock` (same hash as `process_lead_inbox`) serializes scanner vs worker. Race-belt at fire time checks `talkflow.last_lead_message_at > job.scheduled_at`.
+
+- **Schedule-one-at-a-time**: each fired job inserts the next attempt's row. Config changes in `treeflow.yaml` apply to subsequent in-flight schedules naturally. Requires bumping the TreeFlow `version` to publish a new content_hash.
+
+- **CLI ops**:
+  ```bash
+  ai-sdr follow-ups list --tenant <slug> [--lead <uuid>] [--status pending|completed|cancelled|error|all]
+  ai-sdr follow-ups cancel --tenant <slug> --lead <uuid>
+  ai-sdr follow-ups dry-run --tenant <slug> --treeflow <id> --lead <uuid>
+  ```
+
+- **Cold lead reactivation**: a `talkflow.status='cold'` lead that receives an inbound is automatically flipped back to `'active'` by `process_lead_inbox`; attempt counter resets to 0; new follow-up scheduled after agent's reply.
+
+- **WhatsApp HSM payload**: Meta API endpoint `POST /messages` with `type=template`. Body params are positional (`{{1}}, {{2}}, ...` in the Meta-registered template), filled from `params` list at send time. Same retry stack (tenacity 3 attempts, exp backoff) and error classification (`_classify_error`) as `send_text`.
+
+- **Migration**: `0010_follow_up_and_talkflow_columns` — `follow_up_jobs` table (RLS, partial indexes) + 3 columns on `talkflows`.
+
+- **Setting up a tenant for live follow-up**:
+  1. Register HSM templates in Meta Business Manager. Note the exact `name` strings.
+  2. Edit `tenants/<slug>/treeflows/<id>.yaml`: add the `follow_up:` block with matching `template_ref`s. Bump `version` (semver).
+  3. (Optional) Edit `tenants/<slug>/tenant.yaml` `messaging.reengagement_template` for WindowExpired recovery.
+  4. Restart worker: `docker compose up -d --build worker`. The cron registers on startup.
+
+## Observability (Plano 10)
+
+### LangSmith tracing
+
+Opt-in via 3 env vars (in `.env`, or in the VPS environment):
+
+```bash
+LANGCHAIN_TRACING_V2=true
+LANGSMITH_API_KEY=ls__...                  # from https://smith.langchain.com
+LANGCHAIN_PROJECT=pesdr-prod                # or pesdr-dev locally
+```
+
+When set, langchain-core auto-traces every chain run from the 4 LLM call sites:
+- `runtime.graph.ainvoke` (trace_origin=`process_lead_inbox`)
+- `classifier.structured.ainvoke` (trace_origin=`objection_classifier`)
+- `extractor.runnable.ainvoke` (trace_origin=`field_extractor`)
+- `critic.runnable.ainvoke` (trace_origin=`guardrails_critic`)
+
+Each trace carries metadata: `{tenant_id, tenant_slug, talkflow_id, lead_id, node, turn_index, trace_origin}`.
+
+**Filter examples in the LangSmith dashboard:**
+- All traces for Joana: `metadata.tenant_slug = "joana"`
+- All critic passes: `metadata.trace_origin = "guardrails_critic"`
+- Traces for a specific lead: `metadata.lead_id = "uuid"`
+- Slow turns: `latency > 10s` + filter by metadata
+
+**Without `LANGSMITH_API_KEY`** but with `LANGCHAIN_TRACING_V2=true`: langchain silently no-ops; the app boots a structlog warning at startup so the operator notices.
+
+**Sampling:** 100% in v1. If volume exceeds free tier (5k traces/mo), add sampling via a future plan.
+
+### Outbound audit (`outbound_messages` table)
+
+Every adapter send is persisted with full context — `body_text` or `template_ref + template_params`, `status` (sent/failed), `error_detail`, `triggered_by` (inbound | follow_up_scanner | window_expired_recovery), and FKs to the source `inbound_message` or `follow_up_job`.
+
+Query via CLI:
+```bash
+ai-sdr outbound list --tenant <slug>                              # last 50, all statuses
+ai-sdr outbound list --tenant <slug> --status failed              # only failures
+ai-sdr outbound list --tenant <slug> --lead <uuid>                # history of one lead
+ai-sdr outbound list --tenant <slug> --status sent --limit 200    # more rows
+```
+
+Or directly in `psql`:
+```sql
+SELECT sent_at, message_type, status, body_text, template_ref, error_detail, triggered_by
+FROM outbound_messages
+WHERE tenant_id = '<uuid>' AND lead_id = '<uuid>'
+ORDER BY sent_at DESC LIMIT 50;
+```
+
+(Both methods require `set_tenant_context()` to be set if hitting via the app role; `psql` as superuser bypasses RLS.)
+
+### Known race
+
+When `adapter.send_*` succeeds but the worker's `db.commit()` then fails (DB hiccup, etc.), the message went out to Meta but the audit row is lost. The worker emits `log.warning("outbound.audit_lost", external_id=..., ...)` with enough payload to reconstruct manually. No automatic retry — Meta's `external_id` can't be duplicated without double-sending. 2-phase outbox pattern is a future plan if this becomes operational pain.
+
+### What's NOT here
+
+- Prometheus / Grafana / OTel — defer until volume justifies (multi-customer scale).
+- Alerts / paging — log structured serves; alert routing is a future plan.
+- Cost dashboard custom — LangSmith UI already reports tokens + cost per provider.
+- Trace of DB queries / arq jobs — only LLM calls are traced. Add via `@traceable` decorator in a future plan if needed.
