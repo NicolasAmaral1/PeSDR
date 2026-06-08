@@ -46,6 +46,7 @@ class GuardrailsConfig(BaseModel):
     critic_enabled: bool = True
     fallback_text: str = Field(min_length=10)
     max_retries: int = Field(default=2, ge=1, le=5)
+    disallowed_price_pattern: str = ""
 
     @model_validator(mode="after")
     def _require_lists_when_enabled(self) -> Self:

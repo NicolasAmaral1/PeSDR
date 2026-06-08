@@ -29,19 +29,31 @@ def build_structured_llm(chat_model: BaseChatModel | Any) -> Runnable:
     return chat_model.with_structured_output(TurnDecision, method="function_calling")
 
 
-def main_llm_for_tenant(llm_cfg: Any) -> Runnable:
+def main_llm_for_tenant(
+    llm_cfg: Any,
+    secrets: dict[str, str] | None = None,
+) -> Runnable:
     """Build the structured TurnDecision LLM from a tenant.llm.default config.
 
-    Expected fields on llm_cfg (from existing TenantLlmConfig):
+    Resolves `api_key` from `secrets` using `llm_cfg.api_key_ref` (with the
+    documentation-only `secrets/` prefix stripped). Tests can pass
+    `llm_cfg.api_key` directly (skip the dict lookup) by omitting `secrets`.
+
+    Expected fields on llm_cfg:
       - provider: "anthropic" | "openai" | "google" | ...
       - model: model name string
-      - api_key: resolved secret string
+      - api_key_ref: secret reference (when `secrets` is provided)
+      - api_key: pre-resolved secret string (when `secrets` is None)
       - (optional) temperature, max_tokens, timeout
     """
+    if secrets is not None:
+        api_key = secrets[llm_cfg.api_key_ref.removeprefix("secrets/")]
+    else:
+        api_key = llm_cfg.api_key
     chat = init_chat_model(
         model=llm_cfg.model,
         model_provider=llm_cfg.provider,
-        api_key=llm_cfg.api_key,
+        api_key=api_key,
         temperature=getattr(llm_cfg, "temperature", 0.7),
     )
     return build_structured_llm(chat)
