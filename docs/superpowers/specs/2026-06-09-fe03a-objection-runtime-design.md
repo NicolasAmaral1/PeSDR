@@ -382,6 +382,81 @@ python_validator.check(response_text, tenant.guardrails)
 | **B3** | Validador falha 2x | Sender envia `tenant.guardrails.fallback_text`; Talk.status=requires_review com reason=`validator_exhausted` |
 | **B4** | Contradição interna da TurnDecision | Heurísticas pós-LLM (~30 LOC) corrigem accepted→deferred quando texto contradiz; eventos `decision.contradiction_corrected` emitidos |
 | **B5** | Re-engagement após close (lead volta dias depois) | Não tratado — depende close lifecycle (FE-03b); cada Talk nova começa com state limpo |
+| **C1** | Conditional YAML referencia campo fora do escopo do simpleeval (ex: `extracted_facts.X`) | `routing.py` ganha contexto expandido. `validate_transition` passa pro SimpleEval um dict que combina `collected` (top-level) + `extracted_facts` + `objections_handled` + `turn_index`. YAML pode escrever `extracted_facts.dor_principal == 'tempo'` ou `turn_index >= 10`. Doc lista o que está disponível. |
+| **C2** | Routing autoriza transição enquanto `active_treatment` está setado (estado inconsistente) | **`routing.validate_transition` ganha 4ª checagem**: se `state.active_treatment is not None`, retorna `(current_node, "transition_blocked_by_treatment")`. Reusa corrective retry loop existente (FE-01b Task 13). LLM regenera sem propor transição. |
+| **C3** | Compound response: lead pede algo que requer content do próximo node, mas turn só entrega ack | `system_prompt.build_fresh_layer` ganha `bridge_instruction` no bloco IMMEDIATE NEXT NODES (linhas 175-186 atuais). LLM em A pode antecipar o tom/conteúdo de B no `response_text` quando transiciona. Não resolve 100% mas cobre maioria. Casos extremos seguem como UX gap conhecido. |
+| **C4** | LLM emite `response_text` que promete ação ("vou te enviar X") sem refletir em `next_node_suggestion` | Heurística pós-LLM no `objection_runtime.apply()` (junto com B4): se `response_text` matches regex de comprometimento (`r"\b(vou te enviar|te conecto|próximo passo|aguarda)\b"`) E `next_node_suggestion is None` → emit evento `decision.implicit_transition_suspected`. Sem correção automática (LLM pode estar certo). Apenas auditoria. |
+
+### 8.1. Mudanças concretas em `routing.py` (brechas C1 + C2)
+
+Assinatura nova de `validate_transition`:
+
+```python
+def validate_transition(
+    *,
+    current_node: str,
+    next_node_suggestion: str | None,
+    state: TalkFlowState,                # passa TalkFlowState inteiro agora, não só collected
+    treeflow: TreeflowDef,
+) -> tuple[str, str | None]:
+    # ... checagens 1-3 existentes ...
+    
+    # NOVA: brecha C2 — bloqueia se em tratamento ativo
+    if state.active_treatment is not None and next_node_suggestion != current_node:
+        return current_node, "transition_blocked_by_treatment"
+    
+    # ... resto ...
+```
+
+Contexto expandido pro `_eval_bool` (brecha C1):
+
+```python
+def _eval_bool(expression: str, state: TalkFlowState) -> bool:
+    context = {
+        **state.collected,                          # top-level pra retrocompat com YAML v1
+        "collected": state.collected,
+        "extracted_facts": state.extracted_facts,
+        "objections_handled": [
+            {"id": o.objection_id, "resolution": o.resolution}
+            for o in state.objections_handled
+        ],
+        "turn_index": state.turn_index,
+    }
+    try:
+        return bool(SimpleEval(names=context).eval(expression))
+    except Exception:
+        return False
+```
+
+**Documentação no YAML schema (§6):** lista o que conditional pode referenciar:
+- Top-level: nomes dos campos coletados (retrocompat — `ticket_medio >= 50000`)
+- `collected.X` — explicit ref
+- `extracted_facts.X`
+- `objections_handled` — lista de dicts `{id, resolution}`
+- `turn_index` — int
+
+### 8.2. Mudança em `system_prompt.py` (brecha C3)
+
+`build_fresh_layer` no bloco `IMMEDIATE NEXT NODES` ganha `bridge_instruction`:
+
+```python
+if immediate_next_nodes:
+    parts.append("IMMEDIATE NEXT NODES — DENSE DETAIL:")
+    for node, condition in immediate_next_nodes:
+        parts.append(f"  - id: {node.id}")
+        parts.append(f"    objetivo: {node.objetivo}")
+        parts.append(f"    bridge_instruction: {node.bridge_instruction}")    # NOVO
+        parts.append(f"    will_collect: {[c.field for c in node.collects]}")
+        parts.append(f"    transition_condition: {condition}")
+    parts.append(
+        "  When you decide to advance, compose a natural bridge using "
+        "the chosen next node's objetivo AND bridge_instruction. You may "
+        "include content that anchors the lead in the new node within the "
+        "same response."
+    )
+```
+
+LLM em A pode usar bridge_instruction de B pra "antecipar" tom/conteúdo na resposta que está gerando — UX significativamente melhor.
 
 ## 9. Idempotência e consistência transacional
 
@@ -504,6 +579,9 @@ Plano 11 (HITL Console) consome essa coluna no futuro — coluna `Razão` na lis
 | `validator.violation_retry` | retry corretivo | rule |
 | `validator.exhausted` | 2ª violação | rule, fallback_sent |
 | `treeflow.version_missing` | snapshot não está no disco | version_requested |
+| `routing.transition_blocked_by_treatment` | LLM tentou transicionar durante ACTIVE | suggested_target, objection_id |
+| `routing.condition_eval_error` | simpleeval raise (brecha C1) | expression, raise_type |
+| `decision.implicit_transition_suspected` | response_text promete ação sem next_node_suggestion (brecha C4) | matched_pattern, response_excerpt |
 
 Todos os eventos incluem context implícito: `tenant_id`, `talk_id`, `lead_id`, `turn_index`.
 
@@ -539,6 +617,12 @@ test_escalation_request_via_turndecision.py
 test_treeflow_loader_global_objections.py
 test_treeflow_loader_handles_objections.py
 test_treeflow_loader_bounds_validation.py
+test_routing_blocks_transition_when_active_treatment.py
+test_routing_simpleeval_extended_context.py
+test_routing_simpleeval_extracted_facts.py
+test_routing_simpleeval_turn_index.py
+test_system_prompt_includes_bridge_in_next_nodes.py
+test_decision_implicit_transition_heuristic.py
 ```
 
 ### 13.2. Integration tests (`tests/integration/flowengine/`)
@@ -552,6 +636,8 @@ test_treatment_cross_objection_swap.py
 test_multi_message_concat.py
 test_validator_fallback_e2e.py
 test_versioning_snapshot_missing.py
+test_transition_blocked_during_treatment_e2e.py
+test_compound_response_uses_next_bridge.py
 ```
 
 ### 13.3. Fixtures necessárias
