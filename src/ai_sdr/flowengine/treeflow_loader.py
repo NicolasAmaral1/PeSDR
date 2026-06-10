@@ -42,6 +42,30 @@ class TreeflowTransition:
 
 
 @dataclass
+class TreeflowOnMaxTurns:
+    action: str  # "gracefully_continue" | "escalate_to_human"
+    message_hint: str | None = None
+
+
+@dataclass
+class TreeflowToolPayload:
+    canonical_arguments_summary: str
+    kb_ref: str
+    max_treatment_turns: int
+    resolution_criteria: str
+    on_max_turns_no_resolution: TreeflowOnMaxTurns
+    expected_turns: int | None = None
+
+
+@dataclass
+class TreeflowObjection:
+    id: str
+    description: str
+    treatment_mode: str  # "tool" | "inline"
+    tool_payload: TreeflowToolPayload | None = None
+
+
+@dataclass
 class TreeflowNode:
     id: str
     objetivo: str
@@ -59,6 +83,7 @@ class TreeflowDef:
     sdr_persona: dict[str, Any]  # voice + conduct + examples — raw dict
     entry_node: str
     nodes: dict[str, TreeflowNode]
+    global_objections: list[TreeflowObjection] = field(default_factory=list)
 
 
 def load_treeflow_v2(yaml_text: str) -> TreeflowDef:
@@ -86,9 +111,7 @@ def load_treeflow_v2(yaml_text: str) -> TreeflowDef:
 
     entry = data["entry_node"]
     if entry not in nodes:
-        raise TreeflowLoadError(
-            f"entry_node {entry!r} does not match any defined node id"
-        )
+        raise TreeflowLoadError(f"entry_node {entry!r} does not match any defined node id")
 
     for node in nodes.values():
         for tr in node.next_nodes:
@@ -98,6 +121,8 @@ def load_treeflow_v2(yaml_text: str) -> TreeflowDef:
                     f"does not match any defined node id"
                 )
 
+    global_objections = [_parse_objection(o) for o in data.get("global_objections", [])]
+
     return TreeflowDef(
         id=data["id"],
         version=str(data["version"]),
@@ -105,6 +130,7 @@ def load_treeflow_v2(yaml_text: str) -> TreeflowDef:
         sdr_persona=data["sdr_persona"],
         entry_node=entry,
         nodes=nodes,
+        global_objections=global_objections,
     )
 
 
@@ -143,4 +169,41 @@ def _parse_node(raw: dict[str, Any]) -> TreeflowNode:
         collects=collects,
         exit_condition=exit_cond,
         next_nodes=transitions,
+    )
+
+
+def _parse_objection(raw: dict[str, Any]) -> TreeflowObjection:
+    required = {"id", "description", "treatment_mode"}
+    missing = required - raw.keys()
+    if missing:
+        raise TreeflowLoadError(f"objection missing fields {sorted(missing)}: {raw!r}")
+    mode = raw["treatment_mode"]
+    payload: TreeflowToolPayload | None = None
+    if mode == "tool":
+        tp = raw.get("tool_payload")
+        if not isinstance(tp, dict):
+            raise TreeflowLoadError(
+                f"objection {raw['id']!r}: treatment_mode=tool requires tool_payload"
+            )
+        omtr = tp.get("on_max_turns_no_resolution") or {}
+        if not omtr.get("action"):
+            raise TreeflowLoadError(
+                f"objection {raw['id']!r}: on_max_turns_no_resolution.action required"
+            )
+        payload = TreeflowToolPayload(
+            canonical_arguments_summary=tp.get("canonical_arguments_summary", ""),
+            kb_ref=tp.get("kb_ref", ""),
+            max_treatment_turns=int(tp.get("max_treatment_turns", 0)),
+            resolution_criteria=tp.get("resolution_criteria", ""),
+            expected_turns=tp.get("expected_turns"),
+            on_max_turns_no_resolution=TreeflowOnMaxTurns(
+                action=omtr["action"],
+                message_hint=omtr.get("message_hint"),
+            ),
+        )
+    return TreeflowObjection(
+        id=raw["id"],
+        description=raw["description"],
+        treatment_mode=mode,
+        tool_payload=payload,
     )
