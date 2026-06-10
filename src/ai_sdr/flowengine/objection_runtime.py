@@ -135,6 +135,32 @@ def apply(
     # 4. resolved_deferred
     # 5. default (continue)
 
+    # Priority 1: cross-objection (new id, must also be tool mode)
+    detected = decision.detected_objection
+    if (
+        detected is not None
+        and detected != active["objection_id"]
+        and _is_tool_mode(detected, treeflow, current_node_id)
+    ):
+        new = _enter_treatment(detected, treeflow, current_node_id)
+        return StateDelta(
+            new_active_treatment=new,
+            appended_objection_history=[
+                {
+                    "objection_id": active["objection_id"],
+                    "detected_at_turn": active["started_at_turn"],
+                    "resolved_at_turn": active["current_treatment_turn"],
+                    "resolution": "deferred",
+                }
+            ],
+            events=[
+                (
+                    "objection.treatment.cross_swap",
+                    {"from_id": active["objection_id"], "to_id": detected},
+                )
+            ],
+        )
+
     # Priority 2: max turns exhausted
     if active["current_treatment_turn"] >= active["max_treatment_turns"]:
         obj = _find_objection(
