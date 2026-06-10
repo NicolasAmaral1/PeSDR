@@ -85,13 +85,29 @@ def _exit_satisfied(node: TreeflowNode, collected: dict[str, Any]) -> bool:
 
 
 def _eval_bool(expression: str, state: _StateProto) -> bool:
-    # NOTE: extended context comes in Task 15. For Task 14 we keep behavior
-    # identical: pass state.collected only. This split is intentional so the
-    # signature change ships isolated from the semantic change.
+    """Evaluate a simpleeval expression against an extended context.
+
+    Names available in the expression (brecha C1, FE-03a §8.1):
+      - top-level collected field names (retrocompat with v1 YAML)
+      - collected: dict of all collected fields
+      - extracted_facts: dict of facts
+      - objections_handled: list of {id, resolution} dicts
+      - turn_index: int
+    """
+    context: dict[str, Any] = dict(state.collected)
+    context["collected"] = state.collected
+    context["extracted_facts"] = state.extracted_facts
+    context["objections_handled"] = [
+        {
+            "id": getattr(o, "objection_id", None) or o.get("objection_id"),
+            "resolution": getattr(o, "resolution", None) or o.get("resolution"),
+        }
+        for o in state.objections_handled
+    ]
+    context["turn_index"] = state.turn_index
     try:
-        return bool(SimpleEval(names=state.collected).eval(expression))
+        return bool(SimpleEval(names=context, functions={"len": len}).eval(expression))
     except Exception:
-        # Any evaluation error -> treat as false (conservative).
         return False
 
 
