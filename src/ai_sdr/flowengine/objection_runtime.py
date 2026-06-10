@@ -111,21 +111,28 @@ def apply(
     # IDLE
     if active is None:
         detected = decision.detected_objection
-        if detected and _is_tool_mode(detected, treeflow, current_node_id):
-            new = _enter_treatment(detected, treeflow, current_node_id)
-            return StateDelta(
-                new_active_treatment=new,
-                events=[
-                    (
-                        "objection.treatment.entered",
-                        {
-                            "objection_id": detected,
-                            "max_turns": new["max_treatment_turns"],
-                        },
-                    )
-                ],
-            )
-        # Stay IDLE: explicitly assert no active treatment.
+        if detected:
+            obj = _find_objection(detected, treeflow, current_node_id)
+            if obj is None:
+                return StateDelta(
+                    new_active_treatment=None,
+                    events=[("objection.hallucinated_id", {"id_received": detected})],
+                )
+            if obj.treatment_mode == "tool":
+                new = _enter_treatment(detected, treeflow, current_node_id)
+                return StateDelta(
+                    new_active_treatment=new,
+                    events=[
+                        (
+                            "objection.treatment.entered",
+                            {
+                                "objection_id": detected,
+                                "max_turns": new["max_treatment_turns"],
+                            },
+                        )
+                    ],
+                )
+            # inline mode: emit nothing (LLM handled within response_text)
         return StateDelta(new_active_treatment=None)
 
     # ACTIVE branch — priority order per spec §4.3:
