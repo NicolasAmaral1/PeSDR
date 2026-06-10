@@ -41,15 +41,17 @@ def test_guardrails_disabled_allows_empty_lists() -> None:
     assert cfg.guardrails.enabled is False
 
 
-def test_guardrails_enabled_requires_at_least_one_list() -> None:
+def test_guardrails_enabled_requires_allowed_products() -> None:
+    # FE-03a Task 10: spec §7.2 — allowed_products is mandatory when enabled
+    # (allowed_prices alone is no longer sufficient).
     data = _minimal_tenant_data()
     data["guardrails"] = {
         "enabled": True,
-        "allowed_prices": [],
+        "allowed_prices": [247],
         "allowed_products": [],
         "fallback_text": "Confirmo já já, ok?",
     }
-    with pytest.raises(ValidationError, match="allowed_prices"):
+    with pytest.raises(ValidationError, match="allowed_products"):
         TenantConfig.model_validate(data)
 
 
@@ -58,7 +60,7 @@ def test_guardrails_fallback_text_min_length() -> None:
     data["guardrails"] = {
         "enabled": True,
         "allowed_prices": [247],
-        "allowed_products": [],
+        "allowed_products": ["Mentoria"],
         "fallback_text": "ok",  # too short
     }
     with pytest.raises(ValidationError, match="fallback_text"):

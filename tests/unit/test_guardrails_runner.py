@@ -27,10 +27,13 @@ class _Result(BaseModel):
 
 
 def _gr(prices: list[int], products: list[str], max_retries: int = 2) -> GuardrailsConfig:
+    # FE-03a Task 10: allowed_products must be non-empty when enabled. Tests
+    # that exercise the prices-only whitelist still need a placeholder product
+    # so the schema validates; the runner logic under test is unaffected.
     return GuardrailsConfig(
         enabled=True,
         allowed_prices=prices,
-        allowed_products=products,
+        allowed_products=products or ["Mentoria"],
         fallback_text="Confirmo já já, ok?",
         max_retries=max_retries,
     )
