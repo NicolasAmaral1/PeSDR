@@ -62,7 +62,4 @@ class WorkerSettings:
     on_shutdown = _on_shutdown
     max_tries = 3
     job_completion_wait = 30  # seconds before retry after unhandled exception
-
-    @classmethod
-    def redis_settings(cls) -> RedisSettings:
-        return RedisSettings.from_dsn(get_settings().redis_url)
+    redis_settings = RedisSettings.from_dsn(get_settings().redis_url)

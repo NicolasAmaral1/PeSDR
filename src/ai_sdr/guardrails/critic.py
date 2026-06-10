@@ -65,9 +65,15 @@ async def critic_pass(
     kb_chunks: list[RetrievedChunk],
     recent_history: list[Message],
     guardrails: GuardrailsConfig,
+    trace_metadata: dict[str, Any] | None = None,
 ) -> Verdict:
     """Run the critic. Uses tenant_llm.classifier (Haiku by design); raises
-    ValueError if not configured."""
+    ValueError if not configured.
+
+    `trace_metadata`, when provided, is attached to the underlying
+    ``ainvoke`` call as ``config={"metadata": ...}`` so LangSmith can
+    filter sub-traces by tenant/talkflow/lead/node + trace_origin.
+    """
     if tenant_llm.classifier is None:
         raise ValueError("guardrails critic pass requires tenant.llm.classifier to be configured")
 
@@ -93,5 +99,8 @@ async def critic_pass(
         SystemMessage(content=_CRITIC_SYSTEM_PROMPT),
         HumanMessage(content=user_block),
     ]
-    result: Verdict = await runnable.ainvoke(messages)
+    if trace_metadata:
+        result: Verdict = await runnable.ainvoke(messages, config={"metadata": trace_metadata})
+    else:
+        result = await runnable.ainvoke(messages)
     return result

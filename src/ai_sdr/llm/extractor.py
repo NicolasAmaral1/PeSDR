@@ -76,10 +76,20 @@ async def extract(
     llm: BaseChatModel,
     model: type[BaseModel],
     messages: list[BaseMessage],
+    *,
+    trace_metadata: dict[str, Any] | None = None,
 ) -> BaseModel:
-    """Bind the model as structured output and invoke against `messages` (async)."""
+    """Bind the model as structured output and invoke against `messages` (async).
+
+    `trace_metadata`, when provided, is attached to the underlying
+    ``ainvoke`` call as ``config={"metadata": ...}`` so LangSmith can
+    filter sub-traces by tenant/talkflow/lead/node + trace_origin.
+    """
     runnable = llm.with_structured_output(model)
-    result = await runnable.ainvoke(messages)
+    if trace_metadata:
+        result = await runnable.ainvoke(messages, config={"metadata": trace_metadata})
+    else:
+        result = await runnable.ainvoke(messages)
     if isinstance(result, dict):
         # langchain's with_structured_output can return a dict when include_raw=False
         # and the underlying impl uses JSON mode — normalize to the pydantic model.
