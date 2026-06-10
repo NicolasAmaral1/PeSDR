@@ -135,6 +135,41 @@ def apply(
     # 4. resolved_deferred
     # 5. default (continue)
 
+    # Priority 2: max turns exhausted
+    if active["current_treatment_turn"] >= active["max_treatment_turns"]:
+        obj = _find_objection(
+            active["objection_id"],
+            treeflow,
+            current_node_id,
+        )
+        action = (
+            obj.tool_payload.on_max_turns_no_resolution.action
+            if obj and obj.tool_payload
+            else "gracefully_continue"
+        )
+        review_reason = "objection_treatment_exhausted" if action == "escalate_to_human" else None
+        return StateDelta(
+            new_active_treatment=None,
+            appended_objection_history=[
+                {
+                    "objection_id": active["objection_id"],
+                    "detected_at_turn": active["started_at_turn"],
+                    "resolved_at_turn": active["current_treatment_turn"],
+                    "resolution": "exhausted",
+                }
+            ],
+            requires_review_reason=review_reason,
+            events=[
+                (
+                    "objection.treatment.exhausted",
+                    {
+                        "objection_id": active["objection_id"],
+                        "action_taken": action,
+                    },
+                )
+            ],
+        )
+
     # Priority 3 + 4: resolved
     if decision.treatment_status in ("resolved_accepted", "resolved_deferred"):
         resolution = "accepted" if decision.treatment_status == "resolved_accepted" else "deferred"
