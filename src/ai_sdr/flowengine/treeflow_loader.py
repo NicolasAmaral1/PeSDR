@@ -176,38 +176,68 @@ def _parse_node(raw: dict[str, Any]) -> TreeflowNode:
     )
 
 
+_ALLOWED_MODES = {"tool", "inline"}
+_ALLOWED_MAX_TURNS_ACTIONS = {"gracefully_continue", "escalate_to_human"}
+
+
 def _parse_objection(raw: dict[str, Any]) -> TreeflowObjection:
     required = {"id", "description", "treatment_mode"}
     missing = required - raw.keys()
     if missing:
         raise TreeflowLoadError(f"objection missing fields {sorted(missing)}: {raw!r}")
+    desc = str(raw["description"])
+    if len(desc) < 10:
+        raise TreeflowLoadError(f"objection {raw['id']!r}: description must be >=10 chars")
     mode = raw["treatment_mode"]
+    if mode not in _ALLOWED_MODES:
+        raise TreeflowLoadError(
+            f"objection {raw['id']!r}: treatment_mode must be one of "
+            f"{sorted(_ALLOWED_MODES)}, got {mode!r}"
+        )
     payload: TreeflowToolPayload | None = None
     if mode == "tool":
         tp = raw.get("tool_payload")
         if not isinstance(tp, dict):
             raise TreeflowLoadError(
-                f"objection {raw['id']!r}: treatment_mode=tool requires tool_payload"
+                f"objection {raw['id']!r}: treatment_mode=tool requires tool_payload mapping"
             )
-        omtr = tp.get("on_max_turns_no_resolution") or {}
-        if not omtr.get("action"):
+        mtt = int(tp.get("max_treatment_turns", 0))
+        if not 1 <= mtt <= 10:
             raise TreeflowLoadError(
-                f"objection {raw['id']!r}: on_max_turns_no_resolution.action required"
+                f"objection {raw['id']!r}: max_treatment_turns must be in [1, 10], got {mtt}"
+            )
+        cas = str(tp.get("canonical_arguments_summary", ""))
+        if len(cas) < 10:
+            raise TreeflowLoadError(
+                f"objection {raw['id']!r}: canonical_arguments_summary must be >=10 chars"
+            )
+        rc = str(tp.get("resolution_criteria", ""))
+        if len(rc) < 10:
+            raise TreeflowLoadError(
+                f"objection {raw['id']!r}: resolution_criteria must be >=10 chars"
+            )
+        omtr_raw = tp.get("on_max_turns_no_resolution") or {}
+        action = omtr_raw.get("action")
+        if action not in _ALLOWED_MAX_TURNS_ACTIONS:
+            raise TreeflowLoadError(
+                f"objection {raw['id']!r}: on_max_turns_no_resolution.action "
+                f"must be one of {sorted(_ALLOWED_MAX_TURNS_ACTIONS)}, "
+                f"got {action!r}"
             )
         payload = TreeflowToolPayload(
-            canonical_arguments_summary=tp.get("canonical_arguments_summary", ""),
+            canonical_arguments_summary=cas,
             kb_ref=tp.get("kb_ref", ""),
-            max_treatment_turns=int(tp.get("max_treatment_turns", 0)),
-            resolution_criteria=tp.get("resolution_criteria", ""),
+            max_treatment_turns=mtt,
+            resolution_criteria=rc,
             expected_turns=tp.get("expected_turns"),
             on_max_turns_no_resolution=TreeflowOnMaxTurns(
-                action=omtr["action"],
-                message_hint=omtr.get("message_hint"),
+                action=action,
+                message_hint=omtr_raw.get("message_hint"),
             ),
         )
     return TreeflowObjection(
-        id=raw["id"],
-        description=raw["description"],
+        id=str(raw["id"]),
+        description=desc,
         treatment_mode=mode,
         tool_payload=payload,
     )
