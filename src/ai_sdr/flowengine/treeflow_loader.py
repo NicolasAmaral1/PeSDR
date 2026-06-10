@@ -73,6 +73,7 @@ class TreeflowNode:
     collects: list[TreeflowCollectField]
     exit_condition: TreeflowExitCondition
     next_nodes: list[TreeflowTransition]
+    handles_objections: list[TreeflowObjection] = field(default_factory=list)
 
 
 @dataclass
@@ -162,6 +163,8 @@ def _parse_node(raw: dict[str, Any]) -> TreeflowNode:
         for t in raw["next_nodes"]
     ]
 
+    handles_objections = [_parse_objection(o) for o in raw.get("handles_objections", [])]
+
     return TreeflowNode(
         id=raw["id"],
         objetivo=raw["objetivo"],
@@ -169,6 +172,7 @@ def _parse_node(raw: dict[str, Any]) -> TreeflowNode:
         collects=collects,
         exit_condition=exit_cond,
         next_nodes=transitions,
+        handles_objections=handles_objections,
     )
 
 
