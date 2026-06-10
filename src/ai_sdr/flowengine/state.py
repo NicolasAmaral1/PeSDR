@@ -62,11 +62,19 @@ class StackFrame(BaseModel):
 
 
 class TalkFlowStatePayload(BaseModel):
-    """Pydantic envelope for the TalkFlowState JSONB column.
+    """Typed shape for FE-03a runtime flags persisted as shadow keys in JSONB.
 
-    Provides defaults for fields added across FlowEngine phases so legacy
-    rows deserialize cleanly. Fields here mirror columns persisted by
-    ``TalkFlowStateRepository``; see ai_sdr/models/talkflow_state.py.
+    FE-03a introduces ``off_topic_count`` as a counter consulted by the
+    off-topic escalation logic in ``pipeline.run_turn``. The counter is
+    persisted opaquely under ``TalkFlowState.collected['__off_topic_count__']``
+    (per plan T27) rather than as a dedicated Mapped column — this avoids a
+    migration for a single integer and keeps the schema lean while FE-03a is
+    the only consumer.
+
+    This class is therefore a typed *shape* used by the runtime, not an
+    authoritative envelope of any single JSONB column. ``extra='allow'`` is
+    preserved so future FE phases can stage additional runtime flags here
+    without churning the ``model_validate`` call sites.
     """
 
     off_topic_count: int = Field(default=0, ge=0)

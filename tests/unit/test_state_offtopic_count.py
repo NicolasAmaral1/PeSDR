@@ -26,8 +26,18 @@ def test_off_topic_count_rejects_negative():
         TalkFlowStatePayload(off_topic_count=-1)
 
 
-def test_off_topic_count_legacy_payload_without_field_loads_clean():
+def test_legacy_payload_missing_field_defaults_to_zero():
     """Existing serialized state without off_topic_count must default to 0."""
     legacy = {"messages": [], "objections_handled": []}
     p = TalkFlowStatePayload.model_validate(legacy)
     assert p.off_topic_count == 0
+
+
+def test_unknown_keys_preserved_via_extra_allow():
+    """extra='allow' means unknown JSONB keys round-trip without loss."""
+    raw = {"off_topic_count": 2, "future_flag": "x", "another_flag": [1, 2]}
+    p = TalkFlowStatePayload.model_validate(raw)
+    dumped = p.model_dump()
+    assert dumped["off_topic_count"] == 2
+    assert dumped["future_flag"] == "x"
+    assert dumped["another_flag"] == [1, 2]
