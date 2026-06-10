@@ -82,6 +82,9 @@ class TurnDecision(BaseModel):
     # Prompt injection self-flag
     suspect_injection_attempt: bool = False
 
+    # Off-topic detection (FE-03a brecha A1)
+    off_topic_detected: bool = False
+
     # Reasoning (audit + debugging)
     reasoning: str = Field(min_length=1, max_length=400)
 
