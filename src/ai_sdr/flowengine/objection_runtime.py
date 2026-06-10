@@ -128,9 +128,39 @@ def apply(
         # Stay IDLE: explicitly assert no active treatment.
         return StateDelta(new_active_treatment=None)
 
-    # ACTIVE branch
-    # NOTE: max_turns / resolved / cross-objection priorities come in T19-T22.
-    # T18 implements only the default "continue / increment turn" rule.
+    # ACTIVE branch — priority order per spec §4.3:
+    # 1. cross-objection (T21)
+    # 2. max turns (T20)
+    # 3. resolved_accepted
+    # 4. resolved_deferred
+    # 5. default (continue)
+
+    # Priority 3 + 4: resolved
+    if decision.treatment_status in ("resolved_accepted", "resolved_deferred"):
+        resolution = "accepted" if decision.treatment_status == "resolved_accepted" else "deferred"
+        return StateDelta(
+            new_active_treatment=None,
+            appended_objection_history=[
+                {
+                    "objection_id": active["objection_id"],
+                    "detected_at_turn": active["started_at_turn"],
+                    "resolved_at_turn": active["current_treatment_turn"],
+                    "resolution": resolution,
+                }
+            ],
+            events=[
+                (
+                    "objection.treatment.resolved",
+                    {
+                        "objection_id": active["objection_id"],
+                        "status": resolution,
+                        "total_turns": active["current_treatment_turn"],
+                    },
+                )
+            ],
+        )
+
+    # Priority 5: default continue (existing from T18, unchanged)
     new = dict(active)
     new["current_treatment_turn"] = active["current_treatment_turn"] + 1
     return StateDelta(
