@@ -1,7 +1,7 @@
 """Transition validation for the FlowEngine.
 
 Pure function per spec §7. Decides whether the LLM's next_node_suggestion
-is a valid advance from the current node, given the collected state and
+is a valid advance from the current node, given the runtime state and
 the TreeFlow definition.
 
 Returns (resolved_target_node_id, failure_reason). failure_reason is None
@@ -14,7 +14,7 @@ retries via run_transition_retry (Task 13).
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Protocol
 
 from simpleeval import SimpleEval
 
@@ -25,11 +25,19 @@ from ai_sdr.flowengine.treeflow_loader import (
 )
 
 
+class _StateProto(Protocol):
+    collected: dict[str, Any]
+    extracted_facts: dict[str, Any]
+    objections_handled: list[Any]
+    turn_index: int
+    active_treatment: Any  # ActiveTreatment | None — typed Any to avoid import cycle
+
+
 def validate_transition(
     *,
     current_node: str,
     next_node_suggestion: str | None,
-    collected: dict[str, Any],
+    state: _StateProto,
     treeflow: TreeflowDef,
 ) -> tuple[str, str | None]:
     """Validate a transition. See module docstring."""
@@ -46,10 +54,10 @@ def validate_transition(
 
     transition = matching[0]
     if transition.condition.strip() != "true":
-        if not _eval_bool(transition.condition, collected):
+        if not _eval_bool(transition.condition, state):
             return current_node, "condition_false"
 
-    if not _exit_satisfied(node, collected):
+    if not _exit_satisfied(node, state.collected):
         return current_node, "exit_not_satisfied"
 
     return next_node_suggestion, None
@@ -63,12 +71,12 @@ def _exit_satisfied(node: TreeflowNode, collected: dict[str, Any]) -> bool:
                 return False
         return True
     if ec.type == "rule_expression":
-        return _eval_bool(ec.expression or "false", collected)
+        return _eval_bool_collected(ec.expression or "false", collected)
     if ec.type == "combined":
         for c in node.collects:
             if c.required and collected.get(c.field) in (None, ""):
                 return False
-        return _eval_bool(ec.expression or "false", collected)
+        return _eval_bool_collected(ec.expression or "false", collected)
     if ec.type == "llm_judge":
         # Reserved for FE-03+. In FE-01b, default to "not satisfied" so the
         # LLM is nudged to stay (matches the conservative spec §11.2).
@@ -76,9 +84,19 @@ def _exit_satisfied(node: TreeflowNode, collected: dict[str, Any]) -> bool:
     return False
 
 
-def _eval_bool(expression: str, collected: dict[str, Any]) -> bool:
+def _eval_bool(expression: str, state: _StateProto) -> bool:
+    # NOTE: extended context comes in Task 15. For Task 14 we keep behavior
+    # identical: pass state.collected only. This split is intentional so the
+    # signature change ships isolated from the semantic change.
+    try:
+        return bool(SimpleEval(names=state.collected).eval(expression))
+    except Exception:
+        # Any evaluation error -> treat as false (conservative).
+        return False
+
+
+def _eval_bool_collected(expression: str, collected: dict[str, Any]) -> bool:
     try:
         return bool(SimpleEval(names=collected).eval(expression))
     except Exception:
-        # Any evaluation error -> treat as false (conservative).
         return False

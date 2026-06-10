@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Any
 
 from langchain_core.runnables import Runnable
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -61,6 +62,21 @@ class RunTurnResult:
     outcome: str  # 'sent' | 'escalated' | 'opt_out' | 'lead_banned' | 'error'
     current_node_after: str | None
     response_text: str | None
+
+
+@dataclass
+class _RoutingStateView:
+    """Minimal state view passed to validate_transition.
+
+    Conforms to routing._StateProto. Built per-call so the routing
+    layer sees post-decision (collected + extracted_facts) merges.
+    """
+
+    collected: dict[str, Any]
+    extracted_facts: dict[str, Any]
+    objections_handled: list[Any]
+    turn_index: int
+    active_treatment: Any
 
 
 async def run_turn(
@@ -158,7 +174,8 @@ async def run_turn(
             ctx.talk.escalation_reason = str(e)
             logger.warning(
                 "turn_escalated_via_guardrails talk=%s reason=%s",
-                ctx.talk.id, e,
+                ctx.talk.id,
+                e,
             )
             return RunTurnResult(
                 outcome="escalated",
@@ -167,10 +184,19 @@ async def run_turn(
             )
 
         # [9] Routing — validate transition
+        def _state_view(d: TurnDecision) -> _RoutingStateView:
+            return _RoutingStateView(
+                collected={**state.collected, **d.collected_fields},
+                extracted_facts={**state.extracted_facts, **d.extracted_facts},
+                objections_handled=list(state.objections_handled),
+                turn_index=ctx.talk.turn_count + 1,
+                active_treatment=state.active_treatment,
+            )
+
         resolved_target, failure = validate_transition(
             current_node=state.current_node,
             next_node_suggestion=decision.next_node_suggestion,
-            collected={**state.collected, **decision.collected_fields},
+            state=_state_view(decision),
             treeflow=treeflow,
         )
         decision, resolved_target = await run_transition_retry(
@@ -184,7 +210,7 @@ async def run_turn(
             revalidate=lambda d: validate_transition(
                 current_node=state.current_node,
                 next_node_suggestion=d.next_node_suggestion,
-                collected={**state.collected, **d.collected_fields},
+                state=_state_view(d),
                 treeflow=treeflow,
             ),
             current_node=state.current_node,
@@ -193,8 +219,11 @@ async def run_turn(
         # [10] Post-processing — apply decision to state
         await apply_decision(
             session,
-            talk=ctx.talk, state=state, decision=decision,
-            resolved_target_node=resolved_target, now=now,
+            talk=ctx.talk,
+            state=state,
+            decision=decision,
+            resolved_target_node=resolved_target,
+            now=now,
         )
 
         # [11] Token bookkeeping (best-effort)
@@ -204,13 +233,16 @@ async def run_turn(
 
         # [12] Send to lead via adapter
         send_result = await send_response_text(
-            adapter=adapter, lead=ctx.lead, decision=decision,
+            adapter=adapter,
+            lead=ctx.lead,
+            decision=decision,
         )
 
         # [13] Audit row
         await record_outbound_audit(
             session,
-            talk=ctx.talk, inbound=inbound,
+            talk=ctx.talk,
+            inbound=inbound,
             response_text=decision.response_text,
             turn_index=ctx.talk.turn_count,
             send_result=send_result,
