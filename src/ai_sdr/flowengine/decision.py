@@ -5,7 +5,7 @@ side-effect the FlowEngine takes after the call is driven from fields
 here: what to say (response_text), which fields to record
 (collected_fields, extracted_facts), what state changes to enact
 (next_node_suggestion, suggest_close_talk, request_human_escalation),
-and self-attestations the LLM owes the runtime (treatment_resolved,
+and self-attestations the LLM owes the runtime (treatment_status,
 suspect_injection_attempt, reasoning).
 
 The schema is bound via `with_structured_output(TurnDecision)` on the
@@ -16,12 +16,11 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 TreatmentStrategy = Literal["inline", "subnode", "tool"]
-CloseTalkSignal = Literal[
-    "no", "completed_success", "completed_failure", "no_interest"
-]
+TreatmentStatus = Literal["in_progress", "resolved_accepted", "resolved_deferred"]
+CloseTalkSignal = Literal["no", "completed_success", "completed_failure", "no_interest"]
 ResponseFormat = Literal["text", "voice", "both"]
 EscalationCategory = Literal[
     "unknown_info",
@@ -49,6 +48,8 @@ class HumanEscalation(BaseModel):
 class TurnDecision(BaseModel):
     """The single structured output of the main LLM per turn."""
 
+    model_config = ConfigDict(extra="forbid")
+
     # The response to send to the lead
     response_text: str = Field(min_length=1)
     response_format: ResponseFormat | None = None
@@ -64,8 +65,9 @@ class TurnDecision(BaseModel):
     detected_objection: str | None = None
     treatment_strategy: TreatmentStrategy | None = None
 
-    # Treatment resolution (when active_treatment was in progress)
-    treatment_resolved: bool = False
+    # Treatment resolution (when active_treatment was in progress).
+    # Only meaningful when state.active_treatment is set; ignored otherwise.
+    treatment_status: TreatmentStatus | None = None
 
     # Routing
     next_node_suggestion: str | None = None
