@@ -59,3 +59,16 @@ class StackFrame(BaseModel):
     node_id: str
     entered_at_turn: int = Field(ge=1)
     return_to_node_id: str | None = None
+
+
+class TalkFlowStatePayload(BaseModel):
+    """Pydantic envelope for the TalkFlowState JSONB column.
+
+    Provides defaults for fields added across FlowEngine phases so legacy
+    rows deserialize cleanly. Fields here mirror columns persisted by
+    ``TalkFlowStateRepository``; see ai_sdr/models/talkflow_state.py.
+    """
+
+    off_topic_count: int = Field(default=0, ge=0)
+
+    model_config = {"extra": "allow"}
