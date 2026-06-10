@@ -13,19 +13,12 @@ Create Date: 2026-06-10 00:00:00
 import sqlalchemy as sa
 from alembic import op
 
+from ai_sdr.models.review_reason import ALL_REASONS as REASONS
+
 revision = "0025_talks_requires_review_reason"
 down_revision = "0024_relax_outbound_talkflow_fk"
 branch_labels = None
 depends_on = None
-
-
-REASONS = (
-    "escalation_requested",
-    "off_topic_exhausted",
-    "validator_exhausted",
-    "treeflow_version_missing",
-    "objection_treatment_exhausted",
-)
 
 
 def upgrade() -> None:
