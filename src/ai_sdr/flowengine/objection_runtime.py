@@ -128,5 +128,20 @@ def apply(
         # Stay IDLE: explicitly assert no active treatment.
         return StateDelta(new_active_treatment=None)
 
-    # ACTIVE — not yet implemented in this task; will be filled in T18-T22.
-    return StateDelta()
+    # ACTIVE branch
+    # NOTE: max_turns / resolved / cross-objection priorities come in T19-T22.
+    # T18 implements only the default "continue / increment turn" rule.
+    new = dict(active)
+    new["current_treatment_turn"] = active["current_treatment_turn"] + 1
+    return StateDelta(
+        new_active_treatment=new,
+        events=[
+            (
+                "objection.treatment.continued",
+                {
+                    "objection_id": active["objection_id"],
+                    "current_turn": new["current_treatment_turn"],
+                },
+            )
+        ],
+    )
