@@ -1,5 +1,5 @@
-id: "joana-mentora"
-display_name: "Joana Mentora"
+id: "manuela-mentora"
+display_name: "Manuela Mentora"
 timezone: "America/Sao_Paulo"
 
 # Horário de atendimento — leads fora desse range entram em queue (não recebem auto-ack).
@@ -32,8 +32,9 @@ llm:
     api_key_ref: secrets/openai_key
   cache_enabled: true
 
-# Guardrails — preços/produtos permitidos pra Joana.
-# Mentoria R$ 6.000 · Aceleradora R$ 1.497–2.000 · Downsell R$ 247
+# Guardrails — preços/produtos permitidos pra Manuela.
+# Valores ainda baseados na estrutura piloto (Mentoria R$ 6.000 / Aceleradora
+# R$ 1.497–2.000 / Downsell R$ 247). Ajuste conforme a oferta real da Manuela.
 guardrails:
   enabled: true
   allowed_prices: [247, 1497, 1997, 2000, 6000]
@@ -43,7 +44,7 @@ guardrails:
   max_retries: 2
 
 # Messaging — WhatsApp Cloud API.
-# As 4 refs abaixo apontam pra chaves em tenants/joana-mentora/secrets.enc.yaml.
+# As 4 refs abaixo apontam pra chaves em tenants/manuela-mentora/secrets.enc.yaml.
 # Você define o webhook_verify_token; os outros 3 vêm do Meta Business Manager.
 messaging:
   provider: whatsapp_cloud
@@ -67,6 +68,7 @@ objections:
   max_handled_per_lead: 10
   history_window: 4
 
-# Plano 11 — Operator Console habilitado pra Joana usar UI de assign de leads.
+# Plano 11 — Operator Console habilitado pra operadora (Lana, estrategista da
+# Manuela) usar UI de assign de leads em /console/manuela-mentora/leads.
 console:
   enabled: true

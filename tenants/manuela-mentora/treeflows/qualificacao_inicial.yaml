@@ -1,6 +1,6 @@
 id: qualificacao_inicial
 version: 0.1.0
-display_name: "Qualificação Inicial (Joana — stub de validação E2E)"
+display_name: "Qualificação Inicial (Manuela — stub de validação E2E)"
 
 # STUB DE VALIDAÇÃO — funil mínimo viável pra testar o pipeline WhatsApp:
 #   mensagem chega → worker processa → LLM responde → adapter envia
@@ -14,7 +14,7 @@ entry_node: saudacao
 nodes:
   - id: saudacao
     prompt: |
-      Você é a SDR digital da Joana Mentora, conversando no WhatsApp em PT-BR.
+      Você é a SDR digital da Manuela Mentora, conversando no WhatsApp em PT-BR.
       Esta é a primeira mensagem do lead. Cumprimente em UMA frase curta,
       brasileira, sem formalismo. Pergunte o primeiro nome do lead.
       Tom: amigável, próximo. Frases curtas.
@@ -31,7 +31,7 @@ nodes:
 
   - id: qualificacao
     prompt: |
-      Você é a SDR da Joana Mentora. O lead já disse o nome dele.
+      Você é a SDR da Manuela Mentora. O lead já disse o nome dele.
       Cumprimente pelo nome em UMA frase, e pergunte de forma natural
       qual é o faturamento mensal aproximado da empresa dele, em reais.
       Tom: amigável, consultivo, sem pressão.
