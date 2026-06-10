@@ -54,7 +54,12 @@ async def test_three_turn_happy_path(db_session: AsyncSession) -> None:
     treeflow = load_treeflow_v2(tfv.content_yaml)
     adapter = FakeMessagingAdapter()
     llm = AsyncMock()
-    gcfg = GuardrailConfig(disallowed_price_pattern=r"R\$\d+", allowed_prices=[])
+    gcfg = GuardrailConfig(
+        disallowed_price_pattern=r"R\$\d+",
+        allowed_prices=[],
+        allowed_products=[],
+        fallback_text="Vou validar com a equipe.",
+    )
 
     # Turn 1
     inbound1 = await _send_inbound(db_session, tenant, "oi")

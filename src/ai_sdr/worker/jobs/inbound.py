@@ -141,6 +141,8 @@ async def _run_v2_inbox(
     guardrail_cfg = GuardrailConfig(
         disallowed_price_pattern=(gcfg.disallowed_price_pattern if gcfg else ""),
         allowed_prices=[str(p) for p in (gcfg.allowed_prices if gcfg else [])],
+        allowed_products=list(gcfg.allowed_products) if gcfg else [],
+        fallback_text=(gcfg.fallback_text if gcfg else "Vou validar com a equipe."),
     )
 
     while True:

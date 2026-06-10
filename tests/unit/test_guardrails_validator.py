@@ -15,6 +15,8 @@ def cfg(
     return GuardrailConfig(
         disallowed_price_pattern=disallowed,
         allowed_prices=allowed or [],
+        allowed_products=[],
+        fallback_text="Vou validar com a equipe.",
     )
 
 

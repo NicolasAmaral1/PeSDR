@@ -5,11 +5,14 @@ that response text didn't hallucinate prices or violate other rules.
 FE-01b replaces that with deterministic Python checks:
 
 1. Regex against tenant.guardrails.disallowed_price_pattern.
-2. Whitelist check: detected price-like tokens must appear in
+2. Price whitelist: detected price-like tokens must appear in
    tenant.guardrails.allowed_prices.
+3. Product whitelist (FE-03a Task 9): mentioned product names must
+   appear in tenant.guardrails.allowed_products.
 
 Violations trigger a corrective retry (Task 10) and, after 2 failures,
-escalate the Talk to requires_review.
+the validator emits tenant.guardrails.fallback_text as the response and
+escalates the Talk to requires_review.
 
 The legacy critic (guardrails/critic.py) and runner stay alive for the
 v1 LangGraph path; FE-02 deletes them.
@@ -25,6 +28,8 @@ from dataclasses import dataclass
 class GuardrailConfig:
     disallowed_price_pattern: str  # regex; empty string disables the check
     allowed_prices: list[str]
+    allowed_products: list[str]
+    fallback_text: str
 
 
 @dataclass(frozen=True)

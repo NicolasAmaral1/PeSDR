@@ -107,7 +107,12 @@ async def test_first_turn_sends_greeting_and_writes_outbound(
         llm=llm,
         adapter=adapter,
         opt_out_keywords=[],
-        guardrail_cfg=GuardrailConfig(disallowed_price_pattern=r"R\$\d+", allowed_prices=[]),
+        guardrail_cfg=GuardrailConfig(
+            disallowed_price_pattern=r"R\$\d+",
+            allowed_prices=[],
+            allowed_products=[],
+            fallback_text="Vou validar com a equipe.",
+        ),
         now=datetime(2026, 6, 2, 10, tzinfo=timezone.utc),
     )
 
@@ -152,7 +157,12 @@ async def test_second_turn_advances_node(db_session: AsyncSession) -> None:
         db_session, tenant=tenant, treeflow=treeflow, treeflow_version=tfv,
         inbound=inbound1, llm=llm, adapter=adapter,
         opt_out_keywords=[],
-        guardrail_cfg=GuardrailConfig(disallowed_price_pattern=r"R\$\d+", allowed_prices=[]),
+        guardrail_cfg=GuardrailConfig(
+            disallowed_price_pattern=r"R\$\d+",
+            allowed_prices=[],
+            allowed_products=[],
+            fallback_text="Vou validar com a equipe.",
+        ),
         now=datetime(2026, 6, 2, 10, tzinfo=timezone.utc),
     )
 
@@ -173,7 +183,12 @@ async def test_second_turn_advances_node(db_session: AsyncSession) -> None:
         db_session, tenant=tenant, treeflow=treeflow, treeflow_version=tfv,
         inbound=inbound2, llm=llm, adapter=adapter,
         opt_out_keywords=[],
-        guardrail_cfg=GuardrailConfig(disallowed_price_pattern=r"R\$\d+", allowed_prices=[]),
+        guardrail_cfg=GuardrailConfig(
+            disallowed_price_pattern=r"R\$\d+",
+            allowed_prices=[],
+            allowed_products=[],
+            fallback_text="Vou validar com a equipe.",
+        ),
         now=datetime(2026, 6, 2, 10, 5, tzinfo=timezone.utc),
     )
     assert result.outcome == "sent"

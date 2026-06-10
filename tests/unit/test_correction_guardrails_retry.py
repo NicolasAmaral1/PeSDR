@@ -47,7 +47,12 @@ async def test_first_response_clean_returns_immediately() -> None:
         cached=CachedLayer(text="C"),
         fresh_builder=lambda _correction: FreshLayer(text="F"),
         inbound_text="oi",
-        validator_config=GuardrailConfig(disallowed_price_pattern=r"R\$\d+", allowed_prices=[]),
+        validator_config=GuardrailConfig(
+            disallowed_price_pattern=r"R\$\d+",
+            allowed_prices=[],
+            allowed_products=[],
+            fallback_text="Vou validar com a equipe.",
+        ),
     )
     assert decision.response_text == "clean response"
     bound_llm.ainvoke.assert_not_called()
@@ -64,7 +69,12 @@ async def test_violation_triggers_one_retry_and_succeeds() -> None:
         cached=CachedLayer(text="C"),
         fresh_builder=lambda _correction: FreshLayer(text=f"F + correction:{_correction.category}"),
         inbound_text="quanto custa?",
-        validator_config=GuardrailConfig(disallowed_price_pattern=r"R\$\d+", allowed_prices=[]),
+        validator_config=GuardrailConfig(
+            disallowed_price_pattern=r"R\$\d+",
+            allowed_prices=[],
+            allowed_products=[],
+            fallback_text="Vou validar com a equipe.",
+        ),
     )
     assert decision.response_text == "cleaned response"
     bound_llm.ainvoke.assert_awaited_once()
@@ -84,7 +94,10 @@ async def test_violation_after_retry_raises_escalation() -> None:
             fresh_builder=lambda _correction: FreshLayer(text="F"),
             inbound_text="quanto custa?",
             validator_config=GuardrailConfig(
-                disallowed_price_pattern=r"R\$\d+", allowed_prices=[]
+                disallowed_price_pattern=r"R\$\d+",
+                allowed_prices=[],
+                allowed_products=[],
+                fallback_text="Vou validar com a equipe.",
             ),
         )
     assert "price" in str(exc.value).lower()
