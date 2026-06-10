@@ -25,11 +25,12 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Text, func
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ai_sdr.db.base import Base
+from ai_sdr.models.review_reason import RequiresReviewReason
 
 TalkStatus = Literal[
     "active",
@@ -89,6 +90,11 @@ class Talk(Base):
     )
     escalation_category: Mapped[str | None] = mapped_column(Text(), nullable=True)
     escalation_reason: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    requires_review_reason: Mapped[RequiresReviewReason | None] = mapped_column(
+        String(64),
+        nullable=True,
+        default=None,
+    )
 
     experiment_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True
