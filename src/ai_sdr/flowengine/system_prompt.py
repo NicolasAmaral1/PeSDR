@@ -147,10 +147,7 @@ def build_fresh_layer(
     """
     parts: list[str] = []
 
-    parts.append(
-        f"HORA ATUAL DO LEAD: {now.isoformat(timespec='minutes')} "
-        f"({_period(now)})"
-    )
+    parts.append(f"HORA ATUAL DO LEAD: {now.isoformat(timespec='minutes')} ({_period(now)})")
     parts.append("")
 
     parts.append("TALK STATE:")
@@ -187,20 +184,31 @@ def build_fresh_layer(
         parts.append("")
 
     if active_treatment:
-        parts.append("ACTIVE TREATMENT:")
+        parts.append("=== TRATAMENTO DE OBJEÇÃO ATIVA (ACTIVE TREATMENT) ===")
+        parts.append(f"Você está argumentando contra: {active_treatment.get('objection_id')}")
         parts.append(
-            f"  objection_id: {active_treatment.get('objection_id')}"
+            f"Turno {active_treatment.get('current_treatment_turn')} de "
+            f"{active_treatment.get('max_treatment_turns')} max "
+            f"(turn {active_treatment.get('current_treatment_turn')} of "
+            f"{active_treatment.get('max_treatment_turns')})"
         )
-        parts.append(
-            f"  turn {active_treatment.get('current_treatment_turn')} "
-            f"of {active_treatment.get('max_treatment_turns')} max"
-        )
-        parts.append(
-            f"  resolution_criteria: {active_treatment.get('resolution_criteria')}"
-        )
+        parts.append(f"Critério de resolução: {active_treatment.get('resolution_criteria')}")
         history_used = active_treatment.get("treatment_history", [])
         if history_used:
-            parts.append(f"  history: {history_used}")
+            parts.append(f"Argumentos já usados: {history_used}")
+        parts.append("")
+        parts.append("INSTRUÇÕES PRA RESOLUÇÃO (conservador):")
+        parts.append("- Em dúvida entre resolved_accepted e resolved_deferred, prefira deferred.")
+        parts.append(
+            "- Sinais de deferred: mensagem curta sem entusiasmo, "
+            "'tá bom', 'tanto faz', pontuação seca."
+        )
+        parts.append(
+            "- resolved_accepted exige sinal positivo claro: "
+            "'fechou!', 'maravilha', pergunta sobre próximo passo."
+        )
+        parts.append("- Lead ainda resistindo: in_progress.")
+        parts.append("- NÃO sugira mudar de node enquanto active_treatment estiver setado.")
         parts.append("")
 
     if correction is not None:
@@ -208,10 +216,7 @@ def build_fresh_layer(
         parts.append(f"  previous_response: {correction.previous_response!r}")
         parts.append(f"  rejection_reason: {correction.rejection_reason}")
         parts.append(f"  category: {correction.category}")
-        parts.append(
-            "  Regenerate, fixing the specific issue. Do NOT repeat the "
-            "previous mistake."
-        )
+        parts.append("  Regenerate, fixing the specific issue. Do NOT repeat the previous mistake.")
         parts.append("")
 
     parts.append("RECENT CONVERSATION (last 15 messages):")
