@@ -169,6 +169,21 @@ def build_fresh_layer(
         parts.append(f"    - {c.field}: {c.type}{req}{hint}")
     parts.append("")
 
+    if current_node.handles_objections:
+        parts.append("NODE-SCOPED OBJECTIONS (visible only in this node):")
+        for obj in current_node.handles_objections:
+            parts.append(f"  - id: {obj.id}")
+            parts.append(f"    description: {obj.description}")
+            parts.append(f"    treatment_mode: {obj.treatment_mode}")
+            if obj.tool_payload is not None:
+                parts.append(
+                    f"    max_treatment_turns: {obj.tool_payload.max_treatment_turns}"
+                )
+        parts.append(
+            "  When you detect one, emit detected_objection with its id."
+        )
+        parts.append("")
+
     if immediate_next_nodes:
         parts.append("IMMEDIATE NEXT NODES — DENSE DETAIL:")
         for node, condition in immediate_next_nodes:
