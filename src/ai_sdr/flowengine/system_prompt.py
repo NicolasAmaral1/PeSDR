@@ -174,12 +174,14 @@ def build_fresh_layer(
         for node, condition in immediate_next_nodes:
             parts.append(f"  - id: {node.id}")
             parts.append(f"    objetivo: {node.objetivo}")
+            parts.append(f"    bridge_instruction: {node.bridge_instruction}")
             parts.append(f"    will_collect: {[c.field for c in node.collects]}")
             parts.append(f"    transition_condition: {condition}")
         parts.append(
             "  When you decide to advance, compose a natural bridge using "
-            "the chosen next node's objetivo. Do NOT mention content from "
-            "nodes beyond the immediate next."
+            "the chosen next node's objetivo AND bridge_instruction. You may "
+            "include content that anchors the lead in the new node within the "
+            "same response."
         )
         parts.append("")
 
