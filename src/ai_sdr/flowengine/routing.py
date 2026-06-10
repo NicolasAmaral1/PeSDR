@@ -6,7 +6,8 @@ the TreeFlow definition.
 
 Returns (resolved_target_node_id, failure_reason). failure_reason is None
 on success; on failure the target stays at current_node and the reason
-is one of: invalid_target | condition_false | exit_not_satisfied.
+is one of: invalid_target | condition_false | transition_blocked_by_treatment
+| exit_not_satisfied.
 
 The orchestrator (Task 17) uses the failure reason to drive corrective
 retries via run_transition_retry (Task 13).
@@ -56,6 +57,14 @@ def validate_transition(
     if transition.condition.strip() != "true":
         if not _eval_bool(transition.condition, state):
             return current_node, "condition_false"
+
+    # Brecha C2 (FE-03a Task 16): block transitions while a treatment is in
+    # progress. The system prompt instructs the LLM not to propose transitions
+    # during active_treatment, but routing must enforce it to keep state
+    # consistent if the LLM disobeys. The failure_reason rides the existing
+    # run_transition_retry loop so the LLM regenerates without a transition.
+    if state.active_treatment is not None:
+        return current_node, "transition_blocked_by_treatment"
 
     if not _exit_satisfied(node, state.collected):
         return current_node, "exit_not_satisfied"
