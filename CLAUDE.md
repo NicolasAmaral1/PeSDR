@@ -200,6 +200,43 @@ docker exec ai_sdr_postgres psql -U ai_sdr_app -d ai_sdr \
       UPDATE talks SET status='active', requires_review_reason=NULL, escalated_at=NULL;"
 ```
 
+## FE-03b — Humanização + Close Lifecycle
+
+Polish do runtime que FE-03a entregou.
+
+### Humanização
+
+- `humanization` block em `tenant.yaml`: `enabled` (default true), `chunk_delimiter` (default `\n\n`), `chars_per_second_min/max` (8/15), `min_delay_ms`/`max_delay_ms` (800/4000), `apply_to_voice` (false).
+- **Pipeline:** `humanize(response_text, config, *, is_voice)` em `flowengine/humanizer.py` é pure function — split por parágrafo + computa delay proporcional ao próximo chunk com bounds.
+- **Sender** (`flowengine/sender.py`) itera chunks: `mark_as_typing(to)` (opcional, no-op default no protocol), `asyncio.sleep`, `send_text`.
+- **WhatsApp Cloud** implementa `mark_as_typing` via `typing_indicator` API; PolicyError silenciado pq Meta gates per account.
+- **Voice mode**: humanização pulada (1 chunk) unless `apply_to_voice=true`. FE-05 wire chunking diferente.
+
+### Close lifecycle
+
+- `talk_lifecycle` block opcional no TreeFlow YAML: `close_after_inactivity` (ISO-8601, [PT1H, P365D]), `close_after_duration` (ISO-8601, [P1D, P730D]), `close_when_completed: [{ expression, outcome }]` (outcome ∈ {success, failure, no_interest}).
+- **Inactivity + Duration**: worker scan job (`worker/jobs/scan_talks.py`) roda cron a cada 5 minutos, cross-tenant via BYPASSRLS + SKIP LOCKED. **Two-phase**: read candidates → per-Talk fresh tx (SET LOCAL row_security=off → SELECT FOR UPDATE SKIP LOCKED → close → commit). Crash mid-batch preserva closures anteriores.
+- **Completion rule**: pipeline hook em `post_processing.apply_decision` após state delta. **Mutually exclusive com requires_review_reason** (close vence; review skipped).
+- **Re-engagement**: lead manda mensagem após Talk close → **nova Talk fresca** (não reopen). preprocessing emite `talk.re_engagement_after_close` event.
+- **Bounds errors fatais**: TreeFlow com talk_lifecycle inválido → `TreeflowLoadError`. Tenant nem inicia.
+
+### Migration 0026
+
+Estende `talks.status` CHECK constraint pra incluir `closed_completed_success`, `closed_completed_failure`, `closed_no_interest`, `closed_duration`. Source-of-truth em `ai_sdr.models.talk_status.TalkStatus` Literal + `ALL_STATUSES` tuple — migration e ORM importam de lá (pattern de `review_reason.py` em FE-03a).
+
+### Eventos structlog (9 novos)
+
+`talk.closed.{inactivity,duration,completion}`, `talk.re_engagement_after_close`, `humanization.{chunks_emitted,skipped_voice_mode}`, `mark_as_typing.{unsupported,failed}`, `scan_talks.completed`.
+
+### Wipe pra dev fresh (atualiza FE-03a guidance)
+
+```bash
+docker exec ai_sdr_postgres psql -U ai_sdr_app -d ai_sdr \
+  -c "TRUNCATE checkpoints, checkpoint_writes, checkpoint_blobs, checkpoint_migrations; \
+      UPDATE talks SET status='active', requires_review_reason=NULL, escalated_at=NULL, \
+                       closed_at=NULL, closed_reason=NULL, closed_by=NULL;"
+```
+
 ## Checkpointer notes
 
 - Tabelas do LangGraph (`checkpoints`, `checkpoint_writes`, `checkpoint_blobs`, `checkpoint_migrations`) são criadas pelo `ensure_checkpointer_schema()` no startup (chamado no lifespan da FastAPI e no `ai-sdr simulate`). Migration 0004 é só um stamp documental — NÃO cria as tabelas (a lib usa psycopg3, alembic env usa asyncpg).
