@@ -44,6 +44,29 @@ class TalkRepository:
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def find_most_recent_closed(
+        self,
+        tenant_id: uuid.UUID,
+        lead_id: uuid.UUID,
+    ) -> Talk | None:
+        """Return the most recently closed Talk for this (tenant, lead), or None.
+
+        A Talk is 'closed' when status starts with 'closed_'. Used by
+        preprocessing for re-engagement logging (FE-03b §5.5).
+        """
+        stmt = (
+            select(Talk)
+            .where(
+                Talk.tenant_id == tenant_id,
+                Talk.lead_id == lead_id,
+                Talk.status.like("closed_%"),
+            )
+            .order_by(Talk.closed_at.desc().nulls_last())
+            .limit(1)
+        )
+        result = await self._session.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def create(
         self,
         *,
