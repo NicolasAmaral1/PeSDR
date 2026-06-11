@@ -24,6 +24,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import structlog
+import yaml
 from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -102,9 +103,11 @@ async def _run_v2_inbox(
 
     from ai_sdr.flowengine.llm_client import main_llm_for_tenant
     from ai_sdr.flowengine.pipeline import run_turn
-    from ai_sdr.flowengine.treeflow_loader import load_treeflow_v2
+    from ai_sdr.flowengine.treeflow_loader import TreeflowLoadError, load_treeflow_v2
     from ai_sdr.guardrails.validator import GuardrailConfig
+    from ai_sdr.models.talk import Talk
     from ai_sdr.models.treeflow_version import TreeflowVersion
+    from ai_sdr.repositories.talk_repository import TalkRepository
     from ai_sdr.secrets.sops_loader import SopsLoader
     from ai_sdr.settings import get_settings
     from ai_sdr.tenant_loader.loader import TenantLoader
@@ -129,13 +132,87 @@ async def _run_v2_inbox(
         )
         return
 
-    treeflow = load_treeflow_v2(tfv.content_yaml)
+    try:
+        treeflow = load_treeflow_v2(tfv.content_yaml)
+    except (TreeflowLoadError, yaml.YAMLError) as exc:
+        # The persisted TreeflowVersion snapshot can no longer be parsed
+        # into a TreeflowDef (corrupt YAML, schema drift, truncation, etc.).
+        # We can't safely run the turn — flag the active Talk for review if
+        # it exists, drain the queued inbounds as error so we don't retry,
+        # and bail. Per FE-03a spec §11 + §B2 (the dead preprocessing-side
+        # guard never fired because the YAML load happens here, before
+        # run_turn).
+        now = datetime.now(UTC)
+        try:
+            talks = TalkRepository(db)
+            active_talk: Talk | None = await talks.find_active_for_lead(tenant.id, lead.id)
+        except Exception as lookup_err:
+            active_talk = None
+            log.warning(
+                "worker.treeflow_load_failed_talk_lookup_failed",
+                tenant_id=str(tenant.id),
+                lead_id=str(lead.id),
+                err=str(lookup_err),
+            )
+        if active_talk is not None:
+            try:
+                active_talk.status = "requires_review"
+                active_talk.requires_review_reason = "treeflow_version_missing"
+                active_talk.escalated_at = now
+                active_talk.escalation_category = "system_exhausted"
+                active_talk.escalation_reason = f"treeflow_version_missing: {exc}"
+                log.warning(
+                    "worker.treeflow_load_failed",
+                    tenant_id=str(tenant.id),
+                    lead_id=str(lead.id),
+                    talk_id=str(active_talk.id),
+                    reason=str(exc),
+                )
+            except Exception as flag_err:
+                # Defensive: do not let a flagging glitch crash the worker.
+                log.warning(
+                    "worker.treeflow_load_failed_flag_failed",
+                    tenant_id=str(tenant.id),
+                    lead_id=str(lead.id),
+                    err=str(flag_err),
+                )
+        else:
+            # Brand-new lead, no Talk yet — nothing to flag. Operator must
+            # inspect the YAML by hand. Use critical level so it surfaces.
+            log.critical(
+                "worker.treeflow_load_failed_no_talk",
+                tenant_id=str(tenant.id),
+                lead_id=str(lead.id),
+                reason=str(exc),
+            )
+        # Mark any queued inbounds for this lead as error so the worker
+        # doesn't keep re-attempting. Operator can re-queue manually after
+        # fixing the YAML.
+        try:
+            await _mark_queued_as_skipped(db, lead.id, reason=f"treeflow_load_failed: {exc}")
+        except Exception as skip_err:
+            log.warning(
+                "worker.treeflow_load_failed_mark_skipped_failed",
+                tenant_id=str(tenant.id),
+                lead_id=str(lead.id),
+                err=str(skip_err),
+            )
+        try:
+            await db.commit()
+        except Exception as commit_err:
+            log.warning(
+                "worker.treeflow_load_failed_commit_failed",
+                tenant_id=str(tenant.id),
+                lead_id=str(lead.id),
+                err=str(commit_err),
+            )
+            with contextlib.suppress(Exception):
+                await db.rollback()
+        return
     llm = main_llm_for_tenant(tenant_cfg.llm.default, secrets=secrets)
 
     opt_out_keywords = (
-        list(tenant_cfg.conversation.optout_stop_words)
-        if tenant_cfg.conversation
-        else []
+        list(tenant_cfg.conversation.optout_stop_words) if tenant_cfg.conversation else []
     )
     gcfg = tenant_cfg.guardrails
     guardrail_cfg = GuardrailConfig(
@@ -263,7 +340,11 @@ async def process_lead_inbox(ctx: dict[str, Any], tenant_id: str, lead_id: str) 
             # FE-01b feature flag: route to FlowEngine v2 when architecture_version == 2.
             if tenant.architecture_version == 2:
                 await _run_v2_inbox(
-                    db, tenant=tenant, lead=lead, adapter=adapter, tenant_uuid=tenant_uuid,
+                    db,
+                    tenant=tenant,
+                    lead=lead,
+                    adapter=adapter,
+                    tenant_uuid=tenant_uuid,
                 )
                 return
             # else: fall through to existing v1 path unchanged

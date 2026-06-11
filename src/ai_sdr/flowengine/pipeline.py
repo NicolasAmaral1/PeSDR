@@ -31,7 +31,6 @@ from ai_sdr.flowengine.decision import TurnDecision
 from ai_sdr.flowengine.post_processing import apply_decision
 from ai_sdr.flowengine.preprocessing import (
     OptOutDetected,
-    TreeflowVersionMissing,
     resolve_pipeline_context,
 )
 from ai_sdr.flowengine.routing import validate_transition
@@ -109,50 +108,6 @@ async def run_turn(
     except OptOutDetected:
         logger.info("opt_out_detected_fe01b inbound=%s", inbound.id)
         return RunTurnResult(outcome="opt_out", current_node_after=None, response_text=None)
-    except TreeflowVersionMissing as e:
-        # The snapshot recorded on the Talk no longer resolves to a YAML
-        # on disk (or the persisted content_yaml is unparseable). We can't
-        # safely run the turn. Best-effort: mark the lead's active Talk for
-        # review and signal escalation. We have to re-locate the Talk via
-        # the inbound — preprocessing raised before fully returning ctx.
-        from sqlalchemy import select  # local to avoid widening top-level imports
-
-        from ai_sdr.models.talk import Talk
-
-        logger.error(
-            "treeflow_version_missing tenant=%s inbound=%s err=%s",
-            tenant.id,
-            inbound.id,
-            e,
-        )
-        try:
-            talk_row = (
-                await session.execute(
-                    select(Talk)
-                    .where(Talk.tenant_id == tenant.id)
-                    .where(Talk.lead_id == inbound.lead_id)
-                    .where(Talk.status == "active")
-                    .limit(1)
-                )
-            ).scalar_one_or_none()
-            if talk_row is not None:
-                talk_row.status = "requires_review"
-                talk_row.escalated_at = now
-                talk_row.escalation_category = "system_exhausted"
-                talk_row.escalation_reason = f"treeflow_version_missing: {e}"
-                talk_row.requires_review_reason = "treeflow_version_missing"
-                await session.flush()
-        except Exception as lookup_err:
-            logger.warning(
-                "treeflow_version_missing_talk_lookup_failed inbound=%s err=%s",
-                inbound.id,
-                lookup_err,
-            )
-        return RunTurnResult(
-            outcome="escalated",
-            current_node_after=None,
-            response_text=None,
-        )
 
     # Banned check
     if ctx.lead.risk_level == "banned":

@@ -6,9 +6,16 @@ covered by T27 for escalation_requested / off_topic_exhausted /
 objection_treatment_exhausted):
 
   - `validator_exhausted` — when `run_guardrails_retry` raises
-    `CorrectionEscalation`.
-  - `treeflow_version_missing` — when the TreeFlow snapshot recorded on the
-    Talk doesn't resolve to a usable TreeflowDef.
+    `CorrectionEscalation`. Lives inside `run_turn`.
+  - `treeflow_version_missing` — when the persisted TreeflowVersion
+    snapshot YAML can no longer be parsed (corrupt / truncated / schema
+    drift). Per code-review on T28, the YAML load happens in the worker
+    (`src/ai_sdr/worker/jobs/inbound.py:_run_v2_inbox`) BEFORE
+    `run_turn` is invoked, so the actual coverage lives there — see
+    that file's `try/except (TreeflowLoadError, yaml.YAMLError)` block.
+    The assertion below is kept as the user-visible contract; the
+    integration test stays skip-friendly until the run_turn_harness
+    fixture lands.
 
 These tests rely on a `run_turn_harness` fixture that wires up a full
 FlowEngine v2 turn (tenant + lead + treeflow + LLM stub + adapter stub).

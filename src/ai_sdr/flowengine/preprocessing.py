@@ -29,16 +29,6 @@ class OptOutDetected(Exception):
     """Raised when the inbound contains an opt-out keyword (case-insensitive)."""
 
 
-class TreeflowVersionMissing(Exception):
-    """Raised when the version snapshot recorded on the Talk no longer
-    resolves to a TreeFlow definition (e.g. YAML file deleted on disk,
-    or the snapshot row's content_yaml became unparseable).
-
-    Caller is expected to mark the Talk as `requires_review` with
-    `requires_review_reason = "treeflow_version_missing"`.
-    """
-
-
 @dataclass
 class PipelineContext:
     """Carried through run_turn — Lead, Talk, inbound, and origin flag."""
@@ -62,20 +52,12 @@ async def resolve_pipeline_context(
 
     Lead resolution: find by ('whatsapp', from_address); create if missing.
     Talk resolution: find_active_for_lead; create if missing.
-    """
-    # Defensive: the snapshot we were handed must be self-consistent.
-    # If the YAML loader produced a TreeflowDef whose entry_node isn't in
-    # its nodes map (e.g. the snapshot row was truncated, or a bug
-    # downstream wiped the map), we can't safely run a turn — raise so
-    # the caller can mark the Talk for review. The loader normally
-    # enforces this; this is a belt-and-braces re-check.
-    if treeflow.entry_node not in treeflow.nodes or not treeflow.nodes:
-        raise TreeflowVersionMissing(
-            f"treeflow {treeflow.id!r} v{treeflow.version} snapshot "
-            f"({treeflow_version.id}) has no resolvable entry_node "
-            f"{treeflow.entry_node!r}"
-        )
 
+    Note: the corrupt-YAML / unresolvable-snapshot case is handled in the
+    worker (`src/ai_sdr/worker/jobs/inbound.py`) BEFORE this function is
+    called, because the YAML parse happens at worker setup time. See
+    FE-03a spec §11 + §B2 (`treeflow_version_missing` escalation path).
+    """
     text = (inbound.text or inbound.transcription or "").strip()
     if text and _match_opt_out(text, opt_out_keywords):
         raise OptOutDetected(f"inbound matched opt-out keyword in {opt_out_keywords!r}")
