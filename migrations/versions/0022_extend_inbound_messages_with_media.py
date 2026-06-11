@@ -25,12 +25,8 @@ def upgrade() -> None:
         "inbound_messages",
         sa.Column("media_storage_key", sa.Text(), nullable=True),
     )
-    op.add_column(
-        "inbound_messages", sa.Column("audio_url", sa.Text(), nullable=True)
-    )
-    op.add_column(
-        "inbound_messages", sa.Column("transcription", sa.Text(), nullable=True)
-    )
+    op.add_column("inbound_messages", sa.Column("audio_url", sa.Text(), nullable=True))
+    op.add_column("inbound_messages", sa.Column("transcription", sa.Text(), nullable=True))
     op.add_column(
         "inbound_messages",
         sa.Column("transcription_confidence", sa.Float(), nullable=True),

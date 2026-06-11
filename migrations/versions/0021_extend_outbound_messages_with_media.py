@@ -25,9 +25,7 @@ def upgrade() -> None:
         "outbound_messages",
         sa.Column("media_storage_key", sa.Text(), nullable=True),
     )
-    op.add_column(
-        "outbound_messages", sa.Column("audio_url", sa.Text(), nullable=True)
-    )
+    op.add_column("outbound_messages", sa.Column("audio_url", sa.Text(), nullable=True))
     op.add_column(
         "outbound_messages",
         sa.Column("audio_duration_ms", sa.Integer(), nullable=True),

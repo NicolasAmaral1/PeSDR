@@ -31,9 +31,7 @@ async def test_find_by_channel_identifier(db_session: AsyncSession) -> None:
     await db_session.flush()
 
     repo = LeadRepository(db_session)
-    found = await repo.find_by_channel_identifier(
-        tenant.id, "whatsapp", "+5511999999999"
-    )
+    found = await repo.find_by_channel_identifier(tenant.id, "whatsapp", "+5511999999999")
     assert found is not None
     assert found.id == lead.id
 
@@ -50,10 +48,7 @@ async def test_find_by_channel_identifier_returns_none_when_missing(
         {"t": str(tenant.id)},
     )
     repo = LeadRepository(db_session)
-    assert (
-        await repo.find_by_channel_identifier(tenant.id, "whatsapp", "+nope")
-        is None
-    )
+    assert await repo.find_by_channel_identifier(tenant.id, "whatsapp", "+nope") is None
 
 
 @pytest.mark.asyncio

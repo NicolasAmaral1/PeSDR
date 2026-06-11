@@ -29,15 +29,11 @@ def upgrade() -> None:
         sa.Column("tenant_id", UUID(as_uuid=True), nullable=False),
         sa.Column("talk_id", UUID(as_uuid=True), nullable=False),
         sa.Column("turn_index", sa.Integer(), nullable=False),
-        sa.Column(
-            "correction_iteration", sa.Integer(), nullable=False, server_default="1"
-        ),
+        sa.Column("correction_iteration", sa.Integer(), nullable=False, server_default="1"),
         sa.Column("parent_review_id", UUID(as_uuid=True), nullable=True),
         sa.Column("original_response", sa.Text(), nullable=False),
         sa.Column("original_turn_decision", JSONB(), nullable=False),
-        sa.Column(
-            "original_system_prompt_snapshot", sa.Text(), nullable=True
-        ),
+        sa.Column("original_system_prompt_snapshot", sa.Text(), nullable=True),
         sa.Column("status", sa.Text(), nullable=False, server_default="pending"),
         sa.Column("operator_id", UUID(as_uuid=True), nullable=True),
         sa.Column("decision_at", sa.DateTime(timezone=True), nullable=True),
@@ -56,9 +52,7 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["talk_id"], ["talks.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(
-            ["parent_review_id"], ["response_reviews.id"], ondelete="SET NULL"
-        ),
+        sa.ForeignKeyConstraint(["parent_review_id"], ["response_reviews.id"], ondelete="SET NULL"),
         sa.CheckConstraint(
             "status IN ('pending', 'approved', 'edited', 'rejected', 'expired', 'auto_approved')",
             name="ck_response_reviews_status",
@@ -94,11 +88,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute(
-        "DROP POLICY IF EXISTS response_reviews_tenant_isolation ON response_reviews"
-    )
+    op.execute("DROP POLICY IF EXISTS response_reviews_tenant_isolation ON response_reviews")
     op.drop_index("ix_response_reviews_talk", table_name="response_reviews")
-    op.drop_index(
-        "ix_response_reviews_tenant_status_created", table_name="response_reviews"
-    )
+    op.drop_index("ix_response_reviews_tenant_status_created", table_name="response_reviews")
     op.drop_table("response_reviews")

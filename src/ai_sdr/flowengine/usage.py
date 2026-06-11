@@ -31,9 +31,7 @@ def extract_usage(message: Any) -> dict[str, int]:
     return out
 
 
-def accumulate_tokens(
-    running: dict[str, Any], increment: dict[str, int]
-) -> None:
+def accumulate_tokens(running: dict[str, Any], increment: dict[str, int]) -> None:
     """Add token increments into a running counter dict in place."""
     for key in ("input", "input_cached", "output"):
         running[key] = int(running.get(key, 0) or 0) + int(increment.get(key, 0) or 0)

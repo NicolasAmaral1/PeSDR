@@ -33,10 +33,14 @@ class LeadRepository:
         Operates under the caller's tenant context (RLS); the explicit
         tenant_id filter is belt-and-suspenders.
         """
-        stmt = select(Lead).where(
-            Lead.tenant_id == tenant_id,
-            text("leads.channel_identifiers ->> :ch = :v"),
-        ).params(ch=channel, v=identifier)
+        stmt = (
+            select(Lead)
+            .where(
+                Lead.tenant_id == tenant_id,
+                text("leads.channel_identifiers ->> :ch = :v"),
+            )
+            .params(ch=channel, v=identifier)
+        )
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
 

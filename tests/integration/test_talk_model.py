@@ -18,8 +18,13 @@ from ai_sdr.models.treeflow_version import TreeflowVersion
 
 def test_status_literal_alias() -> None:
     assert set(get_args(TalkStatus)) == {
-        "active", "paused", "requires_review",
-        "closed_completed", "closed_inactivity", "closed_optout", "closed_banned",
+        "active",
+        "paused",
+        "requires_review",
+        "closed_completed",
+        "closed_inactivity",
+        "closed_optout",
+        "closed_banned",
     }
 
 
@@ -35,8 +40,11 @@ async def test_talk_insert_round_trip(db_session: AsyncSession) -> None:
     lead = Lead(tenant_id=tenant.id)
     db_session.add(lead)
     tfv = TreeflowVersion(
-        tenant_id=tenant.id, treeflow_id="tf", version="1.0",
-        content_hash="x", content_yaml="yaml",
+        tenant_id=tenant.id,
+        treeflow_id="tf",
+        version="1.0",
+        content_hash="x",
+        content_yaml="yaml",
     )
     db_session.add(tfv)
     await db_session.flush()

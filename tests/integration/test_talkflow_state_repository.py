@@ -24,8 +24,11 @@ async def _seed_talk(db_session: AsyncSession) -> Talk:
     lead = Lead(tenant_id=tenant.id)
     db_session.add(lead)
     tfv = TreeflowVersion(
-        tenant_id=tenant.id, treeflow_id="tf", version="1",
-        content_hash="x", content_yaml="y",
+        tenant_id=tenant.id,
+        treeflow_id="tf",
+        version="1",
+        content_hash="x",
+        content_yaml="y",
     )
     db_session.add(tfv)
     await db_session.flush()
@@ -34,8 +37,12 @@ async def _seed_talk(db_session: AsyncSession) -> Talk:
         {"t": str(tenant.id)},
     )
     talk = Talk(
-        tenant_id=tenant.id, lead_id=lead.id, treeflow_id="tf",
-        treeflow_version_id=tfv.id, status="active", handling_mode="ai",
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        treeflow_id="tf",
+        treeflow_version_id=tfv.id,
+        status="active",
+        handling_mode="ai",
         last_message_at=datetime.now(timezone.utc),
     )
     db_session.add(talk)
@@ -54,9 +61,7 @@ async def test_load_returns_none_before_init(db_session: AsyncSession) -> None:
 async def test_initialize_creates_default_state(db_session: AsyncSession) -> None:
     talk = await _seed_talk(db_session)
     repo = TalkFlowStateRepository(db_session)
-    state = await repo.initialize(
-        talk_id=talk.id, tenant_id=talk.tenant_id, entry_node="saudacao"
-    )
+    state = await repo.initialize(talk_id=talk.id, tenant_id=talk.tenant_id, entry_node="saudacao")
     await db_session.flush()
     assert state.current_node == "saudacao"
     assert state.collected == {}
@@ -71,14 +76,15 @@ async def test_append_message_grows_rolling_window(
 ) -> None:
     talk = await _seed_talk(db_session)
     repo = TalkFlowStateRepository(db_session)
-    state = await repo.initialize(
-        talk_id=talk.id, tenant_id=talk.tenant_id, entry_node="saudacao"
-    )
+    state = await repo.initialize(talk_id=talk.id, tenant_id=talk.tenant_id, entry_node="saudacao")
     await db_session.flush()
 
     m = Message(
-        role="user", content="oi", source="lead",
-        turn_index=1, timestamp=datetime.now(timezone.utc),
+        role="user",
+        content="oi",
+        source="lead",
+        turn_index=1,
+        timestamp=datetime.now(timezone.utc),
     )
     await repo.append_message(state, m, max_window=15)
     await db_session.flush()
@@ -92,15 +98,16 @@ async def test_append_message_evicts_when_window_exceeded(
 ) -> None:
     talk = await _seed_talk(db_session)
     repo = TalkFlowStateRepository(db_session)
-    state = await repo.initialize(
-        talk_id=talk.id, tenant_id=talk.tenant_id, entry_node="saudacao"
-    )
+    state = await repo.initialize(talk_id=talk.id, tenant_id=talk.tenant_id, entry_node="saudacao")
     await db_session.flush()
 
     for i in range(1, 18):
         m = Message(
-            role="user", content=f"msg-{i}", source="lead",
-            turn_index=i, timestamp=datetime.now(timezone.utc),
+            role="user",
+            content=f"msg-{i}",
+            source="lead",
+            turn_index=i,
+            timestamp=datetime.now(timezone.utc),
         )
         await repo.append_message(state, m, max_window=15)
     await db_session.flush()

@@ -41,9 +41,7 @@ def upgrade() -> None:
         sa.Column("suggested_change", JSONB(), nullable=False),
         sa.Column("suggested_change_natural_language", sa.Text(), nullable=False),
         sa.Column("confidence", sa.Float(), nullable=False),
-        sa.Column(
-            "status", sa.Text(), nullable=False, server_default="pending_review"
-        ),
+        sa.Column("status", sa.Text(), nullable=False, server_default="pending_review"),
         sa.Column("operator_decision_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column(
             "created_at",
@@ -65,12 +63,8 @@ def upgrade() -> None:
         ["tenant_id", "status", sa.text("created_at DESC")],
     )
 
-    op.execute(
-        "ALTER TABLE treeflow_improvement_suggestions ENABLE ROW LEVEL SECURITY"
-    )
-    op.execute(
-        "ALTER TABLE treeflow_improvement_suggestions FORCE ROW LEVEL SECURITY"
-    )
+    op.execute("ALTER TABLE treeflow_improvement_suggestions ENABLE ROW LEVEL SECURITY")
+    op.execute("ALTER TABLE treeflow_improvement_suggestions FORCE ROW LEVEL SECURITY")
     op.execute(
         """
         CREATE POLICY tfis_tenant_isolation ON treeflow_improvement_suggestions
@@ -81,8 +75,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute(
-        "DROP POLICY IF EXISTS tfis_tenant_isolation ON treeflow_improvement_suggestions"
-    )
+    op.execute("DROP POLICY IF EXISTS tfis_tenant_isolation ON treeflow_improvement_suggestions")
     op.drop_index("ix_tfis_tenant_status", table_name="treeflow_improvement_suggestions")
     op.drop_table("treeflow_improvement_suggestions")

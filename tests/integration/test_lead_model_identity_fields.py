@@ -31,9 +31,7 @@ async def test_lead_model_has_identity_fields(db_session: AsyncSession) -> None:
     db_session.add(lead)
     await db_session.flush()
 
-    fetched = (
-        await db_session.execute(select(Lead).where(Lead.id == lead.id))
-    ).scalar_one()
+    fetched = (await db_session.execute(select(Lead).where(Lead.id == lead.id))).scalar_one()
     assert fetched.channel_identifiers == {"whatsapp": "+5511999999999"}
     assert fetched.display_name == "Test"
     assert fetched.profile == {"likes": "coffee"}

@@ -24,8 +24,11 @@ async def test_talkflow_state_round_trip(db_session: AsyncSession) -> None:
     lead = Lead(tenant_id=tenant.id)
     db_session.add(lead)
     tfv = TreeflowVersion(
-        tenant_id=tenant.id, treeflow_id="tf", version="1",
-        content_hash="x", content_yaml="y",
+        tenant_id=tenant.id,
+        treeflow_id="tf",
+        version="1",
+        content_hash="x",
+        content_yaml="y",
     )
     db_session.add(tfv)
     await db_session.flush()
@@ -34,8 +37,12 @@ async def test_talkflow_state_round_trip(db_session: AsyncSession) -> None:
         {"t": str(tenant.id)},
     )
     talk = Talk(
-        tenant_id=tenant.id, lead_id=lead.id, treeflow_id="tf",
-        treeflow_version_id=tfv.id, status="active", handling_mode="ai",
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        treeflow_id="tf",
+        treeflow_version_id=tfv.id,
+        status="active",
+        handling_mode="ai",
         last_message_at=datetime.now(timezone.utc),
     )
     db_session.add(talk)
@@ -48,8 +55,13 @@ async def test_talkflow_state_round_trip(db_session: AsyncSession) -> None:
         collected={"segmento": "saas"},
         extracted_facts={"tem_filha": True},
         messages=[
-            {"role": "user", "content": "oi", "source": "lead", "turn_index": 1,
-             "timestamp": "2026-06-02T10:00:00+00:00"}
+            {
+                "role": "user",
+                "content": "oi",
+                "source": "lead",
+                "turn_index": 1,
+                "timestamp": "2026-06-02T10:00:00+00:00",
+            }
         ],
         objections_handled=[],
         talkflow_stack=[],
@@ -58,9 +70,7 @@ async def test_talkflow_state_round_trip(db_session: AsyncSession) -> None:
     await db_session.flush()
 
     fetched = (
-        await db_session.execute(
-            select(TalkFlowState).where(TalkFlowState.talk_id == talk.id)
-        )
+        await db_session.execute(select(TalkFlowState).where(TalkFlowState.talk_id == talk.id))
     ).scalar_one()
     assert fetched.current_node == "saudacao"
     assert fetched.collected == {"segmento": "saas"}

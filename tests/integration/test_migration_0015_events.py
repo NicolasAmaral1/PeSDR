@@ -24,18 +24,23 @@ async def test_events_table_columns(db_session: AsyncSession) -> None:
     )
     cols = {r[0] for r in result.all()}
     assert cols >= {
-        "id", "tenant_id", "event_type", "payload",
-        "talk_id", "lead_id", "experiment_id", "experiment_variant",
-        "occurred_at", "ingested_at",
+        "id",
+        "tenant_id",
+        "event_type",
+        "payload",
+        "talk_id",
+        "lead_id",
+        "experiment_id",
+        "experiment_variant",
+        "occurred_at",
+        "ingested_at",
     }
 
 
 @pytest.mark.asyncio
 async def test_events_table_indexes_present(db_session: AsyncSession) -> None:
     result = await db_session.execute(
-        text(
-            "SELECT indexname FROM pg_indexes WHERE tablename = 'events'"
-        )
+        text("SELECT indexname FROM pg_indexes WHERE tablename = 'events'")
     )
     idxs = {r[0] for r in result.all()}
     assert "ix_events_tenant_occurred" in idxs

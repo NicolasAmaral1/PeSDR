@@ -37,10 +37,14 @@ async def test_dispatches_to_adapter_send_text() -> None:
     adapter = _adapter()
     lead = _lead()
     decision = TurnDecision(
-        response_text="oi", collected_fields={}, reasoning="r",
+        response_text="oi",
+        collected_fields={},
+        reasoning="r",
     )
     result = await send_response_text(
-        adapter=adapter, lead=lead, decision=decision,
+        adapter=adapter,
+        lead=lead,
+        decision=decision,
     )
     assert isinstance(result, SendResult)
     assert result.external_id == "ext-123"
@@ -55,12 +59,16 @@ async def test_voice_format_falls_back_to_text_and_logs_warning(
     adapter = _adapter()
     lead = _lead()
     decision = TurnDecision(
-        response_text="oi", collected_fields={}, reasoning="r",
+        response_text="oi",
+        collected_fields={},
+        reasoning="r",
         response_format="voice",
     )
     with caplog.at_level(logging.WARNING):
         result = await send_response_text(
-            adapter=adapter, lead=lead, decision=decision,
+            adapter=adapter,
+            lead=lead,
+            decision=decision,
         )
     assert result.status == "sent"
     adapter.send_text.assert_awaited_once_with("+5511999999999", "oi")

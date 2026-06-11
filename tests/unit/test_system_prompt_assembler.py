@@ -37,8 +37,7 @@ def test_second_message_is_fresh_system_without_cache_control() -> None:
     assert isinstance(msgs[1], SystemMessage)
     # Fresh layer can be a plain string (no cache_control needed).
     assert msgs[1].content == "FRESH" or (
-        isinstance(msgs[1].content, list)
-        and "cache_control" not in msgs[1].content[0]
+        isinstance(msgs[1].content, list) and "cache_control" not in msgs[1].content[0]
     )
 
 

@@ -1,4 +1,5 @@
 """build_fresh_layer renders node-scoped objections (FE-03a Task 13)."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone

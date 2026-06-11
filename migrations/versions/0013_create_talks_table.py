@@ -75,8 +75,7 @@ def upgrade() -> None:
             name="ck_talks_handling_mode",
         ),
         sa.CheckConstraint(
-            "closed_by IS NULL OR closed_by IN "
-            "('rule', 'optout', 'llm', 'operator', 'sentinel')",
+            "closed_by IS NULL OR closed_by IN ('rule', 'optout', 'llm', 'operator', 'sentinel')",
             name="ck_talks_closed_by",
         ),
     )

@@ -24,6 +24,10 @@ async def test_inbound_messages_has_media_fields(db_session: AsyncSession) -> No
     )
     cols = {r[0] for r in result.all()}
     assert cols == {
-        "media_type", "media_storage_key", "audio_url",
-        "transcription", "transcription_confidence", "transcription_provider",
+        "media_type",
+        "media_storage_key",
+        "audio_url",
+        "transcription",
+        "transcription_confidence",
+        "transcription_provider",
     }

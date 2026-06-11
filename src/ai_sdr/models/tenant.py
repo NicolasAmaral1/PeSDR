@@ -20,9 +20,7 @@ class Tenant(Base):
     )
     slug: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
     display_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    architecture_version: Mapped[int] = mapped_column(
-        Integer(), nullable=False, server_default="1"
-    )
+    architecture_version: Mapped[int] = mapped_column(Integer(), nullable=False, server_default="1")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

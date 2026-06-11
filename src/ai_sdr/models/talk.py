@@ -69,25 +69,17 @@ class Talk(Base):
     )
 
     status: Mapped[str] = mapped_column(Text(), nullable=False)
-    handling_mode: Mapped[str] = mapped_column(
-        Text(), nullable=False, server_default="ai"
-    )
+    handling_mode: Mapped[str] = mapped_column(Text(), nullable=False, server_default="ai")
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
-    last_message_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    closed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    last_message_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     closed_reason: Mapped[str | None] = mapped_column(Text(), nullable=True)
     closed_by: Mapped[str | None] = mapped_column(Text(), nullable=True)
 
-    escalated_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    escalated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     escalation_category: Mapped[str | None] = mapped_column(Text(), nullable=True)
     escalation_reason: Mapped[str | None] = mapped_column(Text(), nullable=True)
     requires_review_reason: Mapped[RequiresReviewReason | None] = mapped_column(
@@ -96,9 +88,7 @@ class Talk(Base):
         default=None,
     )
 
-    experiment_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), nullable=True
-    )
+    experiment_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     experiment_variant: Mapped[str | None] = mapped_column(Text(), nullable=True)
 
     turn_count: Mapped[int] = mapped_column(Integer(), nullable=False, server_default="0")

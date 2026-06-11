@@ -25,8 +25,11 @@ async def _seed_tenant_lead_treeflow(
     lead = Lead(tenant_id=tenant.id)
     db_session.add(lead)
     tfv = TreeflowVersion(
-        tenant_id=tenant.id, treeflow_id="tf", version="1",
-        content_hash="x", content_yaml="y",
+        tenant_id=tenant.id,
+        treeflow_id="tf",
+        version="1",
+        content_hash="x",
+        content_yaml="y",
     )
     db_session.add(tfv)
     await db_session.flush()
@@ -46,8 +49,12 @@ async def test_find_active_for_lead_returns_active_talk(
     assert await repo.find_active_for_lead(tenant.id, lead.id) is None
 
     talk = Talk(
-        tenant_id=tenant.id, lead_id=lead.id, treeflow_id="tf",
-        treeflow_version_id=tfv.id, status="active", handling_mode="ai",
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        treeflow_id="tf",
+        treeflow_version_id=tfv.id,
+        status="active",
+        handling_mode="ai",
         last_message_at=datetime.now(timezone.utc),
     )
     db_session.add(talk)
@@ -62,9 +69,13 @@ async def test_find_active_for_lead_returns_active_talk(
 async def test_find_active_ignores_closed_talks(db_session: AsyncSession) -> None:
     tenant, lead, tfv = await _seed_tenant_lead_treeflow(db_session)
     closed = Talk(
-        tenant_id=tenant.id, lead_id=lead.id, treeflow_id="tf",
-        treeflow_version_id=tfv.id, status="closed_completed",
-        handling_mode="ai", last_message_at=datetime.now(timezone.utc),
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        treeflow_id="tf",
+        treeflow_version_id=tfv.id,
+        status="closed_completed",
+        handling_mode="ai",
+        last_message_at=datetime.now(timezone.utc),
     )
     db_session.add(closed)
     await db_session.flush()

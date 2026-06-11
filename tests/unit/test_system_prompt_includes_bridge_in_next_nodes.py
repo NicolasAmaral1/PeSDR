@@ -1,4 +1,5 @@
 """IMMEDIATE NEXT NODES block includes bridge_instruction (FE-03a Task 12, brecha C3)."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone

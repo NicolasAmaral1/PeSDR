@@ -89,11 +89,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute(
-        "DROP POLICY IF EXISTS sentinel_reviews_tenant_isolation ON sentinel_reviews"
-    )
-    op.drop_index(
-        "ix_sentinel_reviews_tenant_classification", table_name="sentinel_reviews"
-    )
+    op.execute("DROP POLICY IF EXISTS sentinel_reviews_tenant_isolation ON sentinel_reviews")
+    op.drop_index("ix_sentinel_reviews_tenant_classification", table_name="sentinel_reviews")
     op.drop_index("ix_sentinel_reviews_lead_created", table_name="sentinel_reviews")
     op.drop_table("sentinel_reviews")

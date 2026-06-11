@@ -50,13 +50,9 @@ class TalkFlowState(Base):
     )
 
     history_summary: Mapped[str | None] = mapped_column(Text(), nullable=True)
-    history_summary_covers_until_turn: Mapped[int | None] = mapped_column(
-        Integer(), nullable=True
-    )
+    history_summary_covers_until_turn: Mapped[int | None] = mapped_column(Integer(), nullable=True)
 
-    active_treatment: Mapped[dict[str, Any] | None] = mapped_column(
-        JSONB(), nullable=True
-    )
+    active_treatment: Mapped[dict[str, Any] | None] = mapped_column(JSONB(), nullable=True)
     objections_handled: Mapped[list[dict[str, Any]]] = mapped_column(
         JSONB(), nullable=False, server_default=func.cast("[]", JSONB())
     )

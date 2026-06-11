@@ -47,9 +47,7 @@ def upgrade() -> None:
             server_default=sa.text("'[]'::jsonb"),
         ),
         sa.Column("history_summary", sa.Text(), nullable=True),
-        sa.Column(
-            "history_summary_covers_until_turn", sa.Integer(), nullable=True
-        ),
+        sa.Column("history_summary_covers_until_turn", sa.Integer(), nullable=True),
         sa.Column("active_treatment", JSONB(), nullable=True),
         sa.Column(
             "objections_handled",
@@ -92,8 +90,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute(
-        "DROP POLICY IF EXISTS talkflow_states_tenant_isolation ON talkflow_states"
-    )
+    op.execute("DROP POLICY IF EXISTS talkflow_states_tenant_isolation ON talkflow_states")
     op.drop_index("ix_talkflow_states_tenant_updated", table_name="talkflow_states")
     op.drop_table("talkflow_states")

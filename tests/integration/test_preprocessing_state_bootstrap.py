@@ -41,8 +41,11 @@ async def test_new_talk_bootstraps_state_with_first_message(
     db_session.add(tenant)
     await db_session.flush()
     tfv = TreeflowVersion(
-        tenant_id=tenant.id, treeflow_id="tf", version="1",
-        content_hash="x", content_yaml=MINIMAL_TF_YAML,
+        tenant_id=tenant.id,
+        treeflow_id="tf",
+        version="1",
+        content_hash="x",
+        content_yaml=MINIMAL_TF_YAML,
     )
     db_session.add(tfv)
     await db_session.flush()
@@ -93,8 +96,11 @@ async def test_returning_talk_does_not_double_bootstrap(
     db_session.add(tenant)
     await db_session.flush()
     tfv = TreeflowVersion(
-        tenant_id=tenant.id, treeflow_id="tf", version="1",
-        content_hash="x", content_yaml=MINIMAL_TF_YAML,
+        tenant_id=tenant.id,
+        treeflow_id="tf",
+        version="1",
+        content_hash="x",
+        content_yaml=MINIMAL_TF_YAML,
     )
     db_session.add(tfv)
     await db_session.flush()
@@ -105,17 +111,23 @@ async def test_returning_talk_does_not_double_bootstrap(
     treeflow = load_treeflow_v2(tfv.content_yaml)
 
     inbound1 = InboundMessageRow(
-        tenant_id=tenant.id, provider="fake",
+        tenant_id=tenant.id,
+        provider="fake",
         external_id=f"a-{uuid.uuid4().hex[:6]}",
-        from_address="+5511999999999", text="oi 1",
+        from_address="+5511999999999",
+        text="oi 1",
         received_at=datetime.now(timezone.utc),
         raw={"body": "oi 1"},
     )
     db_session.add(inbound1)
     await db_session.flush()
     ctx1 = await resolve_pipeline_context(
-        db_session, tenant=tenant, inbound=inbound1,
-        treeflow=treeflow, treeflow_version=tfv, opt_out_keywords=[],
+        db_session,
+        tenant=tenant,
+        inbound=inbound1,
+        treeflow=treeflow,
+        treeflow_version=tfv,
+        opt_out_keywords=[],
     )
     await db_session.flush()
 
@@ -125,17 +137,23 @@ async def test_returning_talk_does_not_double_bootstrap(
 
     # Second inbound on same lead -> resolve again. State must NOT reset.
     inbound2 = InboundMessageRow(
-        tenant_id=tenant.id, provider="fake",
+        tenant_id=tenant.id,
+        provider="fake",
         external_id=f"b-{uuid.uuid4().hex[:6]}",
-        from_address="+5511999999999", text="oi 2",
+        from_address="+5511999999999",
+        text="oi 2",
         received_at=datetime.now(timezone.utc),
         raw={"body": "oi 2"},
     )
     db_session.add(inbound2)
     await db_session.flush()
     ctx2 = await resolve_pipeline_context(
-        db_session, tenant=tenant, inbound=inbound2,
-        treeflow=treeflow, treeflow_version=tfv, opt_out_keywords=[],
+        db_session,
+        tenant=tenant,
+        inbound=inbound2,
+        treeflow=treeflow,
+        treeflow_version=tfv,
+        opt_out_keywords=[],
     )
     assert ctx2.is_new_talk is False
 

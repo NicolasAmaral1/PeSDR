@@ -23,12 +23,25 @@ async def test_talks_table_exists_with_columns(db_session: AsyncSession) -> None
     )
     columns = {r[0] for r in result.all()}
     assert columns >= {
-        "id", "tenant_id", "lead_id", "treeflow_id", "treeflow_version_id",
-        "status", "handling_mode", "created_at", "last_message_at",
-        "closed_at", "closed_reason", "closed_by",
-        "escalated_at", "escalation_category", "escalation_reason",
-        "experiment_id", "experiment_variant",
-        "turn_count", "tokens_consumed",
+        "id",
+        "tenant_id",
+        "lead_id",
+        "treeflow_id",
+        "treeflow_version_id",
+        "status",
+        "handling_mode",
+        "created_at",
+        "last_message_at",
+        "closed_at",
+        "closed_reason",
+        "closed_by",
+        "escalated_at",
+        "escalation_category",
+        "escalation_reason",
+        "experiment_id",
+        "experiment_variant",
+        "turn_count",
+        "tokens_consumed",
     }
 
 

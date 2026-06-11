@@ -21,11 +21,25 @@ async def test_experiments_table_columns(db_session: AsyncSession) -> None:
     )
     cols = {r[0] for r in result.all()}
     assert cols >= {
-        "id", "tenant_id", "name", "key", "variants", "status",
-        "eligibility_rules", "started_at", "expected_end",
-        "target_sample_size", "primary_success_metric", "secondary_metrics",
-        "exclusivity", "priority", "on_conclusion_behavior",
-        "winner", "statistical_confidence", "analysis_notes", "created_at",
+        "id",
+        "tenant_id",
+        "name",
+        "key",
+        "variants",
+        "status",
+        "eligibility_rules",
+        "started_at",
+        "expected_end",
+        "target_sample_size",
+        "primary_success_metric",
+        "secondary_metrics",
+        "exclusivity",
+        "priority",
+        "on_conclusion_behavior",
+        "winner",
+        "statistical_confidence",
+        "analysis_notes",
+        "created_at",
     }
 
 

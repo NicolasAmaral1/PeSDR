@@ -18,9 +18,7 @@ async def test_tenant_architecture_version_defaults_to_1(
     t = Tenant(slug=f"t-{uuid.uuid4().hex[:8]}", display_name="t")
     db_session.add(t)
     await db_session.flush()
-    fetched = (
-        await db_session.execute(select(Tenant).where(Tenant.id == t.id))
-    ).scalar_one()
+    fetched = (await db_session.execute(select(Tenant).where(Tenant.id == t.id))).scalar_one()
     assert fetched.architecture_version == 1
 
 

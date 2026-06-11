@@ -71,15 +71,11 @@ async def run_guardrails_retry(
     new_fresh = fresh_builder(correction)
     messages = assemble_prompt(cached, new_fresh, inbound_text=inbound_text)
     retry_decision: TurnDecision = await bound_llm.ainvoke(messages)
-    retry_validation = validate_response_text(
-        retry_decision.response_text, validator_config
-    )
+    retry_validation = validate_response_text(retry_decision.response_text, validator_config)
     if retry_validation.ok:
         return retry_decision
 
-    raise CorrectionEscalation(
-        f"guardrails retry failed: {retry_validation.violation}"
-    )
+    raise CorrectionEscalation(f"guardrails retry failed: {retry_validation.violation}")
 
 
 async def run_transition_retry(
@@ -104,9 +100,7 @@ async def run_transition_retry(
         return initial_decision, initial_target
 
     correction = CorrectionContext(
-        previous_response=(
-            f"suggested transition to {initial_decision.next_node_suggestion!r}"
-        ),
+        previous_response=(f"suggested transition to {initial_decision.next_node_suggestion!r}"),
         rejection_reason=(
             f"transition failed: {initial_failure}. Reconsider: either complete "
             "the missing collection or do not advance."

@@ -17,11 +17,22 @@ async def test_adapter_calls_columns(db_session: AsyncSession) -> None:
     )
     cols = {r[0] for r in result.all()}
     assert cols >= {
-        "id", "tenant_id", "talk_id", "lead_id",
-        "adapter_category", "adapter_provider", "operation",
-        "args", "result", "status", "error_detail",
-        "latency_ms", "idempotency_key",
-        "started_at", "completed_at", "created_at",
+        "id",
+        "tenant_id",
+        "talk_id",
+        "lead_id",
+        "adapter_category",
+        "adapter_provider",
+        "operation",
+        "args",
+        "result",
+        "status",
+        "error_detail",
+        "latency_ms",
+        "idempotency_key",
+        "started_at",
+        "completed_at",
+        "created_at",
     }
 
 

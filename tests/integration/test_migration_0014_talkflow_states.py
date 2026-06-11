@@ -24,10 +24,17 @@ async def test_talkflow_states_columns(db_session: AsyncSession) -> None:
     )
     cols = {r[0] for r in result.all()}
     assert cols >= {
-        "talk_id", "tenant_id", "current_node",
-        "collected", "extracted_facts", "messages",
-        "history_summary", "history_summary_covers_until_turn",
-        "active_treatment", "objections_handled", "talkflow_stack",
+        "talk_id",
+        "tenant_id",
+        "current_node",
+        "collected",
+        "extracted_facts",
+        "messages",
+        "history_summary",
+        "history_summary_covers_until_turn",
+        "active_treatment",
+        "objections_handled",
+        "talkflow_stack",
         "updated_at",
     }
 
@@ -76,8 +83,13 @@ async def test_talkflow_state_one_to_one_with_talk(db_session: AsyncSession) -> 
             "CAST(:m AS JSONB), CAST(:o AS JSONB), CAST(:s AS JSONB))"
         ),
         {
-            "t": talk_id, "tn": tenant_id,
-            "c": "{}", "f": "{}", "m": "[]", "o": "[]", "s": "[]",
+            "t": talk_id,
+            "tn": tenant_id,
+            "c": "{}",
+            "f": "{}",
+            "m": "[]",
+            "o": "[]",
+            "s": "[]",
         },
     )
 
@@ -90,8 +102,13 @@ async def test_talkflow_state_one_to_one_with_talk(db_session: AsyncSession) -> 
                 "CAST(:m AS JSONB), CAST(:o AS JSONB), CAST(:s AS JSONB))"
             ),
             {
-                "t": talk_id, "tn": tenant_id,
-                "c": "{}", "f": "{}", "m": "[]", "o": "[]", "s": "[]",
+                "t": talk_id,
+                "tn": tenant_id,
+                "c": "{}",
+                "f": "{}",
+                "m": "[]",
+                "o": "[]",
+                "s": "[]",
             },
         )
     await db_session.rollback()

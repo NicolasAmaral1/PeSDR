@@ -73,9 +73,7 @@ class Lead(Base):
     long_term_memory_enabled: Mapped[bool] = mapped_column(
         Boolean(), nullable=False, server_default=func.cast("false", Boolean())
     )
-    risk_level: Mapped[str] = mapped_column(
-        Text(), nullable=False, server_default="normal"
-    )
+    risk_level: Mapped[str] = mapped_column(Text(), nullable=False, server_default="normal")
     risk_level_since: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

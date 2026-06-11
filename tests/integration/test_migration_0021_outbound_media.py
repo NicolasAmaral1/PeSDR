@@ -24,6 +24,10 @@ async def test_outbound_messages_has_media_fields(db_session: AsyncSession) -> N
     )
     cols = {r[0] for r in result.all()}
     assert cols == {
-        "media_type", "media_storage_key", "audio_url",
-        "audio_duration_ms", "synthesis_voice_id", "voice_emotion",
+        "media_type",
+        "media_storage_key",
+        "audio_url",
+        "audio_duration_ms",
+        "synthesis_voice_id",
+        "voice_emotion",
     }

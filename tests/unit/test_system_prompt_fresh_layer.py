@@ -28,14 +28,9 @@ def _node(
         id=node_id,
         objetivo=objetivo,
         bridge_instruction="bridge",
-        collects=[
-            TreeflowCollectField(field="segmento", type="text", required=True)
-        ],
+        collects=[TreeflowCollectField(field="segmento", type="text", required=True)],
         exit_condition=TreeflowExitCondition(type="all_fields_filled"),
-        next_nodes=[
-            TreeflowTransition(condition=cond, target=t)
-            for cond, t in (nexts or [])
-        ],
+        next_nodes=[TreeflowTransition(condition=cond, target=t) for cond, t in (nexts or [])],
     )
 
 
@@ -123,12 +118,22 @@ def test_fresh_layer_includes_time_block() -> None:
 def test_fresh_layer_includes_history_window() -> None:
     current = _node("saudacao", "x")
     history = [
-        {"role": "user", "content": "oi", "source": "lead",
-         "turn_index": 1, "timestamp": "2026-06-02T10:00:00+00:00",
-         "media_type": "text"},
-        {"role": "assistant", "content": "oi! qual segmento?", "source": "agent",
-         "turn_index": 1, "timestamp": "2026-06-02T10:00:05+00:00",
-         "media_type": "text"},
+        {
+            "role": "user",
+            "content": "oi",
+            "source": "lead",
+            "turn_index": 1,
+            "timestamp": "2026-06-02T10:00:00+00:00",
+            "media_type": "text",
+        },
+        {
+            "role": "assistant",
+            "content": "oi! qual segmento?",
+            "source": "agent",
+            "turn_index": 1,
+            "timestamp": "2026-06-02T10:00:05+00:00",
+            "media_type": "text",
+        },
     ]
     layer = build_fresh_layer(
         current_node=current,

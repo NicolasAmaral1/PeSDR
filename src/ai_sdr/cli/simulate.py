@@ -35,6 +35,7 @@ from ai_sdr.treeflow.runtime import TalkFlowRuntime
 def _llm_for_simulate(tenant_cfg, tenants_dir: Path = Path("tenants")):
     """Factory hook — tests patch this to inject a fake LLM."""
     from ai_sdr.flowengine.llm_client import main_llm_for_tenant
+
     secrets = SopsLoader(tenants_dir).load(tenant_cfg.id)
     return main_llm_for_tenant(tenant_cfg.llm.default, secrets=secrets)
 
@@ -64,7 +65,8 @@ async def simulate_v2_turn(
 
     treeflow = load_treeflow_v2(treeflow_version.content_yaml)
     inbound = InboundMessageRow(
-        tenant_id=tenant.id, provider="fake",
+        tenant_id=tenant.id,
+        provider="fake",
         external_id=f"sim-{uuid.uuid4().hex[:6]}",
         from_address=lead_phone,
         text=inbound_text,
@@ -91,8 +93,12 @@ async def simulate_v2_turn(
     )
     result = await run_turn(
         session,
-        tenant=tenant, treeflow=treeflow, treeflow_version=treeflow_version,
-        inbound=inbound, llm=llm, adapter=adapter,
+        tenant=tenant,
+        treeflow=treeflow,
+        treeflow_version=treeflow_version,
+        inbound=inbound,
+        llm=llm,
+        adapter=adapter,
         opt_out_keywords=opt_out_keywords,
         guardrail_cfg=guardrail_cfg,
     )
@@ -289,8 +295,7 @@ async def _run_v2(
             ).scalar_one_or_none()
             if tfv is None:
                 typer.secho(
-                    f"no TreeflowVersion found for tenant={tenant_slug!r} "
-                    f"treeflow={treeflow_id!r}",
+                    f"no TreeflowVersion found for tenant={tenant_slug!r} treeflow={treeflow_id!r}",
                     fg=typer.colors.RED,
                 )
                 raise typer.Exit(code=1)

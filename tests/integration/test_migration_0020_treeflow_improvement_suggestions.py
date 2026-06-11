@@ -20,8 +20,17 @@ async def test_treeflow_improvement_suggestions_columns(
     )
     cols = {r[0] for r in result.all()}
     assert cols >= {
-        "id", "tenant_id", "treeflow_id", "target_node_id",
-        "pattern_summary", "sample_count", "sample_review_ids",
-        "suggested_change", "suggested_change_natural_language",
-        "confidence", "status", "operator_decision_at", "created_at",
+        "id",
+        "tenant_id",
+        "treeflow_id",
+        "target_node_id",
+        "pattern_summary",
+        "sample_count",
+        "sample_review_ids",
+        "suggested_change",
+        "suggested_change_natural_language",
+        "confidence",
+        "status",
+        "operator_decision_at",
+        "created_at",
     }

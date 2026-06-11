@@ -47,9 +47,7 @@ class InboundMessageRow(Base):
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error_detail: Mapped[str | None] = mapped_column(Text(), nullable=True)
     raw: Mapped[dict[str, Any]] = mapped_column(JSONB(), nullable=False)
-    media_type: Mapped[str] = mapped_column(
-        Text(), nullable=False, server_default="text"
-    )
+    media_type: Mapped[str] = mapped_column(Text(), nullable=False, server_default="text")
     media_storage_key: Mapped[str | None] = mapped_column(Text(), nullable=True)
     audio_url: Mapped[str | None] = mapped_column(Text(), nullable=True)
     transcription: Mapped[str | None] = mapped_column(Text(), nullable=True)

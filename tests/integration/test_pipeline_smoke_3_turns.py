@@ -31,11 +31,10 @@ def _td(text: str, *, collected=None, next_node=None, advance=False) -> TurnDeci
     )
 
 
-async def _send_inbound(
-    session: AsyncSession, tenant, body: str
-) -> InboundMessageRow:
+async def _send_inbound(session: AsyncSession, tenant, body: str) -> InboundMessageRow:
     inbound = InboundMessageRow(
-        tenant_id=tenant.id, provider="fake",
+        tenant_id=tenant.id,
+        provider="fake",
         external_id=f"ext-{uuid.uuid4().hex[:6]}",
         from_address="+5511999999999",
         text=body,
@@ -65,9 +64,15 @@ async def test_three_turn_happy_path(db_session: AsyncSession) -> None:
     inbound1 = await _send_inbound(db_session, tenant, "oi")
     llm.ainvoke = AsyncMock(return_value=_td("oi! qual seu segmento?"))
     r1 = await run_turn(
-        db_session, tenant=tenant, treeflow=treeflow, treeflow_version=tfv,
-        inbound=inbound1, llm=llm, adapter=adapter,
-        opt_out_keywords=["sair"], guardrail_cfg=gcfg,
+        db_session,
+        tenant=tenant,
+        treeflow=treeflow,
+        treeflow_version=tfv,
+        inbound=inbound1,
+        llm=llm,
+        adapter=adapter,
+        opt_out_keywords=["sair"],
+        guardrail_cfg=gcfg,
         now=datetime(2026, 6, 2, 10, 0, tzinfo=timezone.utc),
     )
     assert r1.outcome == "sent"
@@ -75,16 +80,24 @@ async def test_three_turn_happy_path(db_session: AsyncSession) -> None:
 
     # Turn 2: lead says "saas"
     inbound2 = await _send_inbound(db_session, tenant, "saas")
-    llm.ainvoke = AsyncMock(return_value=_td(
-        "legal saas! qual seu ticket medio?",
-        collected={"segmento": "saas"},
-        next_node="qualificacao_economica",
-        advance=True,
-    ))
+    llm.ainvoke = AsyncMock(
+        return_value=_td(
+            "legal saas! qual seu ticket medio?",
+            collected={"segmento": "saas"},
+            next_node="qualificacao_economica",
+            advance=True,
+        )
+    )
     r2 = await run_turn(
-        db_session, tenant=tenant, treeflow=treeflow, treeflow_version=tfv,
-        inbound=inbound2, llm=llm, adapter=adapter,
-        opt_out_keywords=["sair"], guardrail_cfg=gcfg,
+        db_session,
+        tenant=tenant,
+        treeflow=treeflow,
+        treeflow_version=tfv,
+        inbound=inbound2,
+        llm=llm,
+        adapter=adapter,
+        opt_out_keywords=["sair"],
+        guardrail_cfg=gcfg,
         now=datetime(2026, 6, 2, 10, 5, tzinfo=timezone.utc),
     )
     assert r2.outcome == "sent"
@@ -92,24 +105,36 @@ async def test_three_turn_happy_path(db_session: AsyncSession) -> None:
 
     # Turn 3
     inbound3 = await _send_inbound(db_session, tenant, "uns 2000 por mes")
-    llm.ainvoke = AsyncMock(return_value=_td(
-        "show, valeu pelas infos.",
-        collected={"ticket_medio": "2000"},
-    ))
+    llm.ainvoke = AsyncMock(
+        return_value=_td(
+            "show, valeu pelas infos.",
+            collected={"ticket_medio": "2000"},
+        )
+    )
     r3 = await run_turn(
-        db_session, tenant=tenant, treeflow=treeflow, treeflow_version=tfv,
-        inbound=inbound3, llm=llm, adapter=adapter,
-        opt_out_keywords=["sair"], guardrail_cfg=gcfg,
+        db_session,
+        tenant=tenant,
+        treeflow=treeflow,
+        treeflow_version=tfv,
+        inbound=inbound3,
+        llm=llm,
+        adapter=adapter,
+        opt_out_keywords=["sair"],
+        guardrail_cfg=gcfg,
         now=datetime(2026, 6, 2, 10, 10, tzinfo=timezone.utc),
     )
     assert r3.outcome == "sent"
 
     # 3 outbound rows
     rows = (
-        await db_session.execute(
-            select(OutboundMessage).where(OutboundMessage.tenant_id == tenant.id)
+        (
+            await db_session.execute(
+                select(OutboundMessage).where(OutboundMessage.tenant_id == tenant.id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(rows) == 3
     assert {r.body_text for r in rows} == {
         "oi! qual seu segmento?",

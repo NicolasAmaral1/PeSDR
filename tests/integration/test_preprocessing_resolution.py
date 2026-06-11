@@ -108,16 +108,24 @@ async def test_reuses_existing_lead_and_talk(db_session: AsyncSession) -> None:
     # First inbound creates Lead + Talk.
     inbound1 = await _seed_inbound(db_session, tenant, "+5511999999999", "oi")
     ctx1 = await resolve_pipeline_context(
-        db_session, tenant=tenant, inbound=inbound1,
-        treeflow=treeflow, treeflow_version=tfv, opt_out_keywords=[],
+        db_session,
+        tenant=tenant,
+        inbound=inbound1,
+        treeflow=treeflow,
+        treeflow_version=tfv,
+        opt_out_keywords=[],
     )
     await db_session.flush()
 
     # Second inbound reuses both.
     inbound2 = await _seed_inbound(db_session, tenant, "+5511999999999", "oi de novo")
     ctx2 = await resolve_pipeline_context(
-        db_session, tenant=tenant, inbound=inbound2,
-        treeflow=treeflow, treeflow_version=tfv, opt_out_keywords=[],
+        db_session,
+        tenant=tenant,
+        inbound=inbound2,
+        treeflow=treeflow,
+        treeflow_version=tfv,
+        opt_out_keywords=[],
     )
     assert ctx2.lead.id == ctx1.lead.id
     assert ctx2.talk.id == ctx1.talk.id
@@ -132,7 +140,10 @@ async def test_opt_out_detected_short_circuits(db_session: AsyncSession) -> None
 
     with pytest.raises(OptOutDetected):
         await resolve_pipeline_context(
-            db_session, tenant=tenant, inbound=inbound,
-            treeflow=treeflow, treeflow_version=tfv,
+            db_session,
+            tenant=tenant,
+            inbound=inbound,
+            treeflow=treeflow,
+            treeflow_version=tfv,
             opt_out_keywords=["sair", "parar"],
         )

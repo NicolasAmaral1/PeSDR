@@ -65,15 +65,12 @@ async def test_leads_risk_level_check_constraint_rejects_invalid(
 
     with pytest.raises(Exception) as excinfo:
         await db_session.execute(
-            text(
-                "INSERT INTO leads (tenant_id, risk_level) "
-                "VALUES (:tid, 'malicious_value')"
-            ),
+            text("INSERT INTO leads (tenant_id, risk_level) VALUES (:tid, 'malicious_value')"),
             {"tid": tenant_id},
         )
-    assert "ck_leads_risk_level" in str(excinfo.value).lower() or "check" in str(
-        excinfo.value
-    ).lower()
+    assert (
+        "ck_leads_risk_level" in str(excinfo.value).lower() or "check" in str(excinfo.value).lower()
+    )
     await db_session.rollback()
 
 

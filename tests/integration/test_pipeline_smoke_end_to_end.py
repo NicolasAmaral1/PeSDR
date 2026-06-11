@@ -63,8 +63,11 @@ async def _seed_tenant(db_session: AsyncSession) -> tuple[Tenant, TreeflowVersio
     db_session.add(tenant)
     await db_session.flush()
     tfv = TreeflowVersion(
-        tenant_id=tenant.id, treeflow_id="tf", version="1",
-        content_hash="x", content_yaml=MINIMAL_TF_YAML,
+        tenant_id=tenant.id,
+        treeflow_id="tf",
+        version="1",
+        content_hash="x",
+        content_yaml=MINIMAL_TF_YAML,
     )
     db_session.add(tfv)
     await db_session.flush()
@@ -83,7 +86,8 @@ async def test_first_turn_sends_greeting_and_writes_outbound(
     treeflow = load_treeflow_v2(tfv.content_yaml)
 
     inbound = InboundMessageRow(
-        tenant_id=tenant.id, provider="fake",
+        tenant_id=tenant.id,
+        provider="fake",
         external_id=f"ext-{uuid.uuid4().hex[:6]}",
         from_address="+5511999999999",
         text="oi",
@@ -124,10 +128,14 @@ async def test_first_turn_sends_greeting_and_writes_outbound(
 
     # Outbound row exists
     rows = (
-        await db_session.execute(
-            select(OutboundMessage).where(OutboundMessage.tenant_id == tenant.id)
+        (
+            await db_session.execute(
+                select(OutboundMessage).where(OutboundMessage.tenant_id == tenant.id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(rows) == 1
     assert rows[0].body_text == greeting_decision().response_text
 
@@ -142,7 +150,8 @@ async def test_second_turn_advances_node(db_session: AsyncSession) -> None:
 
     # Turn 1: greeting
     inbound1 = InboundMessageRow(
-        tenant_id=tenant.id, provider="fake",
+        tenant_id=tenant.id,
+        provider="fake",
         external_id=f"a-{uuid.uuid4().hex[:6]}",
         from_address="+5511999999999",
         text="oi",
@@ -154,8 +163,13 @@ async def test_second_turn_advances_node(db_session: AsyncSession) -> None:
     await db_session.flush()
     llm.ainvoke = AsyncMock(return_value=greeting_decision())
     await run_turn(
-        db_session, tenant=tenant, treeflow=treeflow, treeflow_version=tfv,
-        inbound=inbound1, llm=llm, adapter=adapter,
+        db_session,
+        tenant=tenant,
+        treeflow=treeflow,
+        treeflow_version=tfv,
+        inbound=inbound1,
+        llm=llm,
+        adapter=adapter,
         opt_out_keywords=[],
         guardrail_cfg=GuardrailConfig(
             disallowed_price_pattern=r"R\$\d+",
@@ -168,7 +182,8 @@ async def test_second_turn_advances_node(db_session: AsyncSession) -> None:
 
     # Turn 2: lead says "saas" -> collect + advance
     inbound2 = InboundMessageRow(
-        tenant_id=tenant.id, provider="fake",
+        tenant_id=tenant.id,
+        provider="fake",
         external_id=f"b-{uuid.uuid4().hex[:6]}",
         from_address="+5511999999999",
         text="saas",
@@ -180,8 +195,13 @@ async def test_second_turn_advances_node(db_session: AsyncSession) -> None:
     await db_session.flush()
     llm.ainvoke = AsyncMock(return_value=collect_segment_decision())
     result = await run_turn(
-        db_session, tenant=tenant, treeflow=treeflow, treeflow_version=tfv,
-        inbound=inbound2, llm=llm, adapter=adapter,
+        db_session,
+        tenant=tenant,
+        treeflow=treeflow,
+        treeflow_version=tfv,
+        inbound=inbound2,
+        llm=llm,
+        adapter=adapter,
         opt_out_keywords=[],
         guardrail_cfg=GuardrailConfig(
             disallowed_price_pattern=r"R\$\d+",

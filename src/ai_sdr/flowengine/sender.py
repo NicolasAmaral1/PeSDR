@@ -41,8 +41,7 @@ async def send_response_text(
     """Send the assistant response as a single text message."""
     if decision.response_format in ("voice", "both"):
         logger.warning(
-            "voice_format_not_implemented_fe01b lead_id=%s format=%s — "
-            "falling back to text",
+            "voice_format_not_implemented_fe01b lead_id=%s format=%s — falling back to text",
             lead.id,
             decision.response_format,
         )

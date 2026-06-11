@@ -17,8 +17,17 @@ async def test_sentinel_reviews_columns(db_session: AsyncSession) -> None:
     )
     cols = {r[0] for r in result.all()}
     assert cols >= {
-        "id", "tenant_id", "lead_id", "talk_id", "inbound_message_id",
-        "triggered_by", "classification", "reasoning", "confidence",
-        "risk_level_before", "risk_level_after",
-        "heuristic_matches", "created_at",
+        "id",
+        "tenant_id",
+        "lead_id",
+        "talk_id",
+        "inbound_message_id",
+        "triggered_by",
+        "classification",
+        "reasoning",
+        "confidence",
+        "risk_level_before",
+        "risk_level_after",
+        "heuristic_matches",
+        "created_at",
     }

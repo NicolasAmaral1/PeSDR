@@ -26,8 +26,11 @@ async def _seed(db_session: AsyncSession) -> tuple[Talk, InboundMessageRow]:
     lead = Lead(tenant_id=tenant.id, whatsapp_e164="+5511999999999")
     db_session.add(lead)
     tfv = TreeflowVersion(
-        tenant_id=tenant.id, treeflow_id="tf", version="1",
-        content_hash="x", content_yaml="y",
+        tenant_id=tenant.id,
+        treeflow_id="tf",
+        version="1",
+        content_hash="x",
+        content_yaml="y",
     )
     db_session.add(tfv)
     await db_session.flush()
@@ -36,13 +39,18 @@ async def _seed(db_session: AsyncSession) -> tuple[Talk, InboundMessageRow]:
         {"t": str(tenant.id)},
     )
     talk = Talk(
-        tenant_id=tenant.id, lead_id=lead.id, treeflow_id="tf",
-        treeflow_version_id=tfv.id, status="active", handling_mode="ai",
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        treeflow_id="tf",
+        treeflow_version_id=tfv.id,
+        status="active",
+        handling_mode="ai",
         last_message_at=datetime.now(timezone.utc),
     )
     db_session.add(talk)
     inbound = InboundMessageRow(
-        tenant_id=tenant.id, provider="fake",
+        tenant_id=tenant.id,
+        provider="fake",
         external_id=f"ext-{uuid.uuid4().hex[:6]}",
         from_address="+5511999999999",
         text="oi",
@@ -72,10 +80,14 @@ async def test_records_outbound_row_with_media_type_text(
     )
     await db_session.flush()
     rows = (
-        await db_session.execute(
-            select(OutboundMessage).where(OutboundMessage.talkflow_id == talk.id)
+        (
+            await db_session.execute(
+                select(OutboundMessage).where(OutboundMessage.talkflow_id == talk.id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(rows) == 1
     row = rows[0]
     assert row.media_type == "text"
@@ -91,8 +103,10 @@ async def test_records_outbound_row_with_media_type_text(
 async def test_duplicate_call_is_idempotent(db_session: AsyncSession) -> None:
     talk, inbound = await _seed(db_session)
     args = dict(
-        talk=talk, inbound=inbound,
-        response_text="oi", turn_index=1,
+        talk=talk,
+        inbound=inbound,
+        response_text="oi",
+        turn_index=1,
         send_result=SendResult(external_id="ext", status="sent", error_detail=None),
         provider="fake",
         sent_at=datetime(2026, 6, 2, 10, tzinfo=timezone.utc),
@@ -101,8 +115,12 @@ async def test_duplicate_call_is_idempotent(db_session: AsyncSession) -> None:
     await record_outbound_audit(db_session, **args)
     await db_session.flush()
     rows = (
-        await db_session.execute(
-            select(OutboundMessage).where(OutboundMessage.talkflow_id == talk.id)
+        (
+            await db_session.execute(
+                select(OutboundMessage).where(OutboundMessage.talkflow_id == talk.id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(rows) == 1
