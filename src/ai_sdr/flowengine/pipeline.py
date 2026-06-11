@@ -21,6 +21,7 @@ from langchain_core.runnables import Runnable
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_sdr.db.advisory_lock import acquire_lead_lock
+from ai_sdr.db.rls import set_tenant_context
 from ai_sdr.flowengine.audit import record_outbound_audit
 from ai_sdr.flowengine.correction import (
     CorrectionEscalation,
@@ -114,8 +115,21 @@ async def run_turn(
         logger.info("lead_banned_silent_drop lead=%s", ctx.lead.id)
         return RunTurnResult(outcome="lead_banned", current_node_after=None, response_text=None)
 
-    # Per-(tenant, lead) advisory lock for the rest of the turn
-    async with session.begin_nested():
+    # FE-03a T29 §9.1 — wrap state mutations + sender + audit in ONE
+    # transaction so that adapter / sender failures roll back this turn's
+    # mutations. Preprocessing (find-or-create lead/talk/state, opt-out
+    # detection) must be PERSISTED before we start the explicit txn so
+    # that on retry the worker re-runs against the same lead/talk and
+    # the rolled-back per-turn state. The worker (or caller) typically
+    # autobegan a transaction when calling preprocessing; commit it now
+    # so `session.begin()` below opens a fresh, isolated transaction
+    # whose lifetime exactly matches this turn's mutations.
+    if session.in_transaction():
+        await session.commit()
+    async with session.begin():
+        # `set_config(..., is_local=true)` is transaction-scoped; the
+        # commit above reset it, so re-establish RLS context here.
+        await set_tenant_context(session, tenant.id)
         await acquire_lead_lock(session, tenant.id, ctx.lead.id)
 
         # Load runtime state
@@ -178,20 +192,14 @@ async def run_turn(
                 ctx.talk.id,
                 e,
             )
-            # Defensive: still send the tenant fallback so the lead isn't
-            # left hanging. Don't crash the worker if the adapter is also
-            # misbehaving — we're already in an escalation path.
-            try:
-                await adapter.send_text(
-                    to=ctx.lead.whatsapp_e164 or "",
-                    text=guardrail_cfg.fallback_text,
-                )
-            except Exception as send_err:
-                logger.warning(
-                    "fallback_send_failed talk=%s err=%s",
-                    ctx.talk.id,
-                    send_err,
-                )
+            # Send tenant fallback INSIDE the transaction (FE-03a T29 §9.1):
+            # if the adapter raises here, the escalation mutations roll
+            # back; the worker retries the whole turn and will likely
+            # re-exhaust + re-send fallback (idempotent at lead level).
+            await adapter.send_text(
+                to=ctx.lead.whatsapp_e164 or "",
+                text=guardrail_cfg.fallback_text,
+            )
             return RunTurnResult(
                 outcome="escalated",
                 current_node_after=state.current_node,
