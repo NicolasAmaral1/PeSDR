@@ -151,8 +151,16 @@ async def _run_v2_inbox(
 ) -> None:
     """Drain queued inbound messages through FlowEngine run_turn (FE-01b).
 
-    Resolves tenant config + latest TreeflowVersion + LLM + GuardrailConfig
+    Resolves tenant config + TreeflowVersion + LLM + GuardrailConfig
     once per drain, then loops over queued rows in received_at ASC order.
+
+    FE-03a T31 (brecha B2): if an active Talk already exists for this
+    lead, the runtime MUST use the TreeflowVersion row recorded on that
+    Talk (`talks.treeflow_version_id`), NOT the latest published version
+    for the tenant. This preserves snapshot-at-open semantics so a
+    mid-conversation TreeFlow bump cannot break an ongoing Talk. For a
+    brand-new lead (no active Talk yet) we fall back to the latest
+    TreeflowVersion — that becomes the Talk's snapshot on creation.
     """
     from pathlib import Path
 
@@ -171,14 +179,77 @@ async def _run_v2_inbox(
     tenant_cfg = TenantLoader(tdir).load(tenant.slug)
     secrets = SopsLoader(tdir).load(tenant.slug)
 
-    tfv = (
-        await db.execute(
-            select(TreeflowVersion)
-            .where(TreeflowVersion.tenant_id == tenant.id)
-            .order_by(TreeflowVersion.created_at.desc())
-            .limit(1)
+    # FE-03a T31 §B2 — prefer the active Talk's recorded snapshot.
+    active_talk_for_resolution: Talk | None = None
+    try:
+        active_talk_for_resolution = await TalkRepository(db).find_active_for_lead(
+            tenant.id, lead.id
         )
-    ).scalar_one_or_none()
+    except Exception as lookup_err:
+        # Lookup failure here is not fatal — fall through to latest-by-tenant
+        # resolution; preprocessing will retry the lookup inside its own txn.
+        log.warning(
+            "worker.v2.snapshot_talk_lookup_failed",
+            tenant_id=str(tenant.id),
+            lead_id=str(lead.id),
+            err=str(lookup_err),
+        )
+
+    tfv: TreeflowVersion | None = None
+    if active_talk_for_resolution is not None:
+        tfv = (
+            await db.execute(
+                select(TreeflowVersion).where(
+                    TreeflowVersion.id == active_talk_for_resolution.treeflow_version_id
+                )
+            )
+        ).scalar_one_or_none()
+        if tfv is None:
+            # The Talk references a TreeflowVersion row that has been
+            # deleted (operator wipe, manual purge, etc.). Treat as the
+            # `treeflow_version_missing` escalation path — same handling
+            # as a corrupt YAML snapshot. We synthesize a load error to
+            # reuse the existing flagging code below.
+            log.warning(
+                "worker.v2.snapshot_row_missing",
+                tenant_id=str(tenant.id),
+                lead_id=str(lead.id),
+                talk_id=str(active_talk_for_resolution.id),
+                snapshot_id=str(active_talk_for_resolution.treeflow_version_id),
+            )
+            now = datetime.now(UTC)
+            try:
+                active_talk_for_resolution.status = "requires_review"
+                active_talk_for_resolution.requires_review_reason = "treeflow_version_missing"
+                active_talk_for_resolution.escalated_at = now
+                active_talk_for_resolution.escalation_category = "system_exhausted"
+                active_talk_for_resolution.escalation_reason = (
+                    "treeflow_version_missing: snapshot row gone"
+                )
+                await _mark_queued_as_skipped(
+                    db, lead.id, reason="treeflow_version_snapshot_missing"
+                )
+                await db.commit()
+            except Exception as commit_err:
+                log.warning(
+                    "worker.v2.snapshot_row_missing_commit_failed",
+                    tenant_id=str(tenant.id),
+                    lead_id=str(lead.id),
+                    err=str(commit_err),
+                )
+                with contextlib.suppress(Exception):
+                    await db.rollback()
+            return
+
+    if tfv is None:
+        tfv = (
+            await db.execute(
+                select(TreeflowVersion)
+                .where(TreeflowVersion.tenant_id == tenant.id)
+                .order_by(TreeflowVersion.created_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
     if tfv is None:
         log.error(
             "worker.v2_no_treeflow_version",
