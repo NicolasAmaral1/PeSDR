@@ -16,6 +16,7 @@ from typing import Any
 
 import isodate
 import yaml
+from simpleeval import SimpleEval
 
 
 class TreeflowLoadError(ValueError):
@@ -154,24 +155,78 @@ def load_treeflow_v2(yaml_text: str) -> TreeflowDef:
     )
 
 
+_ALLOWED_OUTCOMES = {"success", "failure", "no_interest"}
+_MIN_INACTIVITY = timedelta(hours=1)
+_MAX_INACTIVITY = timedelta(days=365)
+_MIN_DURATION = timedelta(days=1)
+_MAX_DURATION = timedelta(days=730)
+
+
 def _parse_talk_lifecycle(raw: dict[str, Any] | None) -> TreeflowTalkLifecycle | None:
     if raw is None:
         return None
 
     inactivity = raw.get("close_after_inactivity")
-    inactivity_td = isodate.parse_duration(inactivity) if inactivity else None
+    inactivity_td: timedelta | None = None
+    if inactivity:
+        try:
+            inactivity_td = isodate.parse_duration(inactivity)
+        except (isodate.ISO8601Error, ValueError) as e:
+            raise TreeflowLoadError(
+                f"talk_lifecycle.close_after_inactivity invalid ISO-8601: "
+                f"{inactivity!r}: {e}"
+            ) from e
+        if not (_MIN_INACTIVITY <= inactivity_td <= _MAX_INACTIVITY):
+            raise TreeflowLoadError(
+                f"talk_lifecycle.close_after_inactivity must be in "
+                f"[PT1H, P365D], got {inactivity}"
+            )
 
     duration = raw.get("close_after_duration")
-    duration_td = isodate.parse_duration(duration) if duration else None
+    duration_td: timedelta | None = None
+    if duration:
+        try:
+            duration_td = isodate.parse_duration(duration)
+        except (isodate.ISO8601Error, ValueError) as e:
+            raise TreeflowLoadError(
+                f"talk_lifecycle.close_after_duration invalid ISO-8601: "
+                f"{duration!r}: {e}"
+            ) from e
+        if not (_MIN_DURATION <= duration_td <= _MAX_DURATION):
+            raise TreeflowLoadError(
+                f"talk_lifecycle.close_after_duration must be in "
+                f"[P1D, P730D], got {duration}"
+            )
 
     completion_raw = raw.get("close_when_completed") or []
-    completion = [
-        TreeflowCompletionRule(
-            expression=entry["expression"],
-            outcome=entry["outcome"],
+    completion: list[TreeflowCompletionRule] = []
+    for entry in completion_raw:
+        if not isinstance(entry, dict):
+            raise TreeflowLoadError(
+                f"talk_lifecycle.close_when_completed entries must be mappings, "
+                f"got {entry!r}"
+            )
+        expr = entry.get("expression")
+        outcome = entry.get("outcome")
+        if not expr:
+            raise TreeflowLoadError(
+                "talk_lifecycle.close_when_completed entry missing 'expression'"
+            )
+        if outcome not in _ALLOWED_OUTCOMES:
+            raise TreeflowLoadError(
+                f"talk_lifecycle.close_when_completed entry outcome must be one "
+                f"of {sorted(_ALLOWED_OUTCOMES)}, got {outcome!r}"
+            )
+        try:
+            SimpleEval(names={}).parse(expr)
+        except Exception as e:
+            raise TreeflowLoadError(
+                f"talk_lifecycle.close_when_completed expression invalid syntax: "
+                f"{expr!r}: {e}"
+            ) from e
+        completion.append(
+            TreeflowCompletionRule(expression=expr, outcome=outcome)
         )
-        for entry in completion_raw
-    ]
 
     return TreeflowTalkLifecycle(
         close_after_inactivity=inactivity_td,
