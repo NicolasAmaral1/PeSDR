@@ -22,6 +22,7 @@ from typing import Any, cast
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
+from ai_sdr.flowengine.close_lifecycle import evaluate_completion_rule
 from ai_sdr.flowengine.decision import TurnDecision
 from ai_sdr.flowengine.escalation import resolve_escalation_reason
 from ai_sdr.flowengine.heuristics import (
@@ -132,6 +133,29 @@ async def apply_decision(
     # 8. Talk metadata
     talk.turn_count = next_turn
     talk.last_message_at = now
+
+    # NEW (FE-03b §5.4): completion rule check.
+    # Mutually exclusive with requires_review_reason — when a rule fires,
+    # the Talk closes and the review chain is SKIPPED.
+    close_outcome = evaluate_completion_rule(
+        state=state,
+        decision=decision,
+        treeflow=treeflow,
+    )
+    if close_outcome is not None:
+        talk.status = cast(Any, close_outcome.status)
+        talk.closed_at = now
+        talk.closed_reason = close_outcome.reason
+        talk.closed_by = close_outcome.closed_by
+        logger.info(
+            "talk.closed.completion talk=%s outcome=%s rule=%s",
+            talk.id,
+            close_outcome.status,
+            close_outcome.reason,
+        )
+        # Skip the requires_review_reason chain — completion close wins.
+        _emit_events(events, talk.id, getattr(talk, "lead_id", None))
+        return
 
     # 9. requires_review_reason — first non-None wins.
     # Objection-treatment exhaustion has highest priority (set by runtime),
