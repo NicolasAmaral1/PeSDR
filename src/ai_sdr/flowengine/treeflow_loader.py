@@ -11,8 +11,10 @@ Returns @dataclass types (not Pydantic) — config plumbing, not LLM I/O.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import timedelta
 from typing import Any
 
+import isodate
 import yaml
 
 
@@ -66,6 +68,19 @@ class TreeflowObjection:
 
 
 @dataclass
+class TreeflowCompletionRule:
+    expression: str
+    outcome: str  # "success" | "failure" | "no_interest"
+
+
+@dataclass
+class TreeflowTalkLifecycle:
+    close_after_inactivity: timedelta | None = None
+    close_after_duration: timedelta | None = None
+    close_when_completed: list[TreeflowCompletionRule] = field(default_factory=list)
+
+
+@dataclass
 class TreeflowNode:
     id: str
     objetivo: str
@@ -85,6 +100,7 @@ class TreeflowDef:
     entry_node: str
     nodes: dict[str, TreeflowNode]
     global_objections: list[TreeflowObjection] = field(default_factory=list)
+    talk_lifecycle: TreeflowTalkLifecycle | None = None
 
 
 def load_treeflow_v2(yaml_text: str) -> TreeflowDef:
@@ -124,6 +140,8 @@ def load_treeflow_v2(yaml_text: str) -> TreeflowDef:
 
     global_objections = [_parse_objection(o) for o in data.get("global_objections", [])]
 
+    talk_lifecycle = _parse_talk_lifecycle(data.get("talk_lifecycle"))
+
     return TreeflowDef(
         id=data["id"],
         version=str(data["version"]),
@@ -132,6 +150,33 @@ def load_treeflow_v2(yaml_text: str) -> TreeflowDef:
         entry_node=entry,
         nodes=nodes,
         global_objections=global_objections,
+        talk_lifecycle=talk_lifecycle,
+    )
+
+
+def _parse_talk_lifecycle(raw: dict[str, Any] | None) -> TreeflowTalkLifecycle | None:
+    if raw is None:
+        return None
+
+    inactivity = raw.get("close_after_inactivity")
+    inactivity_td = isodate.parse_duration(inactivity) if inactivity else None
+
+    duration = raw.get("close_after_duration")
+    duration_td = isodate.parse_duration(duration) if duration else None
+
+    completion_raw = raw.get("close_when_completed") or []
+    completion = [
+        TreeflowCompletionRule(
+            expression=entry["expression"],
+            outcome=entry["outcome"],
+        )
+        for entry in completion_raw
+    ]
+
+    return TreeflowTalkLifecycle(
+        close_after_inactivity=inactivity_td,
+        close_after_duration=duration_td,
+        close_when_completed=completion,
     )
 
 
