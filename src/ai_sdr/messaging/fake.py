@@ -24,6 +24,7 @@ class FakeMessagingAdapter(MessagingAdapter):
         self._pending_template_failure: TerminalError | None = None
         self.sent_messages: list[tuple[str, str]] = []
         self.sent_templates: list[tuple[str, str, str, list[str]]] = []
+        self.typing_calls: list[str] = []
 
     # --- scripting hooks --------------------------------------------------
 
@@ -82,3 +83,6 @@ class FakeMessagingAdapter(MessagingAdapter):
 
     def verification_challenge(self, params: Mapping[str, str]) -> str | None:
         return params.get("hub.challenge")
+
+    async def mark_as_typing(self, to: str) -> None:
+        self.typing_calls.append(to)

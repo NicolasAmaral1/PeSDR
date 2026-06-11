@@ -276,6 +276,32 @@ class WhatsAppCloudAPIAdapter(MessagingAdapter):
 
         raise RuntimeError("unreachable: tenacity exhausted without raising")
 
+    async def mark_as_typing(self, to: str) -> None:
+        """Call Meta's typing_indicator API. Silent fallback on any error.
+
+        Meta gates typing_indicator per account; older accounts get a 400
+        PolicyError which we swallow so the actual message send still happens
+        on the next adapter call.
+        """
+        url = f"https://graph.facebook.com/{self._api_version}/{self._phone_number_id}/messages"
+        body = {
+            "messaging_product": "whatsapp",
+            "to": to.lstrip("+"),
+            "typing_indicator": {"type": "text"},
+        }
+        request_headers = {"Authorization": f"Bearer {self._access_token}"}
+        try:
+            async with _build_http_client() as client:
+                await client.post(url, json=body, headers=request_headers)
+        except Exception as exc:
+            log.info(
+                "wa.mark_as_typing.failed",
+                to=to,
+                err_type=type(exc).__name__,
+                err=str(exc),
+            )
+            return None
+
 
 # Replace the placeholder builder registered in Task 12.
 # We re-register here; the factory's _REGISTRY mutates.
