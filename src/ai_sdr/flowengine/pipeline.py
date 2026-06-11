@@ -224,6 +224,7 @@ async def run_turn(
             decision=decision,
             resolved_target_node=resolved_target,
             now=now,
+            treeflow=treeflow,
         )
 
         # [11] Token bookkeeping (best-effort)
