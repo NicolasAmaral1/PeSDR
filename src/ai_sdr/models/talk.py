@@ -31,16 +31,9 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from ai_sdr.db.base import Base
 from ai_sdr.models.review_reason import RequiresReviewReason
+from ai_sdr.models.talk_status import TalkStatus
 
-TalkStatus = Literal[
-    "active",
-    "paused",
-    "requires_review",
-    "closed_completed",
-    "closed_inactivity",
-    "closed_optout",
-    "closed_banned",
-]
+__all__ = ["HandlingMode", "Talk", "TalkStatus"]
 
 HandlingMode = Literal["ai", "human", "auto_with_approval"]
 
@@ -68,7 +61,7 @@ class Talk(Base):
         nullable=False,
     )
 
-    status: Mapped[str] = mapped_column(Text(), nullable=False)
+    status: Mapped[TalkStatus] = mapped_column(Text(), nullable=False)
     handling_mode: Mapped[str] = mapped_column(Text(), nullable=False, server_default="ai")
 
     created_at: Mapped[datetime] = mapped_column(
