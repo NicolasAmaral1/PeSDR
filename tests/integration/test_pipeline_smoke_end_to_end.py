@@ -122,9 +122,9 @@ async def test_first_turn_sends_greeting_and_writes_outbound(
 
     assert isinstance(result, RunTurnResult)
     assert result.outcome == "sent"
-    # FakeMessagingAdapter stores (to, text) tuples in .sent_messages
+    # FakeMessagingAdapter stores {"to", "text"} dicts in .sent_messages
     assert len(adapter.sent_messages) == 1
-    assert adapter.sent_messages[0][1] == greeting_decision().response_text
+    assert adapter.sent_messages[0]["text"] == greeting_decision().response_text
 
     # Outbound row exists
     rows = (

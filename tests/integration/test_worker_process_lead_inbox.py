@@ -143,9 +143,9 @@ async def test_active_lead_replays_all_queued_in_order(db_session, session_facto
     )
     assert seen_inputs == ["first", "second", "third"]
     assert adapter.sent_messages == [
-        ("+5511999999999", "echo:first"),
-        ("+5511999999999", "echo:second"),
-        ("+5511999999999", "echo:third"),
+        {"to": "+5511999999999", "text": "echo:first"},
+        {"to": "+5511999999999", "text": "echo:second"},
+        {"to": "+5511999999999", "text": "echo:third"},
     ]
 
 

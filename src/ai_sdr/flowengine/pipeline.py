@@ -29,6 +29,7 @@ from ai_sdr.flowengine.correction import (
     run_transition_retry,
 )
 from ai_sdr.flowengine.decision import TurnDecision
+from ai_sdr.flowengine.humanizer import HumanizationConfig
 from ai_sdr.flowengine.post_processing import apply_decision
 from ai_sdr.flowengine.preprocessing import (
     OptOutDetected,
@@ -256,10 +257,15 @@ async def run_turn(
         ctx.talk.tokens_consumed = tokens
 
         # [12] Send to lead via adapter
+        # FE-03b T9: humanizer iterates chunks + typing indicator. Until the
+        # tenant.yaml > humanization block is plumbed end-to-end (later FE-03b
+        # task), use defaults. Disabled tenants opt out via HumanizationConfig
+        # built from their tenant.yaml when the wiring lands.
         send_result = await send_response_text(
             adapter=adapter,
             lead=ctx.lead,
             decision=decision,
+            humanization_config=HumanizationConfig(),
         )
 
         # [13] Audit row

@@ -32,8 +32,8 @@ async def test_send_text_records_sent_messages() -> None:
     r1 = await fake.send_text("+5511999999991", "hello")
     r2 = await fake.send_text("+5511999999992", "world")
     assert fake.sent_messages == [
-        ("+5511999999991", "hello"),
-        ("+5511999999992", "world"),
+        {"to": "+5511999999991", "text": "hello"},
+        {"to": "+5511999999992", "text": "world"},
     ]
     assert r1.external_id != r2.external_id
 

@@ -22,7 +22,7 @@ class FakeMessagingAdapter(MessagingAdapter):
         self._inbound_queue: deque[InboundMessage] = deque()
         self._pending_failure: TerminalError | None = None
         self._pending_template_failure: TerminalError | None = None
-        self.sent_messages: list[tuple[str, str]] = []
+        self.sent_messages: list[dict[str, str]] = []
         self.sent_templates: list[tuple[str, str, str, list[str]]] = []
         self.typing_calls: list[str] = []
 
@@ -58,7 +58,7 @@ class FakeMessagingAdapter(MessagingAdapter):
             exc = self._pending_failure
             self._pending_failure = None
             raise exc
-        self.sent_messages.append((to, text))
+        self.sent_messages.append({"to": to, "text": text})
         return SendResult(
             external_id=f"fake_{uuid.uuid4().hex[:12]}",
             sent_at_iso=datetime.now(UTC).isoformat(),

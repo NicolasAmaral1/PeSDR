@@ -165,7 +165,7 @@ async def test_end_to_end_webhook_assign_worker_reply(app, db_session) -> None:
         lead_id_str,
     )
     assert fake_for_send.sent_messages == [
-        ("+5511988887777", "Olá! Recebi sua mensagem."),
+        {"to": "+5511988887777", "text": "Olá! Recebi sua mensagem."},
     ]
 
     # All inbounds processed

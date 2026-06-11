@@ -38,5 +38,5 @@ async def test_send_text_and_send_template_independent_buffers() -> None:
     fake = FakeMessagingAdapter()
     await fake.send_text("+1", "hi")
     await fake.send_template("+2", "ref", "pt_BR", ["X"])
-    assert fake.sent_messages == [("+1", "hi")]
+    assert fake.sent_messages == [{"to": "+1", "text": "hi"}]
     assert fake.sent_templates == [("+2", "ref", "pt_BR", ["X"])]
