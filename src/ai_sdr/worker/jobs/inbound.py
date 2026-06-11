@@ -389,6 +389,7 @@ async def _run_v2_inbox(
             result = await run_turn(
                 db,
                 tenant=tenant,
+                tenant_cfg=tenant_cfg,
                 treeflow=treeflow,
                 treeflow_version=tfv,
                 inbound=msg,
