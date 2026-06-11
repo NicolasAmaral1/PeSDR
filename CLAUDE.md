@@ -144,6 +144,62 @@ uv run ai-sdr simulate --tenant example --treeflow example --lead test-1 --show-
 - End-to-end validation per provider (live tests, prompt caching tuning, error shape handling) is Plan 4.
 - `secrets/` prefix convention: tenant.yaml's `api_key_ref` must start with `secrets/` (enforced by validator). At lookup time, factory strips the prefix and does `secrets[bare_name]`. SopsLoader returns secrets keyed by bare names.
 
+## FE-03a — Objection Runtime + Python Validator
+
+Substitui o Plano 4a (objection classifier v1) na linha FlowEngine v2.
+
+- **YAML:** `global_objections[]` + `nodes[].handles_objections[]` com `treatment_mode: tool | inline`. `tool_payload` exige `max_treatment_turns ∈ [1,10]`, `canonical_arguments_summary`, `kb_ref`, `resolution_criteria`, `on_max_turns_no_resolution.action ∈ {gracefully_continue, escalate_to_human}`. Bounds errors são fatais — tenant nem inicia.
+- **Detecção:** LLM principal emite `TurnDecision.detected_objection`. Inline mode é resolvido no `response_text` direto; tool mode entra em `TalkFlowState.active_treatment`.
+- **Resolução:** LLM emite `treatment_status: in_progress | resolved_accepted | resolved_deferred`. Conservative guidance no system prompt instrui a preferir deferred em dúvida.
+- **Cross-objection:** nova objeção tool durante tratamento ativo defere a anterior automaticamente.
+- **Max turns:** ao esgotar, executa `on_max_turns_no_resolution.action` — `gracefully_continue` limpa estado; `escalate_to_human` adicionalmente seta `Talk.requires_review_reason='objection_treatment_exhausted'`.
+- **Validador Python:** `validate_response_text` ganha `allowed_products` + normalização. Violação dispara 1 retry corretivo; segunda violação envia `tenant.guardrails.fallback_text` + `Talk.requires_review_reason='validator_exhausted'`.
+- **Tenant.yaml:** `guardrails.allowed_products` + `guardrails.fallback_text` (>=10 chars) são obrigatórios quando `enabled=true`.
+- **Routing:** simpleeval context expandido — YAML pode referenciar `extracted_facts`, `objections_handled`, `turn_index`. Bloqueia transição quando `active_treatment` setado (failure_reason `transition_blocked_by_treatment`, reusa corrective retry).
+- **Brechas conversacionais:**
+  - Off-topic: `TurnDecision.off_topic_detected` flag + counter persisted as shadow key `__off_topic_count__` inside `TalkFlowState.collected`; aos 3 escalates com `requires_review_reason='off_topic_exhausted'`.
+  - Lead pede humano: LLM emite `request_human_escalation` (qualquer category); runtime seta `requires_review_reason='escalation_requested'`.
+  - Mídia (áudio/imagem): **gap conhecido**, depende FE-05. Tenant configura Meta Business Manager pra não receber mídia ANTES de subir FE-03a sem FE-05.
+- **Brechas técnicas:** transação única no `run_turn`; worker concatena inbounds pendentes (janela 2s configurável via `WORKER_INBOUND_CONCAT_WINDOW_SECONDS`); TreeFlow snapshot at Talk open (versão sumiu → `requires_review` com `treeflow_version_missing` — handler vive no worker, não em preprocessing).
+- **Heurísticas pós-LLM:** contradição (`accepted` → `deferred` quando texto contradiz) e implicit transition (event-only).
+- **Migration 0025:** `talks.requires_review_reason` enum com 5 valores. Source-of-truth Literal em `ai_sdr.models.review_reason.RequiresReviewReason`. Consumido pelo HITL console (FE-07).
+
+### FE-03a config no tenant.yaml
+
+```yaml
+guardrails:
+  enabled: true
+  disallowed_price_pattern: "R\\$\\s*\\d+"
+  allowed_prices: ["R$ 6000", "R$ 2000", "R$ 1497", "R$ 247"]
+  allowed_products: ["Mentoria", "Aceleradora"]
+  fallback_text: "Deixa eu confirmar isso com a equipe, te retorno em alguns minutos."
+```
+
+### TreeFlow YAML — exemplo objection block
+
+```yaml
+global_objections:
+  - id: preco
+    description: "lead questiona valor, acha caro"
+    treatment_mode: tool
+    tool_payload:
+      canonical_arguments_summary: "ROI cabe em 1 mês com volume X"
+      kb_ref: argumentos_preco
+      max_treatment_turns: 3
+      resolution_criteria: "lead aceitou parcelamento ou pediu próximo passo"
+      on_max_turns_no_resolution:
+        action: gracefully_continue
+        message_hint: "Reconheça hesitação, ofereça material"
+```
+
+### Wipe pra dev fresh (atualiza FE-01a guidance)
+
+```bash
+docker exec ai_sdr_postgres psql -U ai_sdr_app -d ai_sdr \
+  -c "TRUNCATE checkpoints, checkpoint_writes, checkpoint_blobs, checkpoint_migrations; \
+      UPDATE talks SET status='active', requires_review_reason=NULL, escalated_at=NULL;"
+```
+
 ## Checkpointer notes
 
 - Tabelas do LangGraph (`checkpoints`, `checkpoint_writes`, `checkpoint_blobs`, `checkpoint_migrations`) são criadas pelo `ensure_checkpointer_schema()` no startup (chamado no lifespan da FastAPI e no `ai-sdr simulate`). Migration 0004 é só um stamp documental — NÃO cria as tabelas (a lib usa psycopg3, alembic env usa asyncpg).
