@@ -1,4 +1,5 @@
 """TreeFlowLoader bounds validation for talk_lifecycle (FE-03b Task 5)."""
+
 from __future__ import annotations
 
 from pathlib import Path

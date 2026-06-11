@@ -1,4 +1,5 @@
 """close_lifecycle.evaluate_completion_rule pure function (FE-03b Task 11)."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -24,13 +25,20 @@ class _State:
 
 def _treeflow_with_rules(rules: list[TreeflowCompletionRule]) -> TreeflowDef:
     n = TreeflowNode(
-        id="a", objetivo="x", bridge_instruction="", collects=[],
+        id="a",
+        objetivo="x",
+        bridge_instruction="",
+        collects=[],
         exit_condition=TreeflowExitCondition(type="all_fields_filled"),
         next_nodes=[TreeflowTransition(condition="true", target="a")],
     )
     return TreeflowDef(
-        id="t", version="1.0", display_name=None, sdr_persona={},
-        entry_node="a", nodes={"a": n},
+        id="t",
+        version="1.0",
+        display_name=None,
+        sdr_persona={},
+        entry_node="a",
+        nodes={"a": n},
         talk_lifecycle=TreeflowTalkLifecycle(close_when_completed=rules),
     )
 
@@ -100,10 +108,12 @@ def test_returns_outcome_when_no_interest_rule_fires():
 def test_first_matching_rule_wins():
     rules = [
         TreeflowCompletionRule(
-            expression="collected.first == True", outcome="failure",
+            expression="collected.first == True",
+            outcome="failure",
         ),
         TreeflowCompletionRule(
-            expression="collected.first == True", outcome="success",  # never reached
+            expression="collected.first == True",
+            outcome="success",  # never reached
         ),
     ]
     tf = _treeflow_with_rules(rules)
@@ -116,7 +126,8 @@ def test_first_matching_rule_wins():
 def test_rule_seeing_only_state_collected():
     """state.collected is in scope (not just decision.collected_fields)."""
     rule = TreeflowCompletionRule(
-        expression="collected.flag == True", outcome="success",
+        expression="collected.flag == True",
+        outcome="success",
     )
     tf = _treeflow_with_rules([rule])
     state = _State(collected={"flag": True})
@@ -128,7 +139,8 @@ def test_rule_seeing_only_state_collected():
 def test_runtime_exception_in_rule_is_swallowed():
     """If simpleeval raises (unbound name, etc.) at runtime, skip the rule."""
     rule = TreeflowCompletionRule(
-        expression="nonexistent_name > 0", outcome="success",
+        expression="nonexistent_name > 0",
+        outcome="success",
     )
     tf = _treeflow_with_rules([rule])
     state = _State()

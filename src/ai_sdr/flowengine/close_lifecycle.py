@@ -69,7 +69,8 @@ def evaluate_completion_rule(
         except Exception as exc:
             logger.info(
                 "close_lifecycle.rule_eval_skipped expression=%s err=%s",
-                rule.expression, exc,
+                rule.expression,
+                exc,
             )
             continue
 

@@ -49,24 +49,12 @@ def humanize(
     Empty / whitespace-only input → empty list.
     """
     if is_voice and not config.apply_to_voice:
-        return (
-            [Chunk(text=response_text, delay_before_ms=0)]
-            if response_text.strip()
-            else []
-        )
+        return [Chunk(text=response_text, delay_before_ms=0)] if response_text.strip() else []
 
     if not config.enabled:
-        return (
-            [Chunk(text=response_text, delay_before_ms=0)]
-            if response_text.strip()
-            else []
-        )
+        return [Chunk(text=response_text, delay_before_ms=0)] if response_text.strip() else []
 
-    raw_chunks = [
-        c.strip()
-        for c in response_text.split(config.chunk_delimiter)
-        if c.strip()
-    ]
+    raw_chunks = [c.strip() for c in response_text.split(config.chunk_delimiter) if c.strip()]
     if not raw_chunks:
         return []
 

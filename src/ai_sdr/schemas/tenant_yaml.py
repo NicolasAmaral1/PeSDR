@@ -85,13 +85,9 @@ class HumanizationConfig(BaseModel):
     @model_validator(mode="after")
     def _check_bounds(self) -> Self:
         if self.chars_per_second_min > self.chars_per_second_max:
-            raise ValueError(
-                "humanization.chars_per_second_min must be <= chars_per_second_max"
-            )
+            raise ValueError("humanization.chars_per_second_min must be <= chars_per_second_max")
         if self.min_delay_ms > self.max_delay_ms:
-            raise ValueError(
-                "humanization.min_delay_ms must be <= max_delay_ms"
-            )
+            raise ValueError("humanization.min_delay_ms must be <= max_delay_ms")
         return self
 
 

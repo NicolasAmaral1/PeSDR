@@ -1,4 +1,5 @@
 """humanizer.humanize() chunks + delays (FE-03b Task 6)."""
+
 from __future__ import annotations
 
 from ai_sdr.flowengine.humanizer import Chunk, HumanizationConfig, humanize

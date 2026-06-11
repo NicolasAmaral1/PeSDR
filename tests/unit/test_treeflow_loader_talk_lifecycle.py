@@ -1,4 +1,5 @@
 """TreeFlowLoader parses talk_lifecycle block (FE-03b Task 4)."""
+
 from __future__ import annotations
 
 from datetime import timedelta
@@ -6,11 +7,7 @@ from pathlib import Path
 
 from ai_sdr.flowengine.treeflow_loader import load_treeflow_v2
 
-FIXTURE = (
-    Path(__file__).resolve().parent.parent
-    / "fixtures"
-    / "avelum_v2_with_lifecycle.yaml"
-)
+FIXTURE = Path(__file__).resolve().parent.parent / "fixtures" / "avelum_v2_with_lifecycle.yaml"
 
 
 def test_talk_lifecycle_loaded():

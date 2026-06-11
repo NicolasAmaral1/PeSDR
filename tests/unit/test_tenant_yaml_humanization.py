@@ -1,4 +1,5 @@
 """TenantConfig.humanization parsing + bounds (FE-03b Task 7)."""
+
 from __future__ import annotations
 
 import pytest

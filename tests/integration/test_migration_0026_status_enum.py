@@ -115,10 +115,6 @@ async def test_pg_constraint_registered(async_engine: AsyncEngine) -> None:
     """The named constraint exists in pg_constraint."""
     async with async_engine.connect() as conn:
         r = await conn.execute(
-            text(
-                "SELECT 1 FROM pg_constraint "
-                "WHERE conname = 'ck_talks_status' "
-                "AND contype = 'c'"
-            )
+            text("SELECT 1 FROM pg_constraint WHERE conname = 'ck_talks_status' AND contype = 'c'")
         )
         assert r.scalar() == 1
