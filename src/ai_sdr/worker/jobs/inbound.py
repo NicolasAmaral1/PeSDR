@@ -19,8 +19,9 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import os
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import structlog
@@ -73,6 +74,60 @@ async def _fetch_next_queued(db: AsyncSession, lead_id: uuid.UUID) -> InboundMes
             .limit(1)
         )
     ).scalar_one_or_none()
+
+
+def _concat_window_seconds() -> int:
+    """Read env each call so tests can monkeypatch without module reload."""
+    try:
+        return int(os.environ.get("WORKER_INBOUND_CONCAT_WINDOW_SECONDS", "2"))
+    except ValueError:
+        return 2
+
+
+async def _fetch_window_companions(
+    db: AsyncSession,
+    *,
+    lead_id: uuid.UUID,
+    head: InboundMessageRow,
+    window_seconds: int,
+) -> list[InboundMessageRow]:
+    """Return queued inbounds in ``[head.received_at, head.received_at + window]``.
+
+    Includes ``head`` itself. Rows are locked with ``FOR UPDATE`` to defend
+    against concurrent workers (the per-lead advisory lock already prevents
+    this in production, but the lock makes the semantic explicit and is
+    cheap). Caller is responsible for marking them ``processed``.
+    """
+    upper = head.received_at + timedelta(seconds=window_seconds)
+    rows = (
+        (
+            await db.execute(
+                select(InboundMessageRow)
+                .where(
+                    InboundMessageRow.lead_id == lead_id,
+                    InboundMessageRow.status == "queued",
+                    InboundMessageRow.processed_at.is_(None),
+                    InboundMessageRow.received_at >= head.received_at,
+                    InboundMessageRow.received_at <= upper,
+                )
+                .order_by(InboundMessageRow.received_at.asc())
+                .with_for_update()
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return list(rows)
+
+
+def _consolidate_inbound_text(rows: list[InboundMessageRow]) -> str:
+    """Concatenate inbound text/transcription with newline separator, in order."""
+    parts: list[str] = []
+    for r in rows:
+        body = (r.text or r.transcription or "").strip()
+        if body:
+            parts.append(body)
+    return "\n".join(parts)
 
 
 async def _mark_queued_as_skipped(db: AsyncSession, lead_id: uuid.UUID, reason: str) -> None:
@@ -222,10 +277,43 @@ async def _run_v2_inbox(
         fallback_text=(gcfg.fallback_text if gcfg else "Vou validar com a equipe."),
     )
 
+    window_seconds = _concat_window_seconds()
+
     while True:
         msg = await _fetch_next_queued(db, lead.id)
         if msg is None:
             break
+
+        # FE-03a T30 §9.3 (brecha B1) — within the per-lead advisory lock,
+        # collapse any queued inbound burst within `window_seconds` of the
+        # head message into a single run_turn invocation. The original
+        # `msg.text` is rebound in-memory to the consolidated payload so
+        # downstream (`run_turn`, audit, etc.) sees the merged content.
+        # Companion rows are marked `processed` AFTER run_turn succeeds so
+        # transient failures roll back and the burst is retried on the
+        # next worker pass.
+        companions = await _fetch_window_companions(
+            db,
+            lead_id=lead.id,
+            head=msg,
+            window_seconds=window_seconds,
+        )
+        # `companions` always contains `msg` itself; ORM identity-map ensures
+        # the row instance is the same Python object so mutating `msg.text`
+        # is the same as mutating `companions[0].text` if msg is the head.
+        extras = [r for r in companions if r.id != msg.id]
+        original_text = msg.text
+        if extras:
+            consolidated = _consolidate_inbound_text(companions)
+            msg.text = consolidated
+            log.info(
+                "worker.v2.inbound_concat",
+                lead_id=str(lead.id),
+                head_id=str(msg.id),
+                companion_ids=[str(r.id) for r in extras],
+                window_seconds=window_seconds,
+            )
+
         try:
             result = await run_turn(
                 db,
@@ -239,6 +327,9 @@ async def _run_v2_inbox(
                 guardrail_cfg=guardrail_cfg,
             )
         except RecipientUnreachable as e:
+            # Restore the in-memory text so the persisted row reflects the
+            # actual user input that failed, not the merged payload.
+            msg.text = original_text
             lead.status = "unreachable"
             lead.unreachable_reason = f"unreachable: {e}"
             msg.status = "error"
@@ -247,6 +338,7 @@ async def _run_v2_inbox(
             await db.commit()
             return
         except (AuthError, PolicyError, WindowExpiredError, MessagingError) as e:
+            msg.text = original_text
             msg.status = "error"
             msg.error_detail = f"{type(e).__name__}: {e}"
             log.error(
@@ -258,16 +350,26 @@ async def _run_v2_inbox(
             await db.commit()
             return
 
+        now_ts = datetime.now(UTC)
         if result.outcome == "sent":
             msg.status = "processed"
-            msg.processed_at = datetime.now(UTC)
+            msg.processed_at = now_ts
         elif result.outcome in ("opt_out", "lead_banned", "escalated"):
             msg.status = "processed"
-            msg.processed_at = datetime.now(UTC)
+            msg.processed_at = now_ts
             msg.error_detail = f"v2_outcome: {result.outcome}"
         else:
             msg.status = "error"
             msg.error_detail = f"v2_outcome: {result.outcome}"
+
+        # Mark companion rows as processed regardless of outcome — their
+        # content was merged into the run_turn call that just executed. On
+        # a fresh-error outcome the head row carries the failure marker; the
+        # companions are not re-tried because they were folded in.
+        for r in extras:
+            r.status = "processed"
+            r.processed_at = now_ts
+            r.error_detail = "concatenated_with_head"
 
         await db.commit()
         # Tenant context is transaction-local; re-set so the next fetch sees RLS rows.
