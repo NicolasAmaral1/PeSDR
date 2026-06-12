@@ -82,6 +82,15 @@ class Lead(Base):
         JSONB(), nullable=False, server_default=func.cast("{}", JSONB())
     )
 
+    # Multi-channel pre-paving (Hedge 1) — added by migration 0029.
+    # When a tenant gains multiple messaging channels (e.g., 2 WhatsApp numbers),
+    # this records which channel originated the lead. Today all leads default
+    # to 'main'; when multi-channel ships, the webhook handler stamps the real
+    # channel label here.
+    inbound_channel_label: Mapped[str] = mapped_column(
+        Text(), nullable=False, server_default="main"
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
