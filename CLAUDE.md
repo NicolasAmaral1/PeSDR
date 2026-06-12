@@ -283,6 +283,16 @@ docker exec ai_sdr_postgres psql -U ai_sdr_app -d ai_sdr \
 - **Cross-tenant worker**: `execute_action` faz `SET LOCAL row_security = off` pra lookup, depois `set_tenant_context` pra reads tenant-scoped (Tenant.slug → tenant.yaml + secrets via SopsLoader).
 - **Wipe pra dev fresh**: `docker exec ai_sdr_postgres psql -U ai_sdr_app -d ai_sdr -c "TRUNCATE action_executions;"`.
 
+## Multi-channel pre-paving (hedges)
+
+Hedges baratos que travam a opção de multi-channel-per-tenant sem comprometer a arquitetura atual. Implementação completa de multi-channel fica pra plano dedicado quando aparecer caso de uso real (cliente que precisa de 2+ números no mesmo tenant). Os hedges abaixo eliminam ~50% do custo de refactor futuro:
+
+- **`leads.inbound_channel_label`** (migration 0029) — coluna TEXT NOT NULL DEFAULT `'main'`. Todo lead nasce com `'main'` hoje; quando multi-channel ativar, o webhook handler vai stampar o label real. Zero data migration depois.
+- **Webhook URLs duplas** — `/webhooks/{tenant}/{provider}` (legacy, assume `channel_label='main'`) E `/webhooks/{tenant}/{provider}/{channel_label}` (multi-channel). Ambas válidas hoje; futuras configs do Meta Business Manager podem usar URL nova sem code change.
+- **Eventos com `channel_label`** — `webhook.ingested` event já loga o label. Quando multi-channel ativar, métricas/dashboards já têm a dimensão certa.
+
+**Quando ativar multi-channel completo:** quando aparecer cliente concreto que precise de 2+ números no mesmo tenant compartilhando KB/TreeFlows. Refactor restante estimado em ~2-3 dias (em vez de 5-6 sem os hedges).
+
 ## Checkpointer notes
 
 - Tabelas do LangGraph (`checkpoints`, `checkpoint_writes`, `checkpoint_blobs`, `checkpoint_migrations`) são criadas pelo `ensure_checkpointer_schema()` no startup (chamado no lifespan da FastAPI e no `ai-sdr simulate`). Migration 0004 é só um stamp documental — NÃO cria as tabelas (a lib usa psycopg3, alembic env usa asyncpg).
