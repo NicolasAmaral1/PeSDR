@@ -200,6 +200,89 @@ docker exec ai_sdr_postgres psql -U ai_sdr_app -d ai_sdr \
       UPDATE talks SET status='active', requires_review_reason=NULL, escalated_at=NULL;"
 ```
 
+## FE-03b — Humanização + Close Lifecycle
+
+Polish do runtime que FE-03a entregou.
+
+### Humanização
+
+- `humanization` block em `tenant.yaml`: `enabled` (default true), `chunk_delimiter` (default `\n\n`), `chars_per_second_min/max` (8/15), `min_delay_ms`/`max_delay_ms` (800/4000), `apply_to_voice` (false).
+- **Pipeline:** `humanize(response_text, config, *, is_voice)` em `flowengine/humanizer.py` é pure function — split por parágrafo + computa delay proporcional ao próximo chunk com bounds.
+- **Sender** (`flowengine/sender.py`) itera chunks: `mark_as_typing(to)` (opcional, no-op default no protocol), `asyncio.sleep`, `send_text`.
+- **WhatsApp Cloud** implementa `mark_as_typing` via `typing_indicator` API; PolicyError silenciado pq Meta gates per account.
+- **Voice mode**: humanização pulada (1 chunk) unless `apply_to_voice=true`. FE-05 wire chunking diferente.
+
+### Close lifecycle
+
+- `talk_lifecycle` block opcional no TreeFlow YAML: `close_after_inactivity` (ISO-8601, [PT1H, P365D]), `close_after_duration` (ISO-8601, [P1D, P730D]), `close_when_completed: [{ expression, outcome }]` (outcome ∈ {success, failure, no_interest}).
+- **Inactivity + Duration**: worker scan job (`worker/jobs/scan_talks.py`) roda cron a cada 5 minutos, cross-tenant via BYPASSRLS + SKIP LOCKED. **Two-phase**: read candidates → per-Talk fresh tx (SET LOCAL row_security=off → SELECT FOR UPDATE SKIP LOCKED → close → commit). Crash mid-batch preserva closures anteriores.
+- **Completion rule**: pipeline hook em `post_processing.apply_decision` após state delta. **Mutually exclusive com requires_review_reason** (close vence; review skipped).
+- **Re-engagement**: lead manda mensagem após Talk close → **nova Talk fresca** (não reopen). preprocessing emite `talk.re_engagement_after_close` event.
+- **Bounds errors fatais**: TreeFlow com talk_lifecycle inválido → `TreeflowLoadError`. Tenant nem inicia.
+
+### Migration 0026
+
+Estende `talks.status` CHECK constraint pra incluir `closed_completed_success`, `closed_completed_failure`, `closed_no_interest`, `closed_duration`. Source-of-truth em `ai_sdr.models.talk_status.TalkStatus` Literal + `ALL_STATUSES` tuple — migration e ORM importam de lá (pattern de `review_reason.py` em FE-03a).
+
+### Eventos structlog (9 novos)
+
+`talk.closed.{inactivity,duration,completion}`, `talk.re_engagement_after_close`, `humanization.{chunks_emitted,skipped_voice_mode}`, `mark_as_typing.{unsupported,failed}`, `scan_talks.completed`.
+
+### Wipe pra dev fresh (atualiza FE-03a guidance)
+
+```bash
+docker exec ai_sdr_postgres psql -U ai_sdr_app -d ai_sdr \
+  -c "TRUNCATE checkpoints, checkpoint_writes, checkpoint_blobs, checkpoint_migrations; \
+      UPDATE talks SET status='active', requires_review_reason=NULL, escalated_at=NULL, \
+                       closed_at=NULL, closed_reason=NULL, closed_by=NULL;"
+```
+
+## FE-03c — On-Collected Actions + Adapter Framework
+
+- TreeFlow YAMLs declaram side-effects inline em `TreeflowNode.on_collected`:
+  ```yaml
+  nodes:
+    - id: agendamento_demo
+      collects:
+        - field: demo_data
+          type: text
+          required: true
+      on_collected:
+        - field: demo_data
+          adapter: logging
+          handler: schedule_event
+          params:
+            title: "Demo {{ collected.nome }}"
+            duration_minutes: 30
+  ```
+- Action dispara **assíncrono via worker arq** depois que LLM emite `collected_fields[field]`. Não bloqueia run_turn. Dispatch acontece em `post_processing.apply_decision` antes do current_node update (usa o nó pré-transição como contexto).
+- **Idempotência**: UNIQUE `(talk_id, field, value_hash)` em `action_executions` — mesma coleta (mesmo valor) = skip; correção (valor muda) = nova action. Hash = `sha256(canonical_json(value))`.
+- **Templating**: Jinja2 SandboxedEnvironment com `StrictUndefined`. Contexto exposto: `collected`, `extracted_facts`, `lead.{id, whatsapp_e164, external_label}`, `talk.{id, treeflow_id, turn_count}`. `tenant_id` é deliberadamente **não exposto**. Render rola no dispatcher (sync), `params_resolved` no DB já é o final — auditoria trivial.
+- **Adapter framework**: ABC `ActionAdapter` + registry (`@register` decorator) + factory (`build_action_adapter`). Adicionar novo adapter:
+  1. Subclasse `ActionAdapter`, set `name`, implementa `execute(handler, params)`.
+  2. Decora com `@register` (registry rejeita nome duplicado).
+  3. Importa o módulo em `src/ai_sdr/flowengine/actions/__init__.py` (side-effect).
+- **Adapters incluídos no MVP**: `logging` (fake/test, retorna fake id determinístico `fake-{handler}-{sha256[:8]}`). Adapters reais (Google Calendar, HubSpot, etc) ficam pra plano dedicado de produção.
+- **Falha**: 3 retries com backoff exponencial (5s, 30s — gerenciado pelo arq via `WorkerSettings.max_tries`). Após terminal: `status='failed'`, `last_error` (truncado a 1000 chars). Sem replay automático no MVP — operador investiga via SQL e abre plano se for sistêmico.
+- **Bump de version** obrigatório ao adicionar/mudar `on_collected` num TreeFlow já publicado (Plan 2 rule).
+- **Events estruturados** (structlog): `action.enqueued`, `action.executed`, `action.retry`, `action.failed`, `action.dispatch.skipped_duplicate`, `action.dispatch.template_render_failed`, `action.execution_not_found`.
+- **Validação load-time**: TreeflowLoader rejeita `field` inválido (não declarado em `collects`), `handler` vazio, `params` com sintaxe Jinja2 inválida. Adapter ausente do registry emite warning (não falha) — pode ser registrado em runtime.
+- **Queries operacionais**:
+  ```sql
+  -- Taxa de falha por adapter (24h)
+  SELECT adapter_name,
+         COUNT(*) FILTER (WHERE status='failed') * 100.0 / COUNT(*) AS pct_failed
+  FROM action_executions
+  WHERE created_at > now() - interval '1 day'
+  GROUP BY adapter_name;
+
+  -- Stuck jobs (worker crash?)
+  SELECT * FROM action_executions
+  WHERE status='executing' AND updated_at < now() - interval '5 minutes';
+  ```
+- **Cross-tenant worker**: `execute_action` faz `SET LOCAL row_security = off` pra lookup, depois `set_tenant_context` pra reads tenant-scoped (Tenant.slug → tenant.yaml + secrets via SopsLoader).
+- **Wipe pra dev fresh**: `docker exec ai_sdr_postgres psql -U ai_sdr_app -d ai_sdr -c "TRUNCATE action_executions;"`.
+
 ## Checkpointer notes
 
 - Tabelas do LangGraph (`checkpoints`, `checkpoint_writes`, `checkpoint_blobs`, `checkpoint_migrations`) são criadas pelo `ensure_checkpointer_schema()` no startup (chamado no lifespan da FastAPI e no `ai-sdr simulate`). Migration 0004 é só um stamp documental — NÃO cria as tabelas (a lib usa psycopg3, alembic env usa asyncpg).

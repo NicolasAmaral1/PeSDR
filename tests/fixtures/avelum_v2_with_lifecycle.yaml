@@ -1,0 +1,31 @@
+schema_version: 1
+id: avelum_v2_lifecycle
+version: 1.0.0
+display_name: "Avelum SDR — with lifecycle"
+
+sdr_persona:
+  voice: "PT-BR informal"
+  conduct: "1. Reconheça antes de avançar"
+
+talk_lifecycle:
+  close_after_inactivity: P7D
+  close_after_duration: P30D
+  close_when_completed:
+    - expression: "collected.demo_agendada == true"
+      outcome: success
+    - expression: "collected.no_interest_flag == true"
+      outcome: no_interest
+
+entry_node: saudacao
+nodes:
+  - id: saudacao
+    objetivo: "Cumprimentar lead"
+    collects:
+      - field: segmento
+        type: text
+        required: true
+    exit_condition:
+      type: all_fields_filled
+    next_nodes:
+      - condition: "true"
+        target: saudacao

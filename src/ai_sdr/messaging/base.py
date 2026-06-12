@@ -94,3 +94,13 @@ class MessagingAdapter(ABC):
         """For providers with a GET-based webhook challenge (WhatsApp's
         hub.mode=subscribe handshake). Returns the challenge token to echo.
         """
+
+    async def mark_as_typing(self, to: str) -> None:
+        """Optional: signal 'typing...' indicator to the recipient.
+
+        Default no-op. Adapters override if the underlying channel supports
+        the indicator (e.g., WhatsApp Cloud's typing_indicator API).
+        Failures inside the override should be swallowed — typing is a UX
+        enhancement and must never block the actual message send.
+        """
+        return None

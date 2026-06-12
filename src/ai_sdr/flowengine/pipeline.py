@@ -29,6 +29,7 @@ from ai_sdr.flowengine.correction import (
     run_transition_retry,
 )
 from ai_sdr.flowengine.decision import TurnDecision
+from ai_sdr.flowengine.humanizer import HumanizationConfig
 from ai_sdr.flowengine.post_processing import apply_decision
 from ai_sdr.flowengine.preprocessing import (
     OptOutDetected,
@@ -54,6 +55,7 @@ from ai_sdr.models.inbound_message import InboundMessageRow
 from ai_sdr.models.tenant import Tenant
 from ai_sdr.models.treeflow_version import TreeflowVersion
 from ai_sdr.repositories.talkflow_state_repository import TalkFlowStateRepository
+from ai_sdr.schemas.tenant_yaml import TenantConfig
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +86,7 @@ async def run_turn(
     session: AsyncSession,
     *,
     tenant: Tenant,
+    tenant_cfg: TenantConfig,
     treeflow: TreeflowDef,
     treeflow_version: TreeflowVersion,
     inbound: InboundMessageRow,
@@ -256,10 +259,22 @@ async def run_turn(
         ctx.talk.tokens_consumed = tokens
 
         # [12] Send to lead via adapter
+        # FE-03b T10: humanization config sourced from tenant.yaml > humanization.
+        # Tenants without an explicit block inherit defaults via TenantConfig.
+        humanization = HumanizationConfig(
+            enabled=tenant_cfg.humanization.enabled,
+            chunk_delimiter=tenant_cfg.humanization.chunk_delimiter,
+            chars_per_second_min=tenant_cfg.humanization.chars_per_second_min,
+            chars_per_second_max=tenant_cfg.humanization.chars_per_second_max,
+            min_delay_ms=tenant_cfg.humanization.min_delay_ms,
+            max_delay_ms=tenant_cfg.humanization.max_delay_ms,
+            apply_to_voice=tenant_cfg.humanization.apply_to_voice,
+        )
         send_result = await send_response_text(
             adapter=adapter,
             lead=ctx.lead,
             decision=decision,
+            humanization_config=humanization,
         )
 
         # [13] Audit row

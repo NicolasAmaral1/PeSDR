@@ -22,6 +22,9 @@ from typing import Any, cast
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
+import ai_sdr.flowengine.actions  # noqa: F401 — side-effect: register adapters
+from ai_sdr.flowengine.actions.dispatcher import dispatch_actions
+from ai_sdr.flowengine.close_lifecycle import evaluate_completion_rule
 from ai_sdr.flowengine.decision import TurnDecision
 from ai_sdr.flowengine.escalation import resolve_escalation_reason
 from ai_sdr.flowengine.heuristics import (
@@ -35,6 +38,7 @@ from ai_sdr.flowengine.treeflow_loader import TreeflowDef
 from ai_sdr.models.review_reason import RequiresReviewReason
 from ai_sdr.models.talk import Talk
 from ai_sdr.models.talkflow_state import TalkFlowState
+from ai_sdr.repositories.action_execution_repository import ActionExecutionRepository
 from ai_sdr.repositories.talkflow_state_repository import TalkFlowStateRepository
 
 logger = logging.getLogger(__name__)
@@ -53,6 +57,13 @@ def _emit_events(
             lead_id,
             payload,
         )
+
+
+async def _load_lead_for_actions(session: AsyncSession, lead_id: Any) -> Any:
+    """Lazy lead lookup used only when a node has on_collected actions to fire."""
+    from ai_sdr.models.lead import Lead
+
+    return await session.get(Lead, lead_id)
 
 
 async def apply_decision(
@@ -100,6 +111,26 @@ async def apply_decision(
         state.extracted_facts = merged_facts
         flag_modified(state, "extracted_facts")
 
+    # 4b. FE-03c: dispatch on_collected actions for the (pre-transition) node.
+    # state.current_node still points at the node where the LLM emitted the
+    # collected_fields — that's the node whose on_collected we want to fire.
+    node_spec_for_actions = treeflow.nodes.get(state.current_node)
+    if node_spec_for_actions is not None and getattr(node_spec_for_actions, "on_collected", []):
+        lead_for_actions = await _load_lead_for_actions(session, talk.lead_id)
+        if lead_for_actions is not None:
+            from ai_sdr.worker.queue import enqueue_execute_action
+
+            await dispatch_actions(
+                session=session,
+                repo=ActionExecutionRepository(session),
+                enqueue=enqueue_execute_action,
+                state=state,
+                decision=decision,
+                node_spec=node_spec_for_actions,
+                talk=talk,
+                lead=lead_for_actions,
+            )
+
     # 5. Apply state delta
     if delta.changes_treatment:
         # changes_treatment guards against the _UNSET sentinel.
@@ -132,6 +163,29 @@ async def apply_decision(
     # 8. Talk metadata
     talk.turn_count = next_turn
     talk.last_message_at = now
+
+    # NEW (FE-03b §5.4): completion rule check.
+    # Mutually exclusive with requires_review_reason — when a rule fires,
+    # the Talk closes and the review chain is SKIPPED.
+    close_outcome = evaluate_completion_rule(
+        state=state,
+        decision=decision,
+        treeflow=treeflow,
+    )
+    if close_outcome is not None:
+        talk.status = cast(Any, close_outcome.status)
+        talk.closed_at = now
+        talk.closed_reason = close_outcome.reason
+        talk.closed_by = close_outcome.closed_by
+        logger.info(
+            "talk.closed.completion talk=%s outcome=%s rule=%s",
+            talk.id,
+            close_outcome.status,
+            close_outcome.reason,
+        )
+        # Skip the requires_review_reason chain — completion close wins.
+        _emit_events(events, talk.id, getattr(talk, "lead_id", None))
+        return
 
     # 9. requires_review_reason — first non-None wins.
     # Objection-treatment exhaustion has highest priority (set by runtime),

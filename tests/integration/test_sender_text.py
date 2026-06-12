@@ -10,8 +10,15 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from ai_sdr.flowengine.decision import TurnDecision
+from ai_sdr.flowengine.humanizer import HumanizationConfig
 from ai_sdr.flowengine.sender import SendResult, send_response_text
 from ai_sdr.messaging.base import SendResult as AdapterSendResult
+
+
+def _humanization() -> HumanizationConfig:
+    """Zero-delay, single-chunk config so the legacy single-send asserts
+    in this file continue to hold."""
+    return HumanizationConfig(enabled=False)
 
 
 def _adapter() -> MagicMock:
@@ -45,6 +52,7 @@ async def test_dispatches_to_adapter_send_text() -> None:
         adapter=adapter,
         lead=lead,
         decision=decision,
+        humanization_config=_humanization(),
     )
     assert isinstance(result, SendResult)
     assert result.external_id == "ext-123"
@@ -69,6 +77,7 @@ async def test_voice_format_falls_back_to_text_and_logs_warning(
             adapter=adapter,
             lead=lead,
             decision=decision,
+            humanization_config=_humanization(),
         )
     assert result.status == "sent"
     adapter.send_text.assert_awaited_once_with("+5511999999999", "oi")

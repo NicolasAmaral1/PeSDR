@@ -1,0 +1,15 @@
+schema_version: 1
+id: bad_expr
+version: 1.0.0
+sdr_persona: { voice: "x", conduct: "1. y" }
+entry_node: a
+nodes:
+  - id: a
+    objetivo: "x"
+    collects: []
+    exit_condition: { type: all_fields_filled }
+    next_nodes: [{ condition: "true", target: a }]
+talk_lifecycle:
+  close_when_completed:
+    - expression: "collected.field !!! bad syntax"
+      outcome: success

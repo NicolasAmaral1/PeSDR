@@ -7,6 +7,7 @@ are registered in `functions`.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -22,8 +23,10 @@ from ai_sdr.secrets.sops_loader import SopsLoader
 from ai_sdr.settings import get_settings
 from ai_sdr.tenant_loader.loader import TenantLoader
 from ai_sdr.treeflow.checkpointer import ensure_checkpointer_schema
+from ai_sdr.worker.jobs.execute_action import execute_action
 from ai_sdr.worker.jobs.follow_up_scanner import follow_up_scanner
 from ai_sdr.worker.jobs.inbound import process_lead_inbox
+from ai_sdr.worker.jobs.scan_talks import scan_active_talks
 
 
 async def _on_startup(ctx: dict[str, Any]) -> None:
@@ -51,13 +54,28 @@ async def _on_shutdown(ctx: dict[str, Any]) -> None:
     structlog.get_logger().info("worker.stopped")
 
 
+async def scheduled_scan_talks(ctx: dict[str, Any]) -> None:
+    """arq cron entrypoint for scan_active_talks. Runs every 5 minutes."""
+    session_factory = ctx["session_factory"]
+    async with session_factory() as session:
+        await scan_active_talks(session, now=datetime.now(UTC))
+
+
+cron_jobs = [
+    cron(follow_up_scanner, minute=set(range(0, 60)), run_at_startup=False),
+    cron(
+        scheduled_scan_talks,
+        minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55},
+        run_at_startup=False,
+    ),
+]
+
+
 class WorkerSettings:
     """arq looks up class attributes by name."""
 
-    functions = [process_lead_inbox]
-    cron_jobs = [
-        cron(follow_up_scanner, minute=set(range(0, 60)), run_at_startup=False),
-    ]
+    functions = [process_lead_inbox, execute_action]
+    cron_jobs = cron_jobs
     on_startup = _on_startup
     on_shutdown = _on_shutdown
     max_tries = 3

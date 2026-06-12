@@ -7,6 +7,7 @@ this stage runs cheaply before any LLM cost is incurred.
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -23,6 +24,8 @@ from ai_sdr.models.treeflow_version import TreeflowVersion
 from ai_sdr.repositories.lead_repository import LeadRepository
 from ai_sdr.repositories.talk_repository import TalkRepository
 from ai_sdr.repositories.talkflow_state_repository import TalkFlowStateRepository
+
+logger = logging.getLogger(__name__)
 
 
 class OptOutDetected(Exception):
@@ -78,6 +81,21 @@ async def resolve_pipeline_context(
     existing = await talks.find_active_for_lead(tenant.id, lead.id)
     if existing is not None:
         return PipelineContext(lead=lead, talk=existing, inbound=inbound, is_new_talk=False)
+
+    # FE-03b §5.5: re-engagement detection.
+    # When a previous Talk closed and the lead is now sending a fresh inbound,
+    # log the event so operators can see the timeline. Per spec §16 the new
+    # Talk is created fresh (no reopen) — behavior unchanged.
+    previously_closed = await talks.find_most_recent_closed(tenant.id, lead.id)
+    if previously_closed is not None:
+        logger.info(
+            "talk.re_engagement_after_close lead=%s previous_talk=%s "
+            "previous_status=%s closed_at=%s",
+            lead.id,
+            previously_closed.id,
+            previously_closed.status,
+            previously_closed.closed_at,
+        )
 
     talk = await talks.create(
         tenant_id=tenant.id,

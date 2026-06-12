@@ -17,11 +17,15 @@ from ai_sdr.models.treeflow_version import TreeflowVersion
 
 
 def test_status_literal_alias() -> None:
+    # Canonical source: ai_sdr.models.talk_status.ALL_STATUSES (FE-03b T1/T3).
     assert set(get_args(TalkStatus)) == {
         "active",
-        "paused",
         "requires_review",
         "closed_completed",
+        "closed_completed_success",
+        "closed_completed_failure",
+        "closed_no_interest",
+        "closed_duration",
         "closed_inactivity",
         "closed_optout",
         "closed_banned",

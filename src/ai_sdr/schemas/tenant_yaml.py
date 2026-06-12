@@ -65,6 +65,32 @@ class GuardrailsConfig(BaseModel):
         return self
 
 
+class HumanizationConfig(BaseModel):
+    """Per-tenant humanization knobs (FE-03b §4).
+
+    All defaults align with the runtime humanizer; tenants without the
+    `humanization` block in their tenant.yaml inherit these.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    chunk_delimiter: str = "\n\n"
+    chars_per_second_min: float = Field(default=8.0, gt=0)
+    chars_per_second_max: float = Field(default=15.0, gt=0)
+    min_delay_ms: int = Field(default=800, ge=0)
+    max_delay_ms: int = Field(default=4000, ge=0)
+    apply_to_voice: bool = False
+
+    @model_validator(mode="after")
+    def _check_bounds(self) -> Self:
+        if self.chars_per_second_min > self.chars_per_second_max:
+            raise ValueError("humanization.chars_per_second_min must be <= chars_per_second_max")
+        if self.min_delay_ms > self.max_delay_ms:
+            raise ValueError("humanization.min_delay_ms must be <= max_delay_ms")
+        return self
+
+
 class ReengagementTemplate(BaseModel):
     """Tenant-level default template used by WindowExpiredError recovery.
 
@@ -153,6 +179,7 @@ class TenantConfig(BaseModel):
     messaging: MessagingConfig | None = None
     guardrails: GuardrailsConfig | None = None
     objections: ObjectionsConfig | None = None  # Plan 4a
+    humanization: HumanizationConfig = Field(default_factory=HumanizationConfig)
     sdr_persona: dict[str, Any] | None = (
         None  # FE-01b: pass-through slot (architecture_version stays in DB)
     )
