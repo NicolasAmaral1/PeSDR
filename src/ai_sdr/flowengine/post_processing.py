@@ -111,25 +111,35 @@ async def apply_decision(
         state.extracted_facts = merged_facts
         flag_modified(state, "extracted_facts")
 
-    # 4b. FE-03c: dispatch on_collected actions for the (pre-transition) node.
-    # state.current_node still points at the node where the LLM emitted the
-    # collected_fields — that's the node whose on_collected we want to fire.
-    node_spec_for_actions = treeflow.nodes.get(state.current_node)
-    if node_spec_for_actions is not None and getattr(node_spec_for_actions, "on_collected", []):
-        lead_for_actions = await _load_lead_for_actions(session, talk.lead_id)
-        if lead_for_actions is not None:
-            from ai_sdr.worker.queue import enqueue_execute_action
+    # 4b. FE-03c: dispatch on_collected actions.
+    # Scans ALL nodes (not just current_node): real-LLM smoke showed the
+    # model collects fields of future nodes without proposing the
+    # transition, so anchoring dispatch to current_node silently skips
+    # actions. on_collected is semantically about the FIELD; the UNIQUE
+    # (talk_id, field, value_hash) constraint already guarantees
+    # exactly-once, so scanning every node is safe.
+    if decision.collected_fields:
+        nodes_with_matching_actions = [
+            n
+            for n in treeflow.nodes.values()
+            if any(a.field in decision.collected_fields for a in n.on_collected)
+        ]
+        if nodes_with_matching_actions:
+            lead_for_actions = await _load_lead_for_actions(session, talk.lead_id)
+            if lead_for_actions is not None:
+                from ai_sdr.worker.queue import enqueue_execute_action
 
-            await dispatch_actions(
-                session=session,
-                repo=ActionExecutionRepository(session),
-                enqueue=enqueue_execute_action,
-                state=state,
-                decision=decision,
-                node_spec=node_spec_for_actions,
-                talk=talk,
-                lead=lead_for_actions,
-            )
+                for node_spec_for_actions in nodes_with_matching_actions:
+                    await dispatch_actions(
+                        session=session,
+                        repo=ActionExecutionRepository(session),
+                        enqueue=enqueue_execute_action,
+                        state=state,
+                        decision=decision,
+                        node_spec=node_spec_for_actions,
+                        talk=talk,
+                        lead=lead_for_actions,
+                    )
 
     # 5. Apply state delta
     if delta.changes_treatment:

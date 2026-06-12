@@ -224,3 +224,125 @@ async def test_apply_decision_skips_dispatch_when_no_on_collected():
         )
 
     mock_dispatch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_dispatch_fires_even_when_current_node_differs():
+    """Regression (manoela smoke 2026-06-12): LLM collects fields belonging to
+    a FUTURE node without proposing the transition — current_node stays on the
+    entry node. Dispatch must scan all nodes, not just current_node."""
+    with (
+        patch(
+            "ai_sdr.flowengine.post_processing.flag_modified",
+        ),
+        patch(
+            "ai_sdr.flowengine.post_processing.dispatch_actions",
+            AsyncMock(),
+        ) as mock_dispatch,
+        patch(
+            "ai_sdr.flowengine.post_processing.apply_objection_state",
+            return_value=SimpleNamespace(
+                changes_treatment=False,
+                new_active_treatment=None,
+                appended_objection_history=[],
+                events=[],
+                requires_review_reason=None,
+            ),
+        ),
+        patch(
+            "ai_sdr.flowengine.post_processing.apply_contradiction_heuristic",
+            side_effect=lambda d: (d, []),
+        ),
+        patch(
+            "ai_sdr.flowengine.post_processing.detect_implicit_transition",
+            return_value=[],
+        ),
+        patch(
+            "ai_sdr.flowengine.post_processing.evaluate_completion_rule",
+            return_value=None,
+        ),
+        patch(
+            "ai_sdr.flowengine.post_processing.handle_offtopic",
+            return_value=(0, None),
+        ),
+        patch(
+            "ai_sdr.flowengine.post_processing.resolve_escalation_reason",
+            return_value=None,
+        ),
+        patch("ai_sdr.flowengine.post_processing.TalkFlowStateRepository") as MockRepo,
+        patch("ai_sdr.flowengine.post_processing._emit_events"),
+        patch(
+            "ai_sdr.flowengine.post_processing._load_lead_for_actions",
+            AsyncMock(
+                return_value=SimpleNamespace(id=uuid4(), whatsapp_e164="+1", external_label="x")
+            ),
+        ),
+    ):
+        MockRepo.return_value.append_message = AsyncMock()
+
+        from ai_sdr.flowengine.post_processing import apply_decision
+
+        # current_node = saudacao (NO on_collected); the action lives on
+        # qualificacao, whose field the LLM just emitted anyway.
+        saudacao = SimpleNamespace(id="saudacao", on_collected=[])
+        qualificacao = SimpleNamespace(
+            id="qualificacao",
+            on_collected=[
+                SimpleNamespace(
+                    field="faturamento_mensal", adapter="logging", handler="h", params={}
+                )
+            ],
+        )
+        treeflow = SimpleNamespace(
+            nodes={"saudacao": saudacao, "qualificacao": qualificacao},
+            talk_lifecycle=None,
+        )
+        state = SimpleNamespace(
+            collected={"nome": "Ana"},
+            extracted_facts={},
+            current_node="saudacao",  # ← never transitioned
+            active_treatment=None,
+            objections_handled=[],
+        )
+        decision = SimpleNamespace(
+            collected_fields={"faturamento_mensal": "80000"},
+            extracted_facts={},
+            response_text="ok",
+            response_format="text",
+            next_node=None,
+            objection=None,
+            objection_resolved=False,
+            off_topic=False,
+            escalation_reason=None,
+            suggest_close_talk="no",
+        )
+        talk = SimpleNamespace(
+            id=uuid4(),
+            tenant_id=uuid4(),
+            lead_id=uuid4(),
+            treeflow_id="tf",
+            turn_count=2,
+            last_message_at=None,
+            status="active",
+            closed_at=None,
+            closed_reason=None,
+            closed_by=None,
+            requires_review_reason=None,
+        )
+
+        session = MagicMock()
+        session.execute = AsyncMock()
+        session.commit = AsyncMock()
+
+        await apply_decision(
+            session,
+            talk=talk,
+            state=state,
+            decision=decision,
+            resolved_target_node="saudacao",
+            now=datetime.now(UTC),
+            treeflow=treeflow,
+        )
+
+    mock_dispatch.assert_awaited_once()
+    assert mock_dispatch.await_args.kwargs["node_spec"].id == "qualificacao"
