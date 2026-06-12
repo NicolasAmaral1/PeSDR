@@ -1,10 +1,17 @@
 """Inbound webhook routes.
 
-URL shape: /webhooks/{tenant_slug}/{provider}
+URL shape (two forms accepted):
+  /webhooks/{tenant_slug}/{provider}                     ← legacy, assumes channel_label="main"
+  /webhooks/{tenant_slug}/{provider}/{channel_label}     ← multi-channel-aware
 
   - GET  → adapter.verification_challenge(query_params) — handshake.
   - POST → adapter.handle_inbound(raw_body, headers), then per InboundMessage:
             ingest_inbound_message → enqueue one job per affected lead.
+
+The channel_label is captured and forwarded to ingest_inbound_message so the
+lead's `inbound_channel_label` is stamped correctly. When multi-channel ships
+(see roadmap), the URL with explicit `{channel_label}` routes to the right
+adapter instance; for now both URLs behave identically.
 
 SignatureError → 401. Unknown tenant or provider mismatch → 404.
 """
@@ -38,13 +45,13 @@ async def _load_tenant(db: AsyncSession, slug: str) -> Tenant:
     return tenant
 
 
-@router.get("/webhooks/{tenant_slug}/{provider}")
-async def webhook_challenge(
+async def _webhook_challenge_impl(
     tenant_slug: str,
     provider: str,
+    channel_label: str,
     request: Request,
-    db: Annotated[AsyncSession, Depends(db_session)],
-    registry: Annotated[AdapterRegistry, Depends(adapter_registry)],
+    db: AsyncSession,
+    registry: AdapterRegistry,
 ) -> Response:
     tenant = await _load_tenant(db, tenant_slug)
     try:
@@ -62,14 +69,41 @@ async def webhook_challenge(
     return PlainTextResponse(challenge)
 
 
-@router.post("/webhooks/{tenant_slug}/{provider}")
-async def webhook_ingest(
+@router.get("/webhooks/{tenant_slug}/{provider}")
+async def webhook_challenge_legacy(
     tenant_slug: str,
     provider: str,
     request: Request,
     db: Annotated[AsyncSession, Depends(db_session)],
     registry: Annotated[AdapterRegistry, Depends(adapter_registry)],
-    pool: Annotated[Any, Depends(arq_pool)],
+) -> Response:
+    return await _webhook_challenge_impl(
+        tenant_slug, provider, "main", request, db, registry
+    )
+
+
+@router.get("/webhooks/{tenant_slug}/{provider}/{channel_label}")
+async def webhook_challenge_with_channel(
+    tenant_slug: str,
+    provider: str,
+    channel_label: str,
+    request: Request,
+    db: Annotated[AsyncSession, Depends(db_session)],
+    registry: Annotated[AdapterRegistry, Depends(adapter_registry)],
+) -> Response:
+    return await _webhook_challenge_impl(
+        tenant_slug, provider, channel_label, request, db, registry
+    )
+
+
+async def _webhook_ingest_impl(
+    tenant_slug: str,
+    provider: str,
+    channel_label: str,
+    request: Request,
+    db: AsyncSession,
+    registry: AdapterRegistry,
+    pool: Any,
 ) -> Response:
     tenant = await _load_tenant(db, tenant_slug)
     try:
@@ -103,7 +137,37 @@ async def webhook_ingest(
         "webhook.ingested",
         slug=tenant_slug,
         provider=provider,
+        channel_label=channel_label,
         n_messages=len(messages),
         n_enqueued=len(affected_lead_ids),
     )
     return Response(status_code=200)
+
+
+@router.post("/webhooks/{tenant_slug}/{provider}")
+async def webhook_ingest_legacy(
+    tenant_slug: str,
+    provider: str,
+    request: Request,
+    db: Annotated[AsyncSession, Depends(db_session)],
+    registry: Annotated[AdapterRegistry, Depends(adapter_registry)],
+    pool: Annotated[Any, Depends(arq_pool)],
+) -> Response:
+    return await _webhook_ingest_impl(
+        tenant_slug, provider, "main", request, db, registry, pool
+    )
+
+
+@router.post("/webhooks/{tenant_slug}/{provider}/{channel_label}")
+async def webhook_ingest_with_channel(
+    tenant_slug: str,
+    provider: str,
+    channel_label: str,
+    request: Request,
+    db: Annotated[AsyncSession, Depends(db_session)],
+    registry: Annotated[AdapterRegistry, Depends(adapter_registry)],
+    pool: Annotated[Any, Depends(arq_pool)],
+) -> Response:
+    return await _webhook_ingest_impl(
+        tenant_slug, provider, channel_label, request, db, registry, pool
+    )
