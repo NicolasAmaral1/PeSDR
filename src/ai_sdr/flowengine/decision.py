@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 TreatmentStrategy = Literal["inline", "subnode", "tool"]
 TreatmentStatus = Literal["in_progress", "resolved_accepted", "resolved_deferred"]
@@ -88,9 +88,26 @@ class TurnDecision(BaseModel):
     # Reasoning (audit + debugging)
     reasoning: str = Field(min_length=1, max_length=400)
 
+    @field_validator("reasoning", mode="before")
+    @classmethod
+    def _truncate_reasoning(cls, v: object) -> object:
+        # LLMs routinely overshoot the soft cap. reasoning is internal
+        # telemetry (never sent to the lead), so truncating beats failing
+        # the whole turn with a ValidationError.
+        if isinstance(v, str) and len(v) > 400:
+            return v[:397] + "..."
+        return v
+
 
 class JudgeVerdict(BaseModel):
     """Dedicated exit_condition judge LLM response (see spec §11.2)."""
 
     should_exit: bool
     reasoning: str = Field(min_length=1, max_length=200)
+
+    @field_validator("reasoning", mode="before")
+    @classmethod
+    def _truncate_reasoning(cls, v: object) -> object:
+        if isinstance(v, str) and len(v) > 200:
+            return v[:197] + "..."
+        return v

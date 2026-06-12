@@ -35,13 +35,16 @@ def test_response_text_min_length() -> None:
         )
 
 
-def test_reasoning_max_length() -> None:
-    with pytest.raises(ValidationError):
-        TurnDecision(
-            response_text="oi",
-            collected_fields={},
-            reasoning="x" * 500,  # > 400 char max
-        )
+def test_reasoning_overflow_truncates_instead_of_failing() -> None:
+    """LLMs routinely overshoot the cap; reasoning is internal telemetry,
+    so the validator truncates to 400 instead of failing the whole turn."""
+    d = TurnDecision(
+        response_text="oi",
+        collected_fields={},
+        reasoning="x" * 500,  # > 400 char soft cap
+    )
+    assert len(d.reasoning) == 400
+    assert d.reasoning.endswith("...")
 
 
 def test_human_escalation_categories_validated() -> None:
