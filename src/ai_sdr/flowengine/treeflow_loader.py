@@ -290,7 +290,9 @@ def _parse_on_collected(
         handler = raw.get("handler")
         if not handler or not isinstance(handler, str):
             raise TreeflowLoadError(f"node {node_id!r}: on_collected[{idx}].handler is required")
-        params = raw.get("params") or {}
+        params = raw.get("params")
+        if params is None:
+            params = {}
         if not isinstance(params, dict):
             raise TreeflowLoadError(
                 f"node {node_id!r}: on_collected[{idx}].params must be a mapping"
@@ -301,7 +303,7 @@ def _parse_on_collected(
         # flowengine.actions is imported.
         try:
             from ai_sdr.flowengine.actions.registry import ACTION_ADAPTERS  # noqa: PLC0415
-        except ImportError:
+        except ModuleNotFoundError:
             ACTION_ADAPTERS: dict[str, Any] = {}
         if adapter not in ACTION_ADAPTERS:
             _logging.getLogger(__name__).warning(

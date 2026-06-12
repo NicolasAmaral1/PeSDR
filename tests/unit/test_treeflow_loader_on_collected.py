@@ -12,7 +12,6 @@ from ai_sdr.flowengine.treeflow_loader import (
     load_treeflow_v2,
 )
 
-
 _BASE_YAML = """
 schema_version: 1
 id: test_tf
@@ -120,3 +119,18 @@ def test_on_collected_unknown_adapter_is_warning_not_error(caplog):
     node = tf.nodes["agendamento_demo"]
     assert node.on_collected[0].adapter == "never_registered"
     assert any("never_registered" in r.message for r in caplog.records)
+
+
+def test_on_collected_must_be_a_list():
+    yaml = _BASE_YAML.replace(
+        "    on_collected:\n"
+        "      - field: demo_data\n"
+        "        adapter: logging\n"
+        "        handler: schedule_event\n"
+        "        params:\n"
+        "          title: \"Demo {{ collected.nome }}\"\n"
+        "          duration_minutes: 30\n",
+        "    on_collected: \"oops, not a list\"\n",
+    )
+    with pytest.raises(TreeflowLoadError, match="must be a list"):
+        load_treeflow_v2(yaml)
