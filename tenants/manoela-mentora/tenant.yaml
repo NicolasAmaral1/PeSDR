@@ -1,0 +1,74 @@
+id: "manoela-mentora"
+display_name: "Manoela Mentora"
+timezone: "America/Sao_Paulo"
+
+# Horário de atendimento — leads fora desse range entram em queue (não recebem auto-ack).
+schedule:
+  mon-fri: "08:00-22:00"
+  sat: "09:00-18:00"
+  sun: "off"
+  off_hours_behavior: "queue"
+
+# Comportamento conversacional.
+conversation:
+  debounce_ms: 5000
+  optout_stop_words: ["para", "pare", "parar", "stop", "sair", "remove", "cancelar"]
+  optout_action: "end_conversation_silent"
+
+# LLM defaults — Nodes herdam se não overridarem em treeflow YAML.
+llm:
+  default:
+    provider: anthropic
+    model: claude-sonnet-4-6
+    temperature: 0.7
+    api_key_ref: secrets/anthropic_key
+  classifier:
+    provider: anthropic
+    model: claude-haiku-4-5
+    api_key_ref: secrets/anthropic_key
+  embeddings:
+    provider: openai
+    model: text-embedding-3-small
+    api_key_ref: secrets/openai_key
+  cache_enabled: true
+
+# Guardrails — preços/produtos permitidos pra Manoela.
+# Valores ainda baseados na estrutura piloto (Mentoria R$ 6.000 / Aceleradora
+# R$ 1.497–2.000 / Downsell R$ 247). Ajuste conforme a oferta real da Manoela.
+guardrails:
+  enabled: true
+  allowed_prices: [247, 1497, 1997, 2000, 6000]
+  allowed_products: ["Mentoria", "Aceleradora", "Downsell"]
+  critic_enabled: true
+  fallback_text: "Deixa eu confirmar esse valor com a equipe e já te respondo, ok?"
+  max_retries: 2
+
+# Messaging — WhatsApp Cloud API.
+# As 4 refs abaixo apontam pra chaves em tenants/manoela-mentora/secrets.enc.yaml.
+# Você define o webhook_verify_token; os outros 3 vêm do Meta Business Manager.
+messaging:
+  provider: whatsapp_cloud
+  phone_number_id_ref: secrets/wa_phone_id
+  access_token_ref: secrets/wa_token
+  webhook_verify_token_ref: secrets/wa_verify
+  app_secret_ref: secrets/wa_app_secret
+  api_version: v21.0
+  # Plano 9 — template HSM pra reengajamento quando lead fica silencioso > 24h
+  # (WindowExpiredError recovery). Descomente após registrar template no Meta.
+  # reengagement_template:
+  #   template_ref: "reengagement_default_v1"
+  #   language: "pt_BR"
+  #   params:
+  #     - "{{ collected.nome | default('amigo') }}"
+
+# Detecção de objeções via classifier (Plano 4a).
+objections:
+  enabled: true
+  min_confidence: 0.6
+  max_handled_per_lead: 10
+  history_window: 4
+
+# Plano 11 — Operator Console habilitado pra operadora (Lana, estrategista da
+# Manoela) usar UI de assign de leads em /console/manoela-mentora/leads.
+console:
+  enabled: true

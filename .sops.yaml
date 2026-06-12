@@ -1,3 +1,5 @@
 creation_rules:
-  - path_regex: tenants/.*/secrets\.enc\.yaml$
-    age: age1un8amd2f8u63g7uakq0tcyx9fmyja6jmgx4ffz3rhptlfwrpgpdsa7k6m7
+  - path_regex: tenants/.*/secrets(\.enc)?\.yaml$
+    age: >-
+      age1un8amd2f8u63g7uakq0tcyx9fmyja6jmgx4ffz3rhptlfwrpgpdsa7k6m7,
+      age1s5ec56wv2t2jvftu0z5tyn8z2cyzagp0hxcjlcnn4az36twcrassezf0rw

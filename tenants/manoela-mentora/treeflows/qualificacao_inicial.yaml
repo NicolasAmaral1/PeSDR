@@ -1,0 +1,52 @@
+id: qualificacao_inicial
+version: 0.1.0
+display_name: "Qualificação Inicial (Manoela — stub de validação E2E)"
+
+# STUB DE VALIDAÇÃO — funil mínimo viável pra testar o pipeline WhatsApp:
+#   mensagem chega → worker processa → LLM responde → adapter envia
+#
+# Sem KB e sem objections (intencional, pra simplificar primeiro teste).
+# Quando o E2E estiver validado, copie a estrutura rica de
+# tenants/example/treeflows/example.yaml (com KB + objections + critic).
+
+entry_node: saudacao
+
+nodes:
+  - id: saudacao
+    prompt: |
+      Você é a SDR digital da Manoela Mentora, conversando no WhatsApp em PT-BR.
+      Esta é a primeira mensagem do lead. Cumprimente em UMA frase curta,
+      brasileira, sem formalismo. Pergunte o primeiro nome do lead.
+      Tom: amigável, próximo. Frases curtas.
+    collects:
+      - field: nome
+        type: text
+        extraction_hint: "primeiro nome do lead (extrair só se ele realmente disse)"
+        required: true
+    exit_condition:
+      type: all_fields_filled
+    next_nodes:
+      - condition: "is_set('nome')"
+        target: qualificacao
+
+  - id: qualificacao
+    prompt: |
+      Você é a SDR da Manoela Mentora. O lead já disse o nome dele.
+      Cumprimente pelo nome em UMA frase, e pergunte de forma natural
+      qual é o faturamento mensal aproximado da empresa dele, em reais.
+      Tom: amigável, consultivo, sem pressão.
+    collects:
+      - field: faturamento_mensal
+        type: number
+        extraction_hint: "valor mensal em R$, em número (sem 'R$' nem 'mil')"
+        required: true
+    exit_condition:
+      type: rule_expression
+      expression: "faturamento_mensal != None"
+    next_nodes:
+      - condition: "true"
+        target: END
+
+# Plano 9 follow-up: bloco omitido intencionalmente neste stub.
+# Quando registrar templates HSM aprovados no Meta Business Manager, copie
+# o bloco follow_up de tenants/example/treeflows/example.yaml e habilite.
