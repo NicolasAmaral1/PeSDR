@@ -10,13 +10,18 @@ Returns @dataclass types (not Pydantic) — config plumbing, not LLM I/O.
 
 from __future__ import annotations
 
+import logging as _logging
 from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any
 
 import isodate
 import yaml
+from jinja2 import TemplateSyntaxError
+from jinja2.sandbox import SandboxedEnvironment
 from simpleeval import SimpleEval
+
+_TEMPLATE_PARSE_ENV = SandboxedEnvironment()
 
 
 class TreeflowLoadError(ValueError):
@@ -68,6 +73,16 @@ class TreeflowObjection:
     tool_payload: TreeflowToolPayload | None = None
 
 
+@dataclass(frozen=True)
+class OnCollectedAction:
+    """A side-effect fired when a node field is collected (FE-03c §4)."""
+
+    field: str
+    adapter: str
+    handler: str
+    params: dict[str, Any] = field(default_factory=dict)
+
+
 @dataclass
 class TreeflowCompletionRule:
     expression: str
@@ -90,6 +105,7 @@ class TreeflowNode:
     exit_condition: TreeflowExitCondition
     next_nodes: list[TreeflowTransition]
     handles_objections: list[TreeflowObjection] = field(default_factory=list)
+    on_collected: list[OnCollectedAction] = field(default_factory=list)
 
 
 @dataclass
@@ -227,6 +243,84 @@ def _parse_talk_lifecycle(raw: dict[str, Any] | None) -> TreeflowTalkLifecycle |
     )
 
 
+def _validate_template_syntax(node_id: str, idx: int, params: Any) -> None:
+    def walk(node: Any) -> None:
+        if isinstance(node, str):
+            try:
+                _TEMPLATE_PARSE_ENV.parse(node)
+            except TemplateSyntaxError as exc:
+                raise TreeflowLoadError(
+                    f"node {node_id!r}: on_collected[{idx}].params template syntax error: {exc}"
+                ) from exc
+        elif isinstance(node, dict):
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+
+    walk(params)
+
+
+def _parse_on_collected(
+    node_id: str,
+    collect_fields: set[str],
+    raw_list: Any,
+) -> list[OnCollectedAction]:
+    if raw_list is None:
+        return []
+    if not isinstance(raw_list, list):
+        raise TreeflowLoadError(
+            f"node {node_id!r}: on_collected must be a list, got {type(raw_list).__name__}"
+        )
+    result: list[OnCollectedAction] = []
+    for idx, raw in enumerate(raw_list):
+        if not isinstance(raw, dict):
+            raise TreeflowLoadError(f"node {node_id!r}: on_collected[{idx}] must be a mapping")
+        field_name = raw.get("field")
+        if not field_name or not isinstance(field_name, str):
+            raise TreeflowLoadError(f"node {node_id!r}: on_collected[{idx}].field is required")
+        if field_name not in collect_fields:
+            raise TreeflowLoadError(
+                f"node {node_id!r}: on_collected[{idx}].field {field_name!r} not in node.collects"
+            )
+        adapter = raw.get("adapter")
+        if not adapter or not isinstance(adapter, str):
+            raise TreeflowLoadError(f"node {node_id!r}: on_collected[{idx}].adapter is required")
+        handler = raw.get("handler")
+        if not handler or not isinstance(handler, str):
+            raise TreeflowLoadError(f"node {node_id!r}: on_collected[{idx}].handler is required")
+        params = raw.get("params") or {}
+        if not isinstance(params, dict):
+            raise TreeflowLoadError(
+                f"node {node_id!r}: on_collected[{idx}].params must be a mapping"
+            )
+        _validate_template_syntax(node_id, idx, params)
+
+        # Lazy import to avoid circular deps when this file loads before
+        # flowengine.actions is imported.
+        try:
+            from ai_sdr.flowengine.actions.registry import ACTION_ADAPTERS  # noqa: PLC0415
+        except ImportError:
+            ACTION_ADAPTERS: dict[str, Any] = {}
+        if adapter not in ACTION_ADAPTERS:
+            _logging.getLogger(__name__).warning(
+                "treeflow.on_collected.unknown_adapter node=%s adapter=%s",
+                node_id,
+                adapter,
+            )
+
+        result.append(
+            OnCollectedAction(
+                field=field_name,
+                adapter=adapter,
+                handler=handler,
+                params=params,
+            )
+        )
+    return result
+
+
 def _parse_node(raw: dict[str, Any]) -> TreeflowNode:
     required = {"id", "objetivo", "collects", "exit_condition", "next_nodes"}
     missing = required - raw.keys()
@@ -257,6 +351,9 @@ def _parse_node(raw: dict[str, Any]) -> TreeflowNode:
 
     handles_objections = [_parse_objection(o) for o in raw.get("handles_objections", [])]
 
+    collect_field_names = {c.field for c in collects}
+    actions = _parse_on_collected(raw["id"], collect_field_names, raw.get("on_collected"))
+
     return TreeflowNode(
         id=raw["id"],
         objetivo=raw["objetivo"],
@@ -265,6 +362,7 @@ def _parse_node(raw: dict[str, Any]) -> TreeflowNode:
         exit_condition=exit_cond,
         next_nodes=transitions,
         handles_objections=handles_objections,
+        on_collected=actions,
     )
 
 
