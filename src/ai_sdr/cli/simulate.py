@@ -312,13 +312,21 @@ async def _run_v2(
                 )
             ).scalar_one_or_none()
             if dev_lead is None:
+                phone = f"+5511{uuid.uuid4().int % 10**9:09d}"
                 dev_lead = Lead(
                     tenant_id=t.id,
                     external_label=lead_label,
                     status="active",
-                    whatsapp_e164=f"+5511{uuid.uuid4().int % 10**9:09d}",
+                    whatsapp_e164=phone,
+                    # v2 preprocessing resolves leads by channel_identifiers
+                    # (find_by_channel_identifier) — must match or run_turn
+                    # will try to INSERT a duplicate and hit uq_leads_tenant_wa.
+                    channel_identifiers={"whatsapp": phone},
                 )
                 session.add(dev_lead)
+            elif not dev_lead.channel_identifiers and dev_lead.whatsapp_e164:
+                # Backfill dev leads created before this fix.
+                dev_lead.channel_identifiers = {"whatsapp": dev_lead.whatsapp_e164}
 
         tenant_id = t.id
         tfv_id = tfv.id
