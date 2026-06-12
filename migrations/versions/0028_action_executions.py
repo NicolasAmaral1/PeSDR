@@ -54,7 +54,7 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.text("now()"),
         ),
-        sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"]),
+        sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["talk_id"], ["talks.id"], ondelete="CASCADE"),
         sa.CheckConstraint(
             "status IN (" + ", ".join(f"'{v}'" for v in ALL_STATUSES) + ")",

@@ -47,3 +47,12 @@ def test_last_error_nullable():
 
 def test_external_id_nullable():
     assert ActionExecution.__table__.c.external_id.nullable is True
+
+
+def test_status_not_nullable():
+    assert ActionExecution.__table__.c.status.nullable is False
+
+
+def test_dedup_unique_constraint_exists():
+    names = {c.name for c in ActionExecution.__table__.constraints if c.name}
+    assert "uq_action_executions_dedup" in names
