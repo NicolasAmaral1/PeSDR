@@ -347,22 +347,26 @@ async def _run_v2(
             break
 
         async with sm() as session:
-            async with session.begin():
-                await set_tenant_context(session, tenant_id)
-                t = (
-                    await session.execute(select(Tenant).where(Tenant.id == tenant_id))
-                ).scalar_one()
-                tfv = (
-                    await session.execute(
-                        select(TreeflowVersion).where(TreeflowVersion.id == tfv_id)
-                    )
-                ).scalar_one()
-                await simulate_v2_turn(
-                    session=session,
-                    tenant=t,
-                    treeflow_version=tfv,
-                    lead_phone=lead_phone,
-                    inbound_text=user_msg,
+            # NO outer session.begin() here: run_turn manages its own
+            # transaction (FE-03a T29 §9.1) — it commits any in-flight tx
+            # and opens a fresh one, which would invalidate an enclosing
+            # context manager. Autobegin covers the statements below;
+            # run_turn commits them as the preprocessing boundary.
+            await set_tenant_context(session, tenant_id)
+            t = (
+                await session.execute(select(Tenant).where(Tenant.id == tenant_id))
+            ).scalar_one()
+            tfv = (
+                await session.execute(
+                    select(TreeflowVersion).where(TreeflowVersion.id == tfv_id)
                 )
+            ).scalar_one()
+            await simulate_v2_turn(
+                session=session,
+                tenant=t,
+                treeflow_version=tfv,
+                lead_phone=lead_phone,
+                inbound_text=user_msg,
+            )
 
     await engine.dispose()
