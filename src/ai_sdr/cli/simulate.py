@@ -94,6 +94,7 @@ async def simulate_v2_turn(
     result = await run_turn(
         session,
         tenant=tenant,
+        tenant_cfg=tenant_cfg,
         treeflow=treeflow,
         treeflow_version=treeflow_version,
         inbound=inbound,
@@ -311,13 +312,21 @@ async def _run_v2(
                 )
             ).scalar_one_or_none()
             if dev_lead is None:
+                phone = f"+5511{uuid.uuid4().int % 10**9:09d}"
                 dev_lead = Lead(
                     tenant_id=t.id,
                     external_label=lead_label,
                     status="active",
-                    whatsapp_e164=f"+5511{uuid.uuid4().int % 10**9:09d}",
+                    whatsapp_e164=phone,
+                    # v2 preprocessing resolves leads by channel_identifiers
+                    # (find_by_channel_identifier) — must match or run_turn
+                    # will try to INSERT a duplicate and hit uq_leads_tenant_wa.
+                    channel_identifiers={"whatsapp": phone},
                 )
                 session.add(dev_lead)
+            elif not dev_lead.channel_identifiers and dev_lead.whatsapp_e164:
+                # Backfill dev leads created before this fix.
+                dev_lead.channel_identifiers = {"whatsapp": dev_lead.whatsapp_e164}
 
         tenant_id = t.id
         tfv_id = tfv.id
@@ -338,22 +347,26 @@ async def _run_v2(
             break
 
         async with sm() as session:
-            async with session.begin():
-                await set_tenant_context(session, tenant_id)
-                t = (
-                    await session.execute(select(Tenant).where(Tenant.id == tenant_id))
-                ).scalar_one()
-                tfv = (
-                    await session.execute(
-                        select(TreeflowVersion).where(TreeflowVersion.id == tfv_id)
-                    )
-                ).scalar_one()
-                await simulate_v2_turn(
-                    session=session,
-                    tenant=t,
-                    treeflow_version=tfv,
-                    lead_phone=lead_phone,
-                    inbound_text=user_msg,
+            # NO outer session.begin() here: run_turn manages its own
+            # transaction (FE-03a T29 §9.1) — it commits any in-flight tx
+            # and opens a fresh one, which would invalidate an enclosing
+            # context manager. Autobegin covers the statements below;
+            # run_turn commits them as the preprocessing boundary.
+            await set_tenant_context(session, tenant_id)
+            t = (
+                await session.execute(select(Tenant).where(Tenant.id == tenant_id))
+            ).scalar_one()
+            tfv = (
+                await session.execute(
+                    select(TreeflowVersion).where(TreeflowVersion.id == tfv_id)
                 )
+            ).scalar_one()
+            await simulate_v2_turn(
+                session=session,
+                tenant=t,
+                treeflow_version=tfv,
+                lead_phone=lead_phone,
+                inbound_text=user_msg,
+            )
 
     await engine.dispose()

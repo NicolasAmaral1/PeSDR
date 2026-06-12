@@ -1,23 +1,42 @@
+schema_version: 1
 id: qualificacao_inicial
-version: 0.1.0
-display_name: "Qualificação Inicial (Manoela — stub de validação E2E)"
+version: 0.2.1
+display_name: "Qualificação Inicial (Manoela — stub de validação E2E, arquitetura v2)"
 
-# STUB DE VALIDAÇÃO — funil mínimo viável pra testar o pipeline WhatsApp:
-#   mensagem chega → worker processa → LLM responde → adapter envia
+# STUB DE VALIDAÇÃO v2 — funil mínimo viável pra testar o pipeline FlowEngine:
+#   mensagem chega → worker (arch v2) → run_turn (1 LLM call) → humanização → adapter envia
 #
-# Sem KB e sem objections (intencional, pra simplificar primeiro teste).
-# Quando o E2E estiver validado, copie a estrutura rica de
-# tenants/example/treeflows/example.yaml (com KB + objections + critic).
+# Convertido do stub v1 (0.1.0, `prompt:`) pro schema FlowEngine v2
+# (`objetivo:` + `bridge_instruction:`) com showcase das features FE-03:
+#   - talk_lifecycle (FE-03b): close por inatividade/duração + completion rule
+#   - on_collected (FE-03c): action de teste via adapter `logging` (fake)
+#
+# Sem KB e sem objections (intencional, pra simplificar o primeiro E2E).
+# Quando o funil real da Manoela for autorado, este arquivo vira template.
+
+sdr_persona:
+  voice: |
+    Tom PT-BR informal e caloroso, frases curtas, jeito brasileiro de conversar
+    no WhatsApp. Sem formalismo corporativo, sem emoji excessivo.
+  conduct: |
+    1. Sempre reconheça o que o lead disse antes de perguntar a próxima coisa.
+    2. Nunca invente preços, produtos ou promessas fora do que foi configurado.
+    3. Em dúvida factual, diga "vou confirmar com a equipe e te retorno".
+    4. UMA pergunta por mensagem — nunca metralhadora de perguntas.
+  examples:
+    - context: "lead pergunta preço logo na primeira mensagem"
+      bad_response: "A Mentoria custa R$ 6.000."
+      good_response: "Já te falo de valores! Antes, me conta rapidinho — qual seu momento de negócio hoje?"
+      why: "preço sem contexto de valor vira objeção imediata"
 
 entry_node: saudacao
 
 nodes:
   - id: saudacao
-    prompt: |
-      Você é a SDR digital da Manoela Mentora, conversando no WhatsApp em PT-BR.
-      Esta é a primeira mensagem do lead. Cumprimente em UMA frase curta,
-      brasileira, sem formalismo. Pergunte o primeiro nome do lead.
-      Tom: amigável, próximo. Frases curtas.
+    objetivo: "Cumprimentar o lead em PT-BR informal e coletar o primeiro nome."
+    bridge_instruction: |
+      Primeira mensagem do lead. Cumprimente em UMA frase curta, brasileira,
+      sem formalismo, e pergunte o primeiro nome. Tom: amigável, próximo.
     collects:
       - field: nome
         type: text
@@ -30,23 +49,40 @@ nodes:
         target: qualificacao
 
   - id: qualificacao
-    prompt: |
-      Você é a SDR da Manoela Mentora. O lead já disse o nome dele.
-      Cumprimente pelo nome em UMA frase, e pergunte de forma natural
-      qual é o faturamento mensal aproximado da empresa dele, em reais.
-      Tom: amigável, consultivo, sem pressão.
+    objetivo: "Descobrir o faturamento mensal aproximado do negócio do lead."
+    bridge_instruction: |
+      O lead já disse o nome. Cumprimente pelo nome em UMA frase e pergunte,
+      de forma natural e sem pressão, qual o faturamento mensal aproximado
+      da empresa dele, em reais. Tom: amigável, consultivo.
+      Quando o lead informar o faturamento: agradeça em UMA frase calorosa e
+      diga que a equipe da Manoela vai entrar em contato com os próximos
+      passos. NÃO mencione nomes de programas, produtos, preços ou faça
+      pitch — o funil termina aqui e a equipe humana assume.
     collects:
       - field: faturamento_mensal
         type: number
-        extraction_hint: "valor mensal em R$, em número (sem 'R$' nem 'mil')"
+        extraction_hint: "valor mensal em R$, em número (sem 'R$' nem 'mil' — ex: 50000)"
         required: true
     exit_condition:
       type: rule_expression
-      expression: "faturamento_mensal != None"
-    next_nodes:
-      - condition: "true"
-        target: END
+      expression: "faturamento_mensal is not None"
+    next_nodes: []
+    # FE-03c showcase: quando faturamento é coletado, dispara action de teste.
+    # Adapter `logging` é o fake built-in — loga e retorna id determinístico.
+    # No funil real, vira create_deal no CRM (Plano 7).
+    on_collected:
+      - field: faturamento_mensal
+        adapter: logging
+        handler: register_lead_revenue
+        params:
+          lead_nome: "{{ collected.nome }}"
+          faturamento: "{{ collected.faturamento_mensal }}"
+          fonte: "qualificacao_inicial"
 
-# Plano 9 follow-up: bloco omitido intencionalmente neste stub.
-# Quando registrar templates HSM aprovados no Meta Business Manager, copie
-# o bloco follow_up de tenants/example/treeflows/example.yaml e habilite.
+# FE-03b showcase: lifecycle automático da Talk.
+talk_lifecycle:
+  close_after_inactivity: P2D     # 48h sem mensagem → closed_inactivity
+  close_after_duration: P14D      # 14 dias de Talk → closed_duration
+  close_when_completed:
+    - expression: "faturamento_mensal is not None"
+      outcome: success            # qualificação completa → closed_completed_success
