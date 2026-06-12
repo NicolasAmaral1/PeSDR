@@ -1,4 +1,8 @@
-"""RLS isolation on action_executions (FE-03c Task 14)."""
+"""RLS isolation on action_executions (FE-03c Task 14).
+
+Follows the sibling `test_leads_rls.py` pattern: COMMIT between
+phases so RLS evaluates against persisted rows under each tenant context.
+"""
 
 from __future__ import annotations
 
@@ -7,6 +11,8 @@ import uuid
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from ai_sdr.db.rls import set_tenant_context
 
 pytestmark = pytest.mark.integration
 
@@ -22,11 +28,10 @@ async def test_rls_blocks_cross_tenant_reads(db_session: AsyncSession) -> None:
             text("INSERT INTO tenants (id, slug, display_name) VALUES (:i, :s, :n)"),
             {"i": tid, "s": f"t-{tid.hex[:8]}", "n": "t"},
         )
+    await db_session.commit()
 
-    await db_session.execute(
-        text("SELECT set_config('app.current_tenant', :t, true)"),
-        {"t": str(tenant_a)},
-    )
+    # Seed tenant A's parent rows + an action_execution under A.
+    await set_tenant_context(db_session, tenant_a)
     talk_id = uuid.uuid4()
     lead_id = uuid.uuid4()
     tfv_id = uuid.uuid4()
@@ -58,17 +63,14 @@ async def test_rls_blocks_cross_tenant_reads(db_session: AsyncSession) -> None:
         ),
         {"ten": tenant_a, "tid": talk_id},
     )
+    await db_session.commit()
 
-    await db_session.execute(
-        text("SELECT set_config('app.current_tenant', :t, true)"),
-        {"t": str(tenant_b)},
-    )
-    result = await db_session.execute(text("SELECT COUNT(*) FROM action_executions"))
-    assert result.scalar() == 0
-
-    await db_session.execute(
-        text("SELECT set_config('app.current_tenant', :t, true)"),
-        {"t": str(tenant_a)},
-    )
+    # Tenant A sees its own row.
+    await set_tenant_context(db_session, tenant_a)
     result = await db_session.execute(text("SELECT COUNT(*) FROM action_executions"))
     assert result.scalar() == 1
+
+    # Tenant B sees zero (RLS isolates).
+    await set_tenant_context(db_session, tenant_b)
+    result = await db_session.execute(text("SELECT COUNT(*) FROM action_executions"))
+    assert result.scalar() == 0
