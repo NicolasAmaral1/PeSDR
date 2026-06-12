@@ -94,6 +94,7 @@ async def simulate_v2_turn(
     result = await run_turn(
         session,
         tenant=tenant,
+        tenant_cfg=tenant_cfg,
         treeflow=treeflow,
         treeflow_version=treeflow_version,
         inbound=inbound,
