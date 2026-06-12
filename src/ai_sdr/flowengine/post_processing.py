@@ -115,9 +115,7 @@ async def apply_decision(
     # state.current_node still points at the node where the LLM emitted the
     # collected_fields — that's the node whose on_collected we want to fire.
     node_spec_for_actions = treeflow.nodes.get(state.current_node)
-    if node_spec_for_actions is not None and getattr(
-        node_spec_for_actions, "on_collected", []
-    ):
+    if node_spec_for_actions is not None and getattr(node_spec_for_actions, "on_collected", []):
         lead_for_actions = await _load_lead_for_actions(session, talk.lead_id)
         if lead_for_actions is not None:
             from ai_sdr.worker.queue import enqueue_execute_action

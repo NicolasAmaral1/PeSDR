@@ -24,7 +24,7 @@ class LoggingActionAdapter(ActionAdapter):
     async def execute(self, *, handler: str, params: dict[str, Any]) -> ActionResult:
         logger.info(
             "logging_adapter.executed tenant=%s handler=%s params=%s",
-            getattr(self.tenant, "slug", "?"),
+            getattr(self.tenant, "id", "?"),
             handler,
             params,
         )

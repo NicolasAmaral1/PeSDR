@@ -16,8 +16,15 @@ def test_insert_pending_is_async():
     assert inspect.iscoroutinefunction(ActionExecutionRepository.insert_pending)
     params = list(sig.parameters)
     assert params == [
-        "self", "tenant_id", "talk_id", "node_id", "field",
-        "value_hash", "adapter_name", "handler", "params_resolved",
+        "self",
+        "tenant_id",
+        "talk_id",
+        "node_id",
+        "field",
+        "value_hash",
+        "adapter_name",
+        "handler",
+        "params_resolved",
     ]
 
 

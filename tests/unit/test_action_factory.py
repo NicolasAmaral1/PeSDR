@@ -24,7 +24,8 @@ def reset_registry():
 
 
 def _stub_tenant(slug="example"):
-    return SimpleNamespace(slug=slug)
+    # TenantConfig.id IS the slug.
+    return SimpleNamespace(id=slug, slug=slug)
 
 
 def test_build_instantiates_registered_adapter():
@@ -52,7 +53,7 @@ def test_build_instantiates_registered_adapter():
         adapter = build_action_adapter("factory_test", _stub_tenant("acme"))
 
     assert isinstance(adapter, FactoryTestAdapter)
-    assert constructed_with["tenant"].slug == "acme"
+    assert constructed_with["tenant"].id == "acme"
     assert constructed_with["secrets"] == fake_secrets
 
 

@@ -13,42 +13,52 @@ import pytest
 @pytest.mark.asyncio
 async def test_apply_decision_calls_dispatch_actions_when_on_collected_present():
     """apply_decision must invoke dispatch_actions after merging collected_fields."""
-    with patch(
-        "ai_sdr.flowengine.post_processing.flag_modified",
-    ), patch(
-        "ai_sdr.flowengine.post_processing.dispatch_actions",
-        AsyncMock(),
-    ) as mock_dispatch, patch(
-        "ai_sdr.flowengine.post_processing.apply_objection_state",
-        return_value=SimpleNamespace(
-            changes_treatment=False,
-            new_active_treatment=None,
-            appended_objection_history=[],
-            events=[],
-            requires_review_reason=None,
+    with (
+        patch(
+            "ai_sdr.flowengine.post_processing.flag_modified",
         ),
-    ), patch(
-        "ai_sdr.flowengine.post_processing.apply_contradiction_heuristic",
-        side_effect=lambda d: (d, []),
-    ), patch(
-        "ai_sdr.flowengine.post_processing.detect_implicit_transition",
-        return_value=[],
-    ), patch(
-        "ai_sdr.flowengine.post_processing.evaluate_completion_rule",
-        return_value=None,
-    ), patch(
-        "ai_sdr.flowengine.post_processing.handle_offtopic",
-        return_value=(0, None),
-    ), patch(
-        "ai_sdr.flowengine.post_processing.resolve_escalation_reason",
-        return_value=None,
-    ), patch(
-        "ai_sdr.flowengine.post_processing.TalkFlowStateRepository"
-    ) as MockRepo, patch(
-        "ai_sdr.flowengine.post_processing._emit_events"
-    ), patch(
-        "ai_sdr.flowengine.post_processing._load_lead_for_actions",
-        AsyncMock(return_value=SimpleNamespace(id=uuid4(), whatsapp_e164="+1", external_label="x")),
+        patch(
+            "ai_sdr.flowengine.post_processing.dispatch_actions",
+            AsyncMock(),
+        ) as mock_dispatch,
+        patch(
+            "ai_sdr.flowengine.post_processing.apply_objection_state",
+            return_value=SimpleNamespace(
+                changes_treatment=False,
+                new_active_treatment=None,
+                appended_objection_history=[],
+                events=[],
+                requires_review_reason=None,
+            ),
+        ),
+        patch(
+            "ai_sdr.flowengine.post_processing.apply_contradiction_heuristic",
+            side_effect=lambda d: (d, []),
+        ),
+        patch(
+            "ai_sdr.flowengine.post_processing.detect_implicit_transition",
+            return_value=[],
+        ),
+        patch(
+            "ai_sdr.flowengine.post_processing.evaluate_completion_rule",
+            return_value=None,
+        ),
+        patch(
+            "ai_sdr.flowengine.post_processing.handle_offtopic",
+            return_value=(0, None),
+        ),
+        patch(
+            "ai_sdr.flowengine.post_processing.resolve_escalation_reason",
+            return_value=None,
+        ),
+        patch("ai_sdr.flowengine.post_processing.TalkFlowStateRepository") as MockRepo,
+        patch("ai_sdr.flowengine.post_processing._emit_events"),
+        patch(
+            "ai_sdr.flowengine.post_processing._load_lead_for_actions",
+            AsyncMock(
+                return_value=SimpleNamespace(id=uuid4(), whatsapp_e164="+1", external_label="x")
+            ),
+        ),
     ):
         MockRepo.return_value.append_message = AsyncMock()
 
@@ -56,9 +66,7 @@ async def test_apply_decision_calls_dispatch_actions_when_on_collected_present()
 
         node = SimpleNamespace(
             id="n1",
-            on_collected=[
-                SimpleNamespace(field="x", adapter="logging", handler="h", params={})
-            ],
+            on_collected=[SimpleNamespace(field="x", adapter="logging", handler="h", params={})],
         )
         treeflow = SimpleNamespace(
             nodes={"n1": node},
@@ -121,39 +129,46 @@ async def test_apply_decision_calls_dispatch_actions_when_on_collected_present()
 @pytest.mark.asyncio
 async def test_apply_decision_skips_dispatch_when_no_on_collected():
     """No on_collected on node → dispatch_actions NOT invoked (perf optimization)."""
-    with patch(
-        "ai_sdr.flowengine.post_processing.flag_modified",
-    ), patch(
-        "ai_sdr.flowengine.post_processing.dispatch_actions",
-        AsyncMock(),
-    ) as mock_dispatch, patch(
-        "ai_sdr.flowengine.post_processing.apply_objection_state",
-        return_value=SimpleNamespace(
-            changes_treatment=False,
-            new_active_treatment=None,
-            appended_objection_history=[],
-            events=[],
-            requires_review_reason=None,
+    with (
+        patch(
+            "ai_sdr.flowengine.post_processing.flag_modified",
         ),
-    ), patch(
-        "ai_sdr.flowengine.post_processing.apply_contradiction_heuristic",
-        side_effect=lambda d: (d, []),
-    ), patch(
-        "ai_sdr.flowengine.post_processing.detect_implicit_transition",
-        return_value=[],
-    ), patch(
-        "ai_sdr.flowengine.post_processing.evaluate_completion_rule",
-        return_value=None,
-    ), patch(
-        "ai_sdr.flowengine.post_processing.handle_offtopic",
-        return_value=(0, None),
-    ), patch(
-        "ai_sdr.flowengine.post_processing.resolve_escalation_reason",
-        return_value=None,
-    ), patch(
-        "ai_sdr.flowengine.post_processing.TalkFlowStateRepository"
-    ) as MockRepo, patch(
-        "ai_sdr.flowengine.post_processing._emit_events"
+        patch(
+            "ai_sdr.flowengine.post_processing.dispatch_actions",
+            AsyncMock(),
+        ) as mock_dispatch,
+        patch(
+            "ai_sdr.flowengine.post_processing.apply_objection_state",
+            return_value=SimpleNamespace(
+                changes_treatment=False,
+                new_active_treatment=None,
+                appended_objection_history=[],
+                events=[],
+                requires_review_reason=None,
+            ),
+        ),
+        patch(
+            "ai_sdr.flowengine.post_processing.apply_contradiction_heuristic",
+            side_effect=lambda d: (d, []),
+        ),
+        patch(
+            "ai_sdr.flowengine.post_processing.detect_implicit_transition",
+            return_value=[],
+        ),
+        patch(
+            "ai_sdr.flowengine.post_processing.evaluate_completion_rule",
+            return_value=None,
+        ),
+        patch(
+            "ai_sdr.flowengine.post_processing.handle_offtopic",
+            return_value=(0, None),
+        ),
+        patch(
+            "ai_sdr.flowengine.post_processing.resolve_escalation_reason",
+            return_value=None,
+        ),
+        patch("ai_sdr.flowengine.post_processing.TalkFlowStateRepository") as MockRepo,
+        patch("ai_sdr.flowengine.post_processing._emit_events"),
     ):
         MockRepo.return_value.append_message = AsyncMock()
 

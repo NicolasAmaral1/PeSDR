@@ -1,4 +1,5 @@
 """ActionStatus Literal exports canonical enum values (FE-03c Task 1)."""
+
 from __future__ import annotations
 
 from ai_sdr.models.action_status import ALL_STATUSES, ActionStatus
@@ -28,4 +29,4 @@ def test_literal_matches_tuple():
     """ALL_STATUSES is the canonical tuple — derived from the Literal via get_args."""
     from typing import get_args
 
-    assert ALL_STATUSES == get_args(ActionStatus)
+    assert get_args(ActionStatus) == ALL_STATUSES

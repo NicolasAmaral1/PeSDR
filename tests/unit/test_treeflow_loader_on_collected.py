@@ -76,7 +76,7 @@ def test_on_collected_empty_list_when_missing():
         "        adapter: logging\n"
         "        handler: schedule_event\n"
         "        params:\n"
-        "          title: \"Demo {{ collected.nome }}\"\n"
+        '          title: "Demo {{ collected.nome }}"\n'
         "          duration_minutes: 30\n",
         "",
     )
@@ -128,9 +128,9 @@ def test_on_collected_must_be_a_list():
         "        adapter: logging\n"
         "        handler: schedule_event\n"
         "        params:\n"
-        "          title: \"Demo {{ collected.nome }}\"\n"
+        '          title: "Demo {{ collected.nome }}"\n'
         "          duration_minutes: 30\n",
-        "    on_collected: \"oops, not a list\"\n",
+        '    on_collected: "oops, not a list"\n',
     )
     with pytest.raises(TreeflowLoadError, match="must be a list"):
         load_treeflow_v2(yaml)

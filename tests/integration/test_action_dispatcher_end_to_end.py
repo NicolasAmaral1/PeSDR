@@ -14,7 +14,10 @@ pytestmark = pytest.mark.asyncio
 
 
 async def test_turn_collecting_field_enqueues_action(
-    async_session, run_turn_harness, fake_llm_polite, tenant_factory,
+    async_session,
+    run_turn_harness,
+    fake_llm_polite,
+    tenant_factory,
 ):
     """Lead emits demo_data → action_executions row pending → worker → success."""
     fake_llm = fake_llm_polite(
@@ -32,7 +35,9 @@ async def test_turn_collecting_field_enqueues_action(
 
 
 async def test_same_value_twice_skips_duplicate(
-    async_session, run_turn_harness, fake_llm_polite,
+    async_session,
+    run_turn_harness,
+    fake_llm_polite,
 ):
     """Two turns both emit same demo_data → only 1 action_executions row."""
     fake_llm = fake_llm_polite(

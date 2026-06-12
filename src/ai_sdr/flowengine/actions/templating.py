@@ -47,9 +47,7 @@ def render_params(template: dict[str, Any], context: dict[str, Any]) -> dict[str
     return rendered
 
 
-def build_template_context(
-    state: Any, decision: Any, lead: Any, talk: Any
-) -> dict[str, Any]:
+def build_template_context(state: Any, decision: Any, lead: Any, talk: Any) -> dict[str, Any]:
     """Build the whitelisted context dict exposed to Jinja2.
 
     Whitelist scope: only fields adapters are expected to need.

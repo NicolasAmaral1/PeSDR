@@ -70,12 +70,16 @@ async def execute_action(ctx: dict[str, Any], execution_id_str: str) -> None:
             if is_terminal:
                 logger.error(
                     "action.failed execution=%s attempts=%d err=%s",
-                    execution_id, refresh.attempts, exc,
+                    execution_id,
+                    refresh.attempts,
+                    exc,
                 )
                 return
             logger.warning(
                 "action.retry execution=%s attempts=%d err=%s",
-                execution_id, refresh.attempts, exc,
+                execution_id,
+                refresh.attempts,
+                exc,
             )
             raise
 
@@ -88,18 +92,16 @@ async def execute_action(ctx: dict[str, Any], execution_id_str: str) -> None:
         await session.commit()
         logger.info(
             "action.executed execution=%s attempts=%d external_id=%s",
-            execution_id, refresh.attempts, result.external_id,
+            execution_id,
+            refresh.attempts,
+            result.external_id,
         )
 
 
-async def _refetch_locked(
-    session: AsyncSession, execution_id: UUID
-) -> ActionExecution | None:
+async def _refetch_locked(session: AsyncSession, execution_id: UUID) -> ActionExecution | None:
     return (
         await session.execute(
-            select(ActionExecution)
-            .where(ActionExecution.id == execution_id)
-            .with_for_update()
+            select(ActionExecution).where(ActionExecution.id == execution_id).with_for_update()
         )
     ).scalar_one_or_none()
 
@@ -110,8 +112,6 @@ async def _load_tenant_by_id(session: AsyncSession, tenant_id: uuid.UUID) -> Any
     Reuses the existing TenantLoader pattern (load by slug). Wrapper exists so
     tests can patch this symbol without monkey-patching TenantLoader.
     """
-    tenant_row = (
-        await session.execute(select(Tenant).where(Tenant.id == tenant_id))
-    ).scalar_one()
+    tenant_row = (await session.execute(select(Tenant).where(Tenant.id == tenant_id))).scalar_one()
     loader = TenantLoader(Path(get_settings().tenants_dir))
     return loader.load(tenant_row.slug)

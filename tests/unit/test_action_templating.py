@@ -29,9 +29,7 @@ def test_render_passthrough_scalars():
 
 def test_render_nested_dict():
     ctx = {"collected": {"nome": "Joana"}}
-    out = render_params(
-        {"notification": {"subject": "Olá {{ collected.nome }}"}}, ctx
-    )
+    out = render_params({"notification": {"subject": "Olá {{ collected.nome }}"}}, ctx)
     assert out == {"notification": {"subject": "Olá Joana"}}
 
 
@@ -81,7 +79,9 @@ def test_build_template_context_does_not_leak_tenant_id():
     state = SimpleNamespace(collected={}, extracted_facts={})
     decision = SimpleNamespace(collected_fields={})
     lead = SimpleNamespace(
-        id="l", whatsapp_e164="+1", external_label="x",
+        id="l",
+        whatsapp_e164="+1",
+        external_label="x",
         tenant_id="should-not-leak",
     )
     talk = SimpleNamespace(id="t", treeflow_id="tf", turn_count=0)

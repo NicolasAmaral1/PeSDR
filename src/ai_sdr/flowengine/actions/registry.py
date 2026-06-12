@@ -17,9 +17,7 @@ def register(adapter_cls: type[ActionAdapter]) -> type[ActionAdapter]:
     """Decorator: register an ActionAdapter under its `name` attribute."""
     name = getattr(adapter_cls, "name", None)
     if not name or not isinstance(name, str):
-        raise ValueError(
-            f"{adapter_cls.__name__} missing `name` class attribute"
-        )
+        raise ValueError(f"{adapter_cls.__name__} missing `name` class attribute")
     if name in ACTION_ADAPTERS:
         raise ValueError(f"adapter {name!r} already registered")
     ACTION_ADAPTERS[name] = adapter_cls

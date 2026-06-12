@@ -56,9 +56,12 @@ async def test_execution_not_found_returns_early(fake_ctx):
 async def test_success_path_marks_success_and_commits(fake_ctx):
     execution_id = uuid4()
     fake_execution = SimpleNamespace(
-        id=execution_id, tenant_id=uuid4(),
-        adapter_name="logging", handler="schedule_event",
-        params_resolved={"a": 1}, attempts=1,
+        id=execution_id,
+        tenant_id=uuid4(),
+        adapter_name="logging",
+        handler="schedule_event",
+        params_resolved={"a": 1},
+        attempts=1,
     )
     repo_mock = MagicMock()
     repo_mock.mark_executing = AsyncMock(return_value=fake_execution)
@@ -67,27 +70,31 @@ async def test_success_path_marks_success_and_commits(fake_ctx):
     adapter_mock = MagicMock()
     adapter_mock.execute = AsyncMock(return_value=ActionResult(external_id="ext-1"))
 
-    with patch(
-        "ai_sdr.worker.jobs.execute_action.ActionExecutionRepository",
-        return_value=repo_mock,
-    ), patch(
-        "ai_sdr.worker.jobs.execute_action.build_action_adapter",
-        return_value=adapter_mock,
-    ), patch(
-        "ai_sdr.worker.jobs.execute_action._load_tenant_by_id",
-        AsyncMock(return_value=SimpleNamespace(slug="t1")),
-    ), patch(
-        "ai_sdr.worker.jobs.execute_action.set_tenant_context",
-        AsyncMock(),
-    ), patch(
-        "ai_sdr.worker.jobs.execute_action._refetch_locked",
-        AsyncMock(return_value=fake_execution),
+    with (
+        patch(
+            "ai_sdr.worker.jobs.execute_action.ActionExecutionRepository",
+            return_value=repo_mock,
+        ),
+        patch(
+            "ai_sdr.worker.jobs.execute_action.build_action_adapter",
+            return_value=adapter_mock,
+        ),
+        patch(
+            "ai_sdr.worker.jobs.execute_action._load_tenant_by_id",
+            AsyncMock(return_value=SimpleNamespace(slug="t1")),
+        ),
+        patch(
+            "ai_sdr.worker.jobs.execute_action.set_tenant_context",
+            AsyncMock(),
+        ),
+        patch(
+            "ai_sdr.worker.jobs.execute_action._refetch_locked",
+            AsyncMock(return_value=fake_execution),
+        ),
     ):
         await execute_action(fake_ctx, str(execution_id))
 
-    adapter_mock.execute.assert_awaited_once_with(
-        handler="schedule_event", params={"a": 1}
-    )
+    adapter_mock.execute.assert_awaited_once_with(handler="schedule_event", params={"a": 1})
     repo_mock.mark_success.assert_awaited_once()
     assert repo_mock.mark_success.await_args.kwargs["external_id"] == "ext-1"
 
@@ -96,9 +103,12 @@ async def test_success_path_marks_success_and_commits(fake_ctx):
 async def test_retry_path_raises_so_arq_reenqueues(fake_ctx):
     execution_id = uuid4()
     fake_execution = SimpleNamespace(
-        id=execution_id, tenant_id=uuid4(),
-        adapter_name="logging", handler="x",
-        params_resolved={}, attempts=1,
+        id=execution_id,
+        tenant_id=uuid4(),
+        adapter_name="logging",
+        handler="x",
+        params_resolved={},
+        attempts=1,
     )
     repo_mock = MagicMock()
     repo_mock.mark_executing = AsyncMock(return_value=fake_execution)
@@ -107,22 +117,29 @@ async def test_retry_path_raises_so_arq_reenqueues(fake_ctx):
     adapter_mock = MagicMock()
     adapter_mock.execute = AsyncMock(side_effect=RuntimeError("boom"))
 
-    with patch(
-        "ai_sdr.worker.jobs.execute_action.ActionExecutionRepository",
-        return_value=repo_mock,
-    ), patch(
-        "ai_sdr.worker.jobs.execute_action.build_action_adapter",
-        return_value=adapter_mock,
-    ), patch(
-        "ai_sdr.worker.jobs.execute_action._load_tenant_by_id",
-        AsyncMock(return_value=SimpleNamespace(slug="t1")),
-    ), patch(
-        "ai_sdr.worker.jobs.execute_action.set_tenant_context",
-        AsyncMock(),
-    ), patch(
-        "ai_sdr.worker.jobs.execute_action._refetch_locked",
-        AsyncMock(return_value=fake_execution),
-    ), pytest.raises(RuntimeError, match="boom"):
+    with (
+        patch(
+            "ai_sdr.worker.jobs.execute_action.ActionExecutionRepository",
+            return_value=repo_mock,
+        ),
+        patch(
+            "ai_sdr.worker.jobs.execute_action.build_action_adapter",
+            return_value=adapter_mock,
+        ),
+        patch(
+            "ai_sdr.worker.jobs.execute_action._load_tenant_by_id",
+            AsyncMock(return_value=SimpleNamespace(slug="t1")),
+        ),
+        patch(
+            "ai_sdr.worker.jobs.execute_action.set_tenant_context",
+            AsyncMock(),
+        ),
+        patch(
+            "ai_sdr.worker.jobs.execute_action._refetch_locked",
+            AsyncMock(return_value=fake_execution),
+        ),
+        pytest.raises(RuntimeError, match="boom"),
+    ):
         await execute_action(fake_ctx, str(execution_id))
 
     repo_mock.mark_failed.assert_awaited_once()
@@ -133,9 +150,12 @@ async def test_retry_path_raises_so_arq_reenqueues(fake_ctx):
 async def test_terminal_failure_after_3_attempts(fake_ctx):
     execution_id = uuid4()
     fake_execution = SimpleNamespace(
-        id=execution_id, tenant_id=uuid4(),
-        adapter_name="logging", handler="x",
-        params_resolved={}, attempts=3,
+        id=execution_id,
+        tenant_id=uuid4(),
+        adapter_name="logging",
+        handler="x",
+        params_resolved={},
+        attempts=3,
     )
     repo_mock = MagicMock()
     repo_mock.mark_executing = AsyncMock(return_value=fake_execution)
@@ -144,21 +164,27 @@ async def test_terminal_failure_after_3_attempts(fake_ctx):
     adapter_mock = MagicMock()
     adapter_mock.execute = AsyncMock(side_effect=RuntimeError("boom"))
 
-    with patch(
-        "ai_sdr.worker.jobs.execute_action.ActionExecutionRepository",
-        return_value=repo_mock,
-    ), patch(
-        "ai_sdr.worker.jobs.execute_action.build_action_adapter",
-        return_value=adapter_mock,
-    ), patch(
-        "ai_sdr.worker.jobs.execute_action._load_tenant_by_id",
-        AsyncMock(return_value=SimpleNamespace(slug="t1")),
-    ), patch(
-        "ai_sdr.worker.jobs.execute_action.set_tenant_context",
-        AsyncMock(),
-    ), patch(
-        "ai_sdr.worker.jobs.execute_action._refetch_locked",
-        AsyncMock(return_value=fake_execution),
+    with (
+        patch(
+            "ai_sdr.worker.jobs.execute_action.ActionExecutionRepository",
+            return_value=repo_mock,
+        ),
+        patch(
+            "ai_sdr.worker.jobs.execute_action.build_action_adapter",
+            return_value=adapter_mock,
+        ),
+        patch(
+            "ai_sdr.worker.jobs.execute_action._load_tenant_by_id",
+            AsyncMock(return_value=SimpleNamespace(slug="t1")),
+        ),
+        patch(
+            "ai_sdr.worker.jobs.execute_action.set_tenant_context",
+            AsyncMock(),
+        ),
+        patch(
+            "ai_sdr.worker.jobs.execute_action._refetch_locked",
+            AsyncMock(return_value=fake_execution),
+        ),
     ):
         await execute_action(fake_ctx, str(execution_id))
 

@@ -237,6 +237,52 @@ docker exec ai_sdr_postgres psql -U ai_sdr_app -d ai_sdr \
                        closed_at=NULL, closed_reason=NULL, closed_by=NULL;"
 ```
 
+## FE-03c — On-Collected Actions + Adapter Framework
+
+- TreeFlow YAMLs declaram side-effects inline em `TreeflowNode.on_collected`:
+  ```yaml
+  nodes:
+    - id: agendamento_demo
+      collects:
+        - field: demo_data
+          type: text
+          required: true
+      on_collected:
+        - field: demo_data
+          adapter: logging
+          handler: schedule_event
+          params:
+            title: "Demo {{ collected.nome }}"
+            duration_minutes: 30
+  ```
+- Action dispara **assíncrono via worker arq** depois que LLM emite `collected_fields[field]`. Não bloqueia run_turn. Dispatch acontece em `post_processing.apply_decision` antes do current_node update (usa o nó pré-transição como contexto).
+- **Idempotência**: UNIQUE `(talk_id, field, value_hash)` em `action_executions` — mesma coleta (mesmo valor) = skip; correção (valor muda) = nova action. Hash = `sha256(canonical_json(value))`.
+- **Templating**: Jinja2 SandboxedEnvironment com `StrictUndefined`. Contexto exposto: `collected`, `extracted_facts`, `lead.{id, whatsapp_e164, external_label}`, `talk.{id, treeflow_id, turn_count}`. `tenant_id` é deliberadamente **não exposto**. Render rola no dispatcher (sync), `params_resolved` no DB já é o final — auditoria trivial.
+- **Adapter framework**: ABC `ActionAdapter` + registry (`@register` decorator) + factory (`build_action_adapter`). Adicionar novo adapter:
+  1. Subclasse `ActionAdapter`, set `name`, implementa `execute(handler, params)`.
+  2. Decora com `@register` (registry rejeita nome duplicado).
+  3. Importa o módulo em `src/ai_sdr/flowengine/actions/__init__.py` (side-effect).
+- **Adapters incluídos no MVP**: `logging` (fake/test, retorna fake id determinístico `fake-{handler}-{sha256[:8]}`). Adapters reais (Google Calendar, HubSpot, etc) ficam pra plano dedicado de produção.
+- **Falha**: 3 retries com backoff exponencial (5s, 30s — gerenciado pelo arq via `WorkerSettings.max_tries`). Após terminal: `status='failed'`, `last_error` (truncado a 1000 chars). Sem replay automático no MVP — operador investiga via SQL e abre plano se for sistêmico.
+- **Bump de version** obrigatório ao adicionar/mudar `on_collected` num TreeFlow já publicado (Plan 2 rule).
+- **Events estruturados** (structlog): `action.enqueued`, `action.executed`, `action.retry`, `action.failed`, `action.dispatch.skipped_duplicate`, `action.dispatch.template_render_failed`, `action.execution_not_found`.
+- **Validação load-time**: TreeflowLoader rejeita `field` inválido (não declarado em `collects`), `handler` vazio, `params` com sintaxe Jinja2 inválida. Adapter ausente do registry emite warning (não falha) — pode ser registrado em runtime.
+- **Queries operacionais**:
+  ```sql
+  -- Taxa de falha por adapter (24h)
+  SELECT adapter_name,
+         COUNT(*) FILTER (WHERE status='failed') * 100.0 / COUNT(*) AS pct_failed
+  FROM action_executions
+  WHERE created_at > now() - interval '1 day'
+  GROUP BY adapter_name;
+
+  -- Stuck jobs (worker crash?)
+  SELECT * FROM action_executions
+  WHERE status='executing' AND updated_at < now() - interval '5 minutes';
+  ```
+- **Cross-tenant worker**: `execute_action` faz `SET LOCAL row_security = off` pra lookup, depois `set_tenant_context` pra reads tenant-scoped (Tenant.slug → tenant.yaml + secrets via SopsLoader).
+- **Wipe pra dev fresh**: `docker exec ai_sdr_postgres psql -U ai_sdr_app -d ai_sdr -c "TRUNCATE action_executions;"`.
+
 ## Checkpointer notes
 
 - Tabelas do LangGraph (`checkpoints`, `checkpoint_writes`, `checkpoint_blobs`, `checkpoint_migrations`) são criadas pelo `ensure_checkpointer_schema()` no startup (chamado no lifespan da FastAPI e no `ai-sdr simulate`). Migration 0004 é só um stamp documental — NÃO cria as tabelas (a lib usa psycopg3, alembic env usa asyncpg).

@@ -23,5 +23,6 @@ def build_action_adapter(name: str, tenant: TenantConfig) -> ActionAdapter:
         raise UnknownAdapterError(f"adapter {name!r} not registered")
     cls = ACTION_ADAPTERS[name]
     secrets_loader = SopsLoader(Path(get_settings().tenants_dir))
-    secrets = secrets_loader.load(tenant.slug)
+    # TenantConfig.id is the slug — validated by SLUG_RE in schemas/tenant_yaml.py.
+    secrets = secrets_loader.load(tenant.id)
     return cls(tenant_config=tenant, secrets=secrets)

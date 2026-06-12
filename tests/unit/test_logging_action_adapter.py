@@ -17,7 +17,7 @@ def test_registered_under_logging_name():
 
 @pytest.mark.asyncio
 async def test_execute_returns_deterministic_fake_id():
-    tenant = SimpleNamespace(slug="t1")
+    tenant = SimpleNamespace(id="t1")
     adapter = LoggingActionAdapter(tenant_config=tenant, secrets={})
     r1 = await adapter.execute(handler="schedule_event", params={"a": 1})
     r2 = await adapter.execute(handler="schedule_event", params={"a": 1})
@@ -27,7 +27,7 @@ async def test_execute_returns_deterministic_fake_id():
 
 @pytest.mark.asyncio
 async def test_execute_includes_params_in_detail():
-    tenant = SimpleNamespace(slug="t1")
+    tenant = SimpleNamespace(id="t1")
     adapter = LoggingActionAdapter(tenant_config=tenant, secrets={})
     r = await adapter.execute(handler="x", params={"a": 1, "b": 2})
     assert r.detail == {"echo": {"a": 1, "b": 2}}
@@ -35,7 +35,7 @@ async def test_execute_includes_params_in_detail():
 
 @pytest.mark.asyncio
 async def test_execute_logs(caplog):
-    tenant = SimpleNamespace(slug="acme_test_slug")
+    tenant = SimpleNamespace(id="acme_test_slug")
     adapter = LoggingActionAdapter(tenant_config=tenant, secrets={})
     with caplog.at_level(logging.INFO):
         await adapter.execute(handler="schedule_event", params={"a": 1})

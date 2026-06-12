@@ -54,15 +54,9 @@ class ActionExecutionRepository:
         row = result.first()
         return row.id if row is not None else None
 
-    async def mark_executing(
-        self, execution_id: uuid.UUID
-    ) -> ActionExecution | None:
+    async def mark_executing(self, execution_id: uuid.UUID) -> ActionExecution | None:
         """SELECT FOR UPDATE + status='executing' + attempts+1. Returns row or None."""
-        stmt = (
-            select(ActionExecution)
-            .where(ActionExecution.id == execution_id)
-            .with_for_update()
-        )
+        stmt = select(ActionExecution).where(ActionExecution.id == execution_id).with_for_update()
         result = await self._session.execute(stmt)
         execution = result.scalar_one_or_none()
         if execution is None:
@@ -71,15 +65,11 @@ class ActionExecutionRepository:
         execution.attempts = (execution.attempts or 0) + 1
         return execution
 
-    async def mark_success(
-        self, execution: ActionExecution, *, external_id: str | None
-    ) -> None:
+    async def mark_success(self, execution: ActionExecution, *, external_id: str | None) -> None:
         execution.status = "success"
         execution.external_id = external_id
 
-    async def mark_failed(
-        self, execution: ActionExecution, *, error: str, terminal: bool
-    ) -> None:
+    async def mark_failed(self, execution: ActionExecution, *, error: str, terminal: bool) -> None:
         execution.last_error = (error or "")[:1000]
         if terminal:
             execution.status = "failed"

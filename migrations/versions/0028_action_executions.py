@@ -60,9 +60,7 @@ def upgrade() -> None:
             "status IN (" + ", ".join(f"'{v}'" for v in ALL_STATUSES) + ")",
             name="ck_action_executions_status",
         ),
-        sa.UniqueConstraint(
-            "talk_id", "field", "value_hash", name="uq_action_executions_dedup"
-        ),
+        sa.UniqueConstraint("talk_id", "field", "value_hash", name="uq_action_executions_dedup"),
     )
     op.create_index(
         "ix_action_executions_pending",
