@@ -80,13 +80,13 @@ def upgrade() -> None:
     op.execute("ALTER TABLE action_executions ENABLE ROW LEVEL SECURITY")
     op.execute("ALTER TABLE action_executions FORCE ROW LEVEL SECURITY")
     op.execute(
-        "CREATE POLICY tenant_isolation ON action_executions "
+        "CREATE POLICY action_executions_tenant_isolation ON action_executions "
         "USING (tenant_id = current_setting('app.current_tenant', true)::uuid)"
     )
 
 
 def downgrade() -> None:
-    op.execute("DROP POLICY IF EXISTS tenant_isolation ON action_executions")
+    op.execute("DROP POLICY IF EXISTS action_executions_tenant_isolation ON action_executions")
     op.drop_index("ix_action_executions_tenant_talk", table_name="action_executions")
     op.drop_index("ix_action_executions_pending", table_name="action_executions")
     op.drop_table("action_executions")
