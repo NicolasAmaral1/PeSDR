@@ -23,6 +23,7 @@ from ai_sdr.secrets.sops_loader import SopsLoader
 from ai_sdr.settings import get_settings
 from ai_sdr.tenant_loader.loader import TenantLoader
 from ai_sdr.treeflow.checkpointer import ensure_checkpointer_schema
+from ai_sdr.worker.jobs.execute_action import execute_action
 from ai_sdr.worker.jobs.follow_up_scanner import follow_up_scanner
 from ai_sdr.worker.jobs.inbound import process_lead_inbox
 from ai_sdr.worker.jobs.scan_talks import scan_active_talks
@@ -73,7 +74,7 @@ cron_jobs = [
 class WorkerSettings:
     """arq looks up class attributes by name."""
 
-    functions = [process_lead_inbox]
+    functions = [process_lead_inbox, execute_action]
     cron_jobs = cron_jobs
     on_startup = _on_startup
     on_shutdown = _on_shutdown

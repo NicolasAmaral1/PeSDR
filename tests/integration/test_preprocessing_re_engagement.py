@@ -1,4 +1,5 @@
 """preprocessing logs re_engagement when lead returns post-close (FE-03b Task 14)."""
+
 from __future__ import annotations
 
 import pytest
@@ -8,10 +9,12 @@ pytestmark = pytest.mark.integration
 
 @pytest.mark.asyncio
 async def test_re_engagement_log_emitted_when_previous_closed_talk_exists(
-    db_session, caplog,
+    db_session,
+    caplog,
 ):
     """When lead has a closed Talk and sends a new inbound, log re_engagement."""
     import logging
+
     # Minimal smoke test of the wire: caplog captures the logger.info call
     # from preprocessing when previously_closed is non-None.
     # Full E2E is in T17 integration contracts.
