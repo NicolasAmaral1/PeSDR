@@ -1,6 +1,6 @@
 schema_version: 1
 id: qualificacao_inicial
-version: 0.2.0
+version: 0.2.1
 display_name: "Qualificação Inicial (Manoela — stub de validação E2E, arquitetura v2)"
 
 # STUB DE VALIDAÇÃO v2 — funil mínimo viável pra testar o pipeline FlowEngine:
@@ -54,6 +54,10 @@ nodes:
       O lead já disse o nome. Cumprimente pelo nome em UMA frase e pergunte,
       de forma natural e sem pressão, qual o faturamento mensal aproximado
       da empresa dele, em reais. Tom: amigável, consultivo.
+      Quando o lead informar o faturamento: agradeça em UMA frase calorosa e
+      diga que a equipe da Manoela vai entrar em contato com os próximos
+      passos. NÃO mencione nomes de programas, produtos, preços ou faça
+      pitch — o funil termina aqui e a equipe humana assume.
     collects:
       - field: faturamento_mensal
         type: number
