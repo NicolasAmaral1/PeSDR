@@ -15,7 +15,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Text, func
+from sqlalchemy import DateTime, ForeignKey, Integer, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -35,8 +35,8 @@ class OutboundMessage(Base):
     )
     talkflow_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("talkflows.id", ondelete="CASCADE"),
         nullable=False,
+        comment="v1: talkflows.id (FK dropped in 0024); v2: talks.id reuse",
     )
     lead_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -67,6 +67,13 @@ class OutboundMessage(Base):
         ForeignKey("follow_up_jobs.id", ondelete="SET NULL"),
         nullable=True,
     )
+
+    media_type: Mapped[str] = mapped_column(Text(), nullable=False, server_default="text")
+    media_storage_key: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    audio_url: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    audio_duration_ms: Mapped[int | None] = mapped_column(Integer(), nullable=True)
+    synthesis_voice_id: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    voice_emotion: Mapped[str | None] = mapped_column(Text(), nullable=True)
 
     sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(

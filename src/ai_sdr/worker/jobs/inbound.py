@@ -19,11 +19,13 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import os
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import structlog
+import yaml
 from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -74,6 +76,60 @@ async def _fetch_next_queued(db: AsyncSession, lead_id: uuid.UUID) -> InboundMes
     ).scalar_one_or_none()
 
 
+def _concat_window_seconds() -> int:
+    """Read env each call so tests can monkeypatch without module reload."""
+    try:
+        return int(os.environ.get("WORKER_INBOUND_CONCAT_WINDOW_SECONDS", "2"))
+    except ValueError:
+        return 2
+
+
+async def _fetch_window_companions(
+    db: AsyncSession,
+    *,
+    lead_id: uuid.UUID,
+    head: InboundMessageRow,
+    window_seconds: int,
+) -> list[InboundMessageRow]:
+    """Return queued inbounds in ``[head.received_at, head.received_at + window]``.
+
+    Includes ``head`` itself. Rows are locked with ``FOR UPDATE`` to defend
+    against concurrent workers (the per-lead advisory lock already prevents
+    this in production, but the lock makes the semantic explicit and is
+    cheap). Caller is responsible for marking them ``processed``.
+    """
+    upper = head.received_at + timedelta(seconds=window_seconds)
+    rows = (
+        (
+            await db.execute(
+                select(InboundMessageRow)
+                .where(
+                    InboundMessageRow.lead_id == lead_id,
+                    InboundMessageRow.status == "queued",
+                    InboundMessageRow.processed_at.is_(None),
+                    InboundMessageRow.received_at >= head.received_at,
+                    InboundMessageRow.received_at <= upper,
+                )
+                .order_by(InboundMessageRow.received_at.asc())
+                .with_for_update()
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return list(rows)
+
+
+def _consolidate_inbound_text(rows: list[InboundMessageRow]) -> str:
+    """Concatenate inbound text/transcription with newline separator, in order."""
+    parts: list[str] = []
+    for r in rows:
+        body = (r.text or r.transcription or "").strip()
+        if body:
+            parts.append(body)
+    return "\n".join(parts)
+
+
 async def _mark_queued_as_skipped(db: AsyncSession, lead_id: uuid.UUID, reason: str) -> None:
     await db.execute(
         update(InboundMessageRow)
@@ -83,6 +139,312 @@ async def _mark_queued_as_skipped(db: AsyncSession, lead_id: uuid.UUID, reason: 
         )
         .values(status="error", error_detail=f"skipped: {reason}")
     )
+
+
+async def _run_v2_inbox(
+    db: AsyncSession,
+    *,
+    tenant: Tenant,
+    lead: Lead,
+    adapter,
+    tenant_uuid: uuid.UUID,
+) -> None:
+    """Drain queued inbound messages through FlowEngine run_turn (FE-01b).
+
+    Resolves tenant config + TreeflowVersion + LLM + GuardrailConfig
+    once per drain, then loops over queued rows in received_at ASC order.
+
+    FE-03a T31 (brecha B2): if an active Talk already exists for this
+    lead, the runtime MUST use the TreeflowVersion row recorded on that
+    Talk (`talks.treeflow_version_id`), NOT the latest published version
+    for the tenant. This preserves snapshot-at-open semantics so a
+    mid-conversation TreeFlow bump cannot break an ongoing Talk. For a
+    brand-new lead (no active Talk yet) we fall back to the latest
+    TreeflowVersion — that becomes the Talk's snapshot on creation.
+    """
+    from pathlib import Path
+
+    from ai_sdr.flowengine.llm_client import main_llm_for_tenant
+    from ai_sdr.flowengine.pipeline import run_turn
+    from ai_sdr.flowengine.treeflow_loader import TreeflowLoadError, load_treeflow_v2
+    from ai_sdr.guardrails.validator import GuardrailConfig
+    from ai_sdr.models.talk import Talk
+    from ai_sdr.models.treeflow_version import TreeflowVersion
+    from ai_sdr.repositories.talk_repository import TalkRepository
+    from ai_sdr.secrets.sops_loader import SopsLoader
+    from ai_sdr.settings import get_settings
+    from ai_sdr.tenant_loader.loader import TenantLoader
+
+    tdir = Path(get_settings().tenants_dir)
+    tenant_cfg = TenantLoader(tdir).load(tenant.slug)
+    secrets = SopsLoader(tdir).load(tenant.slug)
+
+    # FE-03a T31 §B2 — prefer the active Talk's recorded snapshot.
+    active_talk_for_resolution: Talk | None = None
+    try:
+        active_talk_for_resolution = await TalkRepository(db).find_active_for_lead(
+            tenant.id, lead.id
+        )
+    except Exception as lookup_err:
+        # Lookup failure here is not fatal — fall through to latest-by-tenant
+        # resolution; preprocessing will retry the lookup inside its own txn.
+        log.warning(
+            "worker.v2.snapshot_talk_lookup_failed",
+            tenant_id=str(tenant.id),
+            lead_id=str(lead.id),
+            err=str(lookup_err),
+        )
+
+    tfv: TreeflowVersion | None = None
+    if active_talk_for_resolution is not None:
+        tfv = (
+            await db.execute(
+                select(TreeflowVersion).where(
+                    TreeflowVersion.id == active_talk_for_resolution.treeflow_version_id
+                )
+            )
+        ).scalar_one_or_none()
+        if tfv is None:
+            # The Talk references a TreeflowVersion row that has been
+            # deleted (operator wipe, manual purge, etc.). Treat as the
+            # `treeflow_version_missing` escalation path — same handling
+            # as a corrupt YAML snapshot. We synthesize a load error to
+            # reuse the existing flagging code below.
+            log.warning(
+                "worker.v2.snapshot_row_missing",
+                tenant_id=str(tenant.id),
+                lead_id=str(lead.id),
+                talk_id=str(active_talk_for_resolution.id),
+                snapshot_id=str(active_talk_for_resolution.treeflow_version_id),
+            )
+            now = datetime.now(UTC)
+            try:
+                active_talk_for_resolution.status = "requires_review"
+                active_talk_for_resolution.requires_review_reason = "treeflow_version_missing"
+                active_talk_for_resolution.escalated_at = now
+                active_talk_for_resolution.escalation_category = "system_exhausted"
+                active_talk_for_resolution.escalation_reason = (
+                    "treeflow_version_missing: snapshot row gone"
+                )
+                await _mark_queued_as_skipped(
+                    db, lead.id, reason="treeflow_version_snapshot_missing"
+                )
+                await db.commit()
+            except Exception as commit_err:
+                log.warning(
+                    "worker.v2.snapshot_row_missing_commit_failed",
+                    tenant_id=str(tenant.id),
+                    lead_id=str(lead.id),
+                    err=str(commit_err),
+                )
+                with contextlib.suppress(Exception):
+                    await db.rollback()
+            return
+
+    if tfv is None:
+        tfv = (
+            await db.execute(
+                select(TreeflowVersion)
+                .where(TreeflowVersion.tenant_id == tenant.id)
+                .order_by(TreeflowVersion.created_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+    if tfv is None:
+        log.error(
+            "worker.v2_no_treeflow_version",
+            tenant_id=str(tenant.id),
+            lead_id=str(lead.id),
+        )
+        return
+
+    try:
+        treeflow = load_treeflow_v2(tfv.content_yaml)
+    except (TreeflowLoadError, yaml.YAMLError) as exc:
+        # The persisted TreeflowVersion snapshot can no longer be parsed
+        # into a TreeflowDef (corrupt YAML, schema drift, truncation, etc.).
+        # We can't safely run the turn — flag the active Talk for review if
+        # it exists, drain the queued inbounds as error so we don't retry,
+        # and bail. Per FE-03a spec §11 + §B2 (the dead preprocessing-side
+        # guard never fired because the YAML load happens here, before
+        # run_turn).
+        now = datetime.now(UTC)
+        try:
+            talks = TalkRepository(db)
+            active_talk: Talk | None = await talks.find_active_for_lead(tenant.id, lead.id)
+        except Exception as lookup_err:
+            active_talk = None
+            log.warning(
+                "worker.treeflow_load_failed_talk_lookup_failed",
+                tenant_id=str(tenant.id),
+                lead_id=str(lead.id),
+                err=str(lookup_err),
+            )
+        if active_talk is not None:
+            try:
+                active_talk.status = "requires_review"
+                active_talk.requires_review_reason = "treeflow_version_missing"
+                active_talk.escalated_at = now
+                active_talk.escalation_category = "system_exhausted"
+                active_talk.escalation_reason = f"treeflow_version_missing: {exc}"
+                log.warning(
+                    "worker.treeflow_load_failed",
+                    tenant_id=str(tenant.id),
+                    lead_id=str(lead.id),
+                    talk_id=str(active_talk.id),
+                    reason=str(exc),
+                )
+            except Exception as flag_err:
+                # Defensive: do not let a flagging glitch crash the worker.
+                log.warning(
+                    "worker.treeflow_load_failed_flag_failed",
+                    tenant_id=str(tenant.id),
+                    lead_id=str(lead.id),
+                    err=str(flag_err),
+                )
+        else:
+            # Brand-new lead, no Talk yet — nothing to flag. Operator must
+            # inspect the YAML by hand. Use critical level so it surfaces.
+            log.critical(
+                "worker.treeflow_load_failed_no_talk",
+                tenant_id=str(tenant.id),
+                lead_id=str(lead.id),
+                reason=str(exc),
+            )
+        # Mark any queued inbounds for this lead as error so the worker
+        # doesn't keep re-attempting. Operator can re-queue manually after
+        # fixing the YAML.
+        try:
+            await _mark_queued_as_skipped(db, lead.id, reason=f"treeflow_load_failed: {exc}")
+        except Exception as skip_err:
+            log.warning(
+                "worker.treeflow_load_failed_mark_skipped_failed",
+                tenant_id=str(tenant.id),
+                lead_id=str(lead.id),
+                err=str(skip_err),
+            )
+        try:
+            await db.commit()
+        except Exception as commit_err:
+            log.warning(
+                "worker.treeflow_load_failed_commit_failed",
+                tenant_id=str(tenant.id),
+                lead_id=str(lead.id),
+                err=str(commit_err),
+            )
+            with contextlib.suppress(Exception):
+                await db.rollback()
+        return
+    llm = main_llm_for_tenant(tenant_cfg.llm.default, secrets=secrets)
+
+    opt_out_keywords = (
+        list(tenant_cfg.conversation.optout_stop_words) if tenant_cfg.conversation else []
+    )
+    gcfg = tenant_cfg.guardrails
+    guardrail_cfg = GuardrailConfig(
+        disallowed_price_pattern=(gcfg.disallowed_price_pattern if gcfg else ""),
+        allowed_prices=[str(p) for p in (gcfg.allowed_prices if gcfg else [])],
+        allowed_products=list(gcfg.allowed_products) if gcfg else [],
+        fallback_text=(gcfg.fallback_text if gcfg else "Vou validar com a equipe."),
+    )
+
+    window_seconds = _concat_window_seconds()
+
+    while True:
+        msg = await _fetch_next_queued(db, lead.id)
+        if msg is None:
+            break
+
+        # FE-03a T30 §9.3 (brecha B1) — within the per-lead advisory lock,
+        # collapse any queued inbound burst within `window_seconds` of the
+        # head message into a single run_turn invocation. The original
+        # `msg.text` is rebound in-memory to the consolidated payload so
+        # downstream (`run_turn`, audit, etc.) sees the merged content.
+        # Companion rows are marked `processed` AFTER run_turn succeeds so
+        # transient failures roll back and the burst is retried on the
+        # next worker pass.
+        companions = await _fetch_window_companions(
+            db,
+            lead_id=lead.id,
+            head=msg,
+            window_seconds=window_seconds,
+        )
+        # `companions` always contains `msg` itself; ORM identity-map ensures
+        # the row instance is the same Python object so mutating `msg.text`
+        # is the same as mutating `companions[0].text` if msg is the head.
+        extras = [r for r in companions if r.id != msg.id]
+        original_text = msg.text
+        if extras:
+            consolidated = _consolidate_inbound_text(companions)
+            msg.text = consolidated
+            log.info(
+                "worker.v2.inbound_concat",
+                lead_id=str(lead.id),
+                head_id=str(msg.id),
+                companion_ids=[str(r.id) for r in extras],
+                window_seconds=window_seconds,
+            )
+
+        try:
+            result = await run_turn(
+                db,
+                tenant=tenant,
+                treeflow=treeflow,
+                treeflow_version=tfv,
+                inbound=msg,
+                llm=llm,
+                adapter=adapter,
+                opt_out_keywords=opt_out_keywords,
+                guardrail_cfg=guardrail_cfg,
+            )
+        except RecipientUnreachable as e:
+            # Restore the in-memory text so the persisted row reflects the
+            # actual user input that failed, not the merged payload.
+            msg.text = original_text
+            lead.status = "unreachable"
+            lead.unreachable_reason = f"unreachable: {e}"
+            msg.status = "error"
+            msg.error_detail = f"unreachable: {e}"
+            log.warning("worker.v2.recipient_unreachable", lead_id=str(lead.id), err=str(e))
+            await db.commit()
+            return
+        except (AuthError, PolicyError, WindowExpiredError, MessagingError) as e:
+            msg.text = original_text
+            msg.status = "error"
+            msg.error_detail = f"{type(e).__name__}: {e}"
+            log.error(
+                "worker.v2.messaging_error",
+                lead_id=str(lead.id),
+                err_type=type(e).__name__,
+                err=str(e),
+            )
+            await db.commit()
+            return
+
+        now_ts = datetime.now(UTC)
+        if result.outcome == "sent":
+            msg.status = "processed"
+            msg.processed_at = now_ts
+        elif result.outcome in ("opt_out", "lead_banned", "escalated"):
+            msg.status = "processed"
+            msg.processed_at = now_ts
+            msg.error_detail = f"v2_outcome: {result.outcome}"
+        else:
+            msg.status = "error"
+            msg.error_detail = f"v2_outcome: {result.outcome}"
+
+        # Mark companion rows as processed regardless of outcome — their
+        # content was merged into the run_turn call that just executed. On
+        # a fresh-error outcome the head row carries the failure marker; the
+        # companions are not re-tried because they were folded in.
+        for r in extras:
+            r.status = "processed"
+            r.processed_at = now_ts
+            r.error_detail = "concatenated_with_head"
+
+        await db.commit()
+        # Tenant context is transaction-local; re-set so the next fetch sees RLS rows.
+        await set_tenant_context(db, tenant_uuid)
 
 
 async def process_lead_inbox(ctx: dict[str, Any], tenant_id: str, lead_id: str) -> None:
@@ -147,6 +509,18 @@ async def process_lead_inbox(ctx: dict[str, Any], tenant_id: str, lead_id: str) 
                 return
 
             adapter = registry.get_for_tenant(tenant)
+
+            # FE-01b feature flag: route to FlowEngine v2 when architecture_version == 2.
+            if tenant.architecture_version == 2:
+                await _run_v2_inbox(
+                    db,
+                    tenant=tenant,
+                    lead=lead,
+                    adapter=adapter,
+                    tenant_uuid=tenant_uuid,
+                )
+                return
+            # else: fall through to existing v1 path unchanged
 
             # P9: lead responded — cancel pending follow-ups, reset counter,
             # reactivate cold talkflow.

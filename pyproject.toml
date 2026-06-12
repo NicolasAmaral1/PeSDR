@@ -115,4 +115,5 @@ addopts = "-ra --strict-markers"
 markers = [
     "integration: tests that require docker (postgres, redis)",
     "live_llm: tests that hit real LLM APIs (requires ANTHROPIC_API_KEY and/or OPENAI_API_KEY)",
+    "fresh_db: requires a transient fresh database (set TEST_FRESH_DB_URL)",
 ]

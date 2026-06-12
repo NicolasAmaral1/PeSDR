@@ -1,0 +1,30 @@
+schema_version: 1
+id: avelum_v2_node_obj
+version: 1.0.0
+sdr_persona:
+  voice: "PT-BR"
+  conduct: "1. Reconheça"
+entry_node: qualificacao
+nodes:
+  - id: qualificacao
+    objetivo: "Qualificar"
+    collects:
+      - field: faturamento
+        type: text
+        required: true
+    handles_objections:
+      - id: ja_tentei_curso_online
+        description: "lead diz que cursos online não funcionam pra ele"
+        treatment_mode: tool
+        tool_payload:
+          canonical_arguments_summary: "diferencial mentoria 1:1"
+          kb_ref: kb_diferencial
+          max_treatment_turns: 2
+          resolution_criteria: "lead aceitou diferencial"
+          on_max_turns_no_resolution:
+            action: gracefully_continue
+    exit_condition:
+      type: all_fields_filled
+    next_nodes:
+      - condition: "true"
+        target: qualificacao

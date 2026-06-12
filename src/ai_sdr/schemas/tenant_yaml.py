@@ -7,7 +7,7 @@ Later plans extend with crm, messaging, llm, media, guardrails, treeflows.
 from __future__ import annotations
 
 import re
-from typing import Literal, Self
+from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -44,15 +44,23 @@ class GuardrailsConfig(BaseModel):
     allowed_prices: list[int] = Field(default_factory=list)
     allowed_products: list[str] = Field(default_factory=list)
     critic_enabled: bool = True
-    fallback_text: str = Field(min_length=10)
+    fallback_text: str = ""
     max_retries: int = Field(default=2, ge=1, le=5)
+    disallowed_price_pattern: str = ""
 
     @model_validator(mode="after")
-    def _require_lists_when_enabled(self) -> Self:
-        if self.enabled and not self.allowed_prices and not self.allowed_products:
+    def _check_required_when_enabled(self) -> Self:
+        """FE-03a Task 10: spec §7.2 — allowed_products + fallback_text are
+        mandatory when guardrails are enabled. When disabled, the runner is
+        a passthrough so the lists may be empty.
+        """
+        if not self.enabled:
+            return self
+        if not self.allowed_products:
+            raise ValueError("guardrails.allowed_products must be non-empty when enabled")
+        if not self.fallback_text or len(self.fallback_text) < 10:
             raise ValueError(
-                "guardrails.enabled=true requires at least one of "
-                "allowed_prices or allowed_products to be non-empty"
+                "guardrails.fallback_text must be a non-empty string of >=10 chars when enabled"
             )
         return self
 
@@ -145,6 +153,9 @@ class TenantConfig(BaseModel):
     messaging: MessagingConfig | None = None
     guardrails: GuardrailsConfig | None = None
     objections: ObjectionsConfig | None = None  # Plan 4a
+    sdr_persona: dict[str, Any] | None = (
+        None  # FE-01b: pass-through slot (architecture_version stays in DB)
+    )
 
     @field_validator("id")
     @classmethod
