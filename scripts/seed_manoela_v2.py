@@ -43,59 +43,58 @@ async def main() -> None:
     version = str(meta["version"])
     content_hash = hashlib.sha256(yaml_text.encode()).hexdigest()
 
-    async with sm() as s:
-        async with s.begin():
-            tenant = (
-                await s.execute(select(Tenant).where(Tenant.slug == TENANT_SLUG))
-            ).scalar_one_or_none()
-            if tenant is None:
-                tenant = Tenant(
-                    slug=TENANT_SLUG,
-                    display_name=TENANT_DISPLAY,
-                    architecture_version=2,
-                )
-                s.add(tenant)
-                await s.flush()
-                print(f"[+] created tenant id={tenant.id} slug={TENANT_SLUG} arch_v=2")
-            elif tenant.architecture_version != 2:
-                old = tenant.architecture_version
-                tenant.architecture_version = 2
-                print(f"[~] tenant arch_v {old} -> 2")
-            else:
-                print(f"[=] tenant exists id={tenant.id} arch_v=2 already")
-
-            await s.execute(
-                text("SELECT set_config('app.current_tenant', :t, true)"),
-                {"t": str(tenant.id)},
+    async with sm() as s, s.begin():
+        tenant = (
+            await s.execute(select(Tenant).where(Tenant.slug == TENANT_SLUG))
+        ).scalar_one_or_none()
+        if tenant is None:
+            tenant = Tenant(
+                slug=TENANT_SLUG,
+                display_name=TENANT_DISPLAY,
+                architecture_version=2,
             )
+            s.add(tenant)
+            await s.flush()
+            print(f"[+] created tenant id={tenant.id} slug={TENANT_SLUG} arch_v=2")
+        elif tenant.architecture_version != 2:
+            old = tenant.architecture_version
+            tenant.architecture_version = 2
+            print(f"[~] tenant arch_v {old} -> 2")
+        else:
+            print(f"[=] tenant exists id={tenant.id} arch_v=2 already")
 
-            existing_tfv = (
-                await s.execute(
-                    select(TreeflowVersion).where(
-                        TreeflowVersion.tenant_id == tenant.id,
-                        TreeflowVersion.treeflow_id == treeflow_id,
-                        TreeflowVersion.version == version,
-                    )
-                )
-            ).scalar_one_or_none()
+        await s.execute(
+            text("SELECT set_config('app.current_tenant', :t, true)"),
+            {"t": str(tenant.id)},
+        )
 
-            if existing_tfv is None:
-                tfv = TreeflowVersion(
-                    tenant_id=tenant.id,
-                    treeflow_id=treeflow_id,
-                    version=version,
-                    content_hash=content_hash,
-                    content_yaml=yaml_text,
+        existing_tfv = (
+            await s.execute(
+                select(TreeflowVersion).where(
+                    TreeflowVersion.tenant_id == tenant.id,
+                    TreeflowVersion.treeflow_id == treeflow_id,
+                    TreeflowVersion.version == version,
                 )
-                s.add(tfv)
-                await s.flush()
-                print(f"[+] created TreeflowVersion id={tfv.id} treeflow={treeflow_id} v={version}")
-            elif existing_tfv.content_hash != content_hash:
-                existing_tfv.content_hash = content_hash
-                existing_tfv.content_yaml = yaml_text
-                print(f"[~] updated TreeflowVersion id={existing_tfv.id} (hash drift)")
-            else:
-                print(f"[=] TreeflowVersion exists id={existing_tfv.id} no drift")
+            )
+        ).scalar_one_or_none()
+
+        if existing_tfv is None:
+            tfv = TreeflowVersion(
+                tenant_id=tenant.id,
+                treeflow_id=treeflow_id,
+                version=version,
+                content_hash=content_hash,
+                content_yaml=yaml_text,
+            )
+            s.add(tfv)
+            await s.flush()
+            print(f"[+] created TreeflowVersion id={tfv.id} treeflow={treeflow_id} v={version}")
+        elif existing_tfv.content_hash != content_hash:
+            existing_tfv.content_hash = content_hash
+            existing_tfv.content_yaml = yaml_text
+            print(f"[~] updated TreeflowVersion id={existing_tfv.id} (hash drift)")
+        else:
+            print(f"[=] TreeflowVersion exists id={existing_tfv.id} no drift")
 
     await engine.dispose()
 
