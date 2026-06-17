@@ -1,0 +1,101 @@
+# TreeFlow DEMONSTRATIVO pra Manoela com on_collected: crm em cada node.
+#
+# DIFF vs tenants/manoela-mentora/treeflows/qualificacao_inicial.yaml atual:
+# - Adiciona on_collected: [adapter: crm] em saudacao e qualificacao
+# - Bump de version pra v0.3.0 (semver — adição de actions é breaking compat)
+#
+# Quando aprovar e implementar, o YAML REAL recebe APENAS os blocos
+# on_collected: (patch in-place no treeflow real).
+
+id: qualificacao_inicial
+version: 0.3.0
+display_name: "Qualificação Inicial (Manoela — com CRM sync)"
+
+# Configuração FlowEngine v2 já estabelecida em PR #19 (Manoela v2).
+# Mantém persona + lifecycle + everything else inalterado.
+
+# (sdr_persona block aqui — copia do real)
+# (talk_lifecycle block aqui — copia do real)
+
+entry_node: saudacao
+
+nodes:
+  - id: saudacao
+    objetivo: "Cumprimentar lead (pelo nome se pré-coletado via form) e perguntar nome se necessário."
+    bridge_instruction: "Tom amigável brasileiro. Sem formalismo."
+
+    collect:
+      - field: nome
+        required: true
+        # IMPORTANTE: nome pode vir PRÉ-COLETADO via form.
+        # Spec §2.3 — TalkFlowState.collected já tem nome quando Talk é criado por
+        # process_form_inbound. Exit_condition all_fields_filled é satisfeito no
+        # primeiro turno; node "pula" sem perguntar de novo.
+
+    # ═════════════════════════════════════════════════════════════════════
+    # NOVO BLOCO desta spec — dispara CRM action quando nome é coletado
+    # ═════════════════════════════════════════════════════════════════════
+    on_collected:
+      - field: nome
+        adapter: crm                           # vendor-agnostic (CRMActionAdapter)
+        handler: create_or_update_contact      # canônico — backend implementa
+        params:
+          lead_id: "{{ lead.id }}"
+          contact:
+            name: "{{ collected.nome }}"
+            phones:
+              - "{{ lead.whatsapp_e164 }}"
+            emails: []
+            custom_fields: {}
+
+    exit_condition: { type: all_fields_filled }
+    next_nodes:
+      - condition: "is_set('nome')"
+        target: qualificacao
+
+  - id: qualificacao
+    objetivo: "Perguntar faturamento mensal. Decidir entre oferta_premium ou oferta_basica."
+    bridge_instruction: "Lead já confirmou nome. Cumprimente pelo nome em UMA frase, depois pergunte faturamento."
+
+    collect:
+      - field: faturamento_mensal
+        required: true
+
+    # ═════════════════════════════════════════════════════════════════════
+    # NOVO BLOCO desta spec — cria Deal quando faturamento é coletado
+    # ═════════════════════════════════════════════════════════════════════
+    on_collected:
+      - field: faturamento_mensal
+        adapter: crm
+        handler: create_or_update_deal
+        params:
+          lead_id: "{{ lead.id }}"
+          # contact_external_id resolvido lendo Lead.crm_refs no backend.
+          # Spec §2.5 — backend faz lookup local de Lead.crm_refs.rdstation.contact_id.
+          # Aqui passamos via Jinja2 pra logging/debug; backend re-verifica.
+          contact_external_id: "{{ lead.crm_refs.rdstation.contact_id | default('') }}"
+          deal:
+            # Produto inicial sempre "Mentoria" (refinement em nodes futuros).
+            # TreeFlow autora decide se quer condicionar via expressão Jinja2.
+            product: "Mentoria"
+            stage: "open"
+            value: 6000
+            currency: "BRL"
+            qualification_notes: "Faturamento mensal estimado: R$ {{ collected.faturamento_mensal }}"
+            custom_fields:
+              faturamento_mensal: "{{ collected.faturamento_mensal }}"
+
+    exit_condition:
+      type: rule_expression
+      expression: "faturamento_mensal != None"
+
+    next_nodes:
+      # Roteamento pro próximo node decide oferta premium vs básica baseado
+      # no faturamento. Nodes oferta_* não estão neste demo — usar do TreeFlow real.
+      - condition: "faturamento_mensal >= 30000"
+        target: oferta_premium
+      - condition: "faturamento_mensal < 30000"
+        target: oferta_basica
+
+# Nodes oferta_premium e oferta_basica omitidos neste demo — quando integrar
+# real, copiar do TreeFlow atual (que já está em produção).

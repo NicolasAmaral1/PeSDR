@@ -1,0 +1,121 @@
+# tenant.yaml DEMONSTRATIVO pra Manoela com forms + crm integrados.
+#
+# DIFF vs tenants/manoela-mentora/tenant.yaml atual (em produção):
+# - id: muda pra "manoela-demo" pra não colidir com tenant real
+# - blocos novos: forms.respondi + crm.rdstation
+# - rest: idêntico ao tenant atual (LLM, guardrails, objections, console, schedule)
+#
+# Quando aprovar e implementar, o tenant REAL recebe APENAS os 2 blocos novos
+# (não duplica esse arquivo — patch in-place no manoela-mentora/tenant.yaml).
+
+id: "manoela-demo"
+display_name: "Manoela Mentora (DEMO)"
+timezone: "America/Sao_Paulo"
+
+schedule:
+  mon-fri: "08:00-22:00"
+  sat: "09:00-18:00"
+  sun: "off"
+  off_hours_behavior: "queue"
+
+conversation:
+  debounce_ms: 5000
+  optout_stop_words: ["para", "pare", "parar", "stop", "sair", "remove", "cancelar"]
+  optout_action: "end_conversation_silent"
+
+llm:
+  default:
+    provider: anthropic
+    model: claude-sonnet-4-6
+    temperature: 0.7
+    api_key_ref: secrets/anthropic_key
+  classifier:
+    provider: anthropic
+    model: claude-haiku-4-5
+    api_key_ref: secrets/anthropic_key
+  embeddings:
+    provider: openai
+    model: text-embedding-3-small
+    api_key_ref: secrets/openai_key
+  cache_enabled: true
+
+guardrails:
+  enabled: true
+  allowed_prices: [247, 1497, 1997, 2000, 6000]
+  allowed_products: ["Mentoria", "Aceleradora", "Downsell"]
+  critic_enabled: true
+  fallback_text: "Deixa eu confirmar esse valor com a equipe e já te respondo, ok?"
+  max_retries: 2
+
+messaging:
+  provider: whatsapp_cloud
+  phone_number_id_ref: secrets/wa_phone_id
+  access_token_ref: secrets/wa_token
+  webhook_verify_token_ref: secrets/wa_verify
+  app_secret_ref: secrets/wa_app_secret
+  api_version: v21.0
+
+objections:
+  enabled: true
+  min_confidence: 0.6
+  max_handled_per_lead: 10
+  history_window: 4
+
+console:
+  enabled: true
+
+# ═════════════════════════════════════════════════════════════════════════
+# NOVOS BLOCOS (esta spec) — Form ingestion + CRM out
+# ═════════════════════════════════════════════════════════════════════════
+
+forms:
+  respondi:
+    enabled: true
+    shared_secret_ref: secrets/respondi_webhook_secret
+    start_treeflow: qualificacao_inicial
+
+    # IDs das perguntas no form Respondi da Manoela.
+    # Substituir <qst_...> pelos question_id reais (obtidos via painel Respondi).
+    # NOTA: question_id é estável; question_title é mutável (operadora pode editar).
+    field_mapping:
+      qst_nome_aqui: nome
+      qst_phone_aqui: whatsapp_e164          # vai pra LeadIdentifier, não collected
+      qst_faturamento_aqui: faturamento_mensal
+      # opcionais:
+      # qst_momento_aqui: momento_profissional
+      # qst_email_aqui: email
+
+    # Mensagem proativa via template HSM (Plano 9 já implementou send_template).
+    # Template precisa ser PRE-APROVADO pelo Meta Business Manager.
+    proactive_first_message:
+      enabled: true
+      template_ref: "saudacao_proativa_v1"   # nome do template aprovado no Meta
+      language: pt_BR
+      params:
+        # {{1}} no template Meta substituído pelo primeiro nome (capitalizado)
+        - "{{ collected.nome | default('amigo') | capitalize }}"
+
+crm:
+  provider: rdstation
+
+  rdstation:
+    refresh_token_ref: secrets/rdstation_refresh_token
+    client_id_ref: secrets/rdstation_client_id
+    client_secret_ref: secrets/rdstation_client_secret
+
+    # Obtidos via painel RD Station depois de criar pipeline pra Manoela.
+    pipeline_id: "<rdstation_pipeline_id_aqui>"
+
+    # Mapping DealStage canônico ("open"|"won"|"lost") → stage_id no RD Station.
+    # IDs específicos por pipeline — pegar no painel RD Station.
+    stage_mapping:
+      open: "<rdstation_stage_id_open>"
+      won: "<rdstation_stage_id_won>"
+      lost: "<rdstation_stage_id_lost>"
+
+    # Custom field IDs do RD Station pros campos canônicos do PeSDR.
+    # Operador cria custom fields no painel RD Station e cola os IDs aqui.
+    custom_field_mapping:
+      faturamento_mensal: "<rdstation_cf_faturamento_id>"
+      # tempo_mercado: "<rdstation_cf_tempo_mercado_id>"
+      # momento_profissional: "<rdstation_cf_momento_id>"
