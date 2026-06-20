@@ -134,9 +134,15 @@ class WhatsAppCloudAPIAdapter(MessagingAdapter):
                 value = change.get("value", {})
                 # Status updates have `statuses` but no `messages`.
                 for m in value.get("messages", []):
-                    if m.get("type") != "text":
-                        continue  # Plano 5: text only. Audio/image come in Plano 8.
-                    text_body = (m.get("text") or {}).get("body", "")
+                    mtype = m.get("type")
+                    if mtype == "text":
+                        text_body = (m.get("text") or {}).get("body", "")
+                        media_ref = None
+                    elif mtype == "audio":
+                        text_body = ""
+                        media_ref = (m.get("audio") or {}).get("id")
+                    else:
+                        continue  # image/document — reserved seat (FE-05 v2)
                     received_dt = dt.datetime.fromtimestamp(int(m["timestamp"]), tz=dt.UTC)
                     out.append(
                         InboundMessage(
@@ -145,6 +151,8 @@ class WhatsAppCloudAPIAdapter(MessagingAdapter):
                             text=text_body,
                             received_at_iso=received_dt.isoformat(),
                             raw=m,
+                            media_type=("audio" if mtype == "audio" else "text"),
+                            media_ref=media_ref,
                         )
                     )
         return out
@@ -277,10 +285,45 @@ class WhatsAppCloudAPIAdapter(MessagingAdapter):
         raise RuntimeError("unreachable: tenacity exhausted without raising")
 
     async def send_audio(self, to: str, audio: bytes, content_type: str) -> SendResult:
-        raise NotImplementedError("FE-05 Task 5 implements WhatsApp send_audio")
+        upload_url = f"https://graph.facebook.com/{self._api_version}/{self._phone_number_id}/media"
+        send_url = f"https://graph.facebook.com/{self._api_version}/{self._phone_number_id}/messages"
+        auth = {"Authorization": f"Bearer {self._access_token}"}
+        async with _build_http_client() as client:
+            up = await client.post(
+                upload_url,
+                data={"messaging_product": "whatsapp", "type": content_type},
+                files={"file": ("audio.ogg", audio, content_type)},
+                headers=auth,
+            )
+            if up.status_code != 200:
+                raise _classify_error(up.status_code, (up.json() or {}).get("error"), None)
+            media_id = up.json()["id"]
+            body = {
+                "messaging_product": "whatsapp",
+                "to": to.lstrip("+"),
+                "type": "audio",
+                "audio": {"id": media_id},
+            }
+            resp = await client.post(send_url, json=body, headers=auth)
+        if resp.status_code != 200:
+            raise _classify_error(resp.status_code, (resp.json() or {}).get("error"), None)
+        return SendResult(
+            external_id=resp.json()["messages"][0]["id"],
+            sent_at_iso=datetime.now(dt.UTC).isoformat(),
+        )
 
     async def download_media(self, media_ref: str) -> tuple[bytes, str]:
-        raise NotImplementedError("FE-05 Task 5 implements WhatsApp download_media")
+        meta_url = f"https://graph.facebook.com/{self._api_version}/{media_ref}"
+        auth = {"Authorization": f"Bearer {self._access_token}"}
+        async with _build_http_client() as client:
+            meta = await client.get(meta_url, headers=auth)
+            if meta.status_code != 200:
+                raise _classify_error(meta.status_code, (meta.json() or {}).get("error"), None)
+            info = meta.json()
+            blob = await client.get(info["url"], headers=auth)
+            if blob.status_code != 200:
+                raise _classify_error(blob.status_code, None, None)
+        return blob.content, info.get("mime_type", "audio/ogg")
 
     async def mark_as_typing(self, to: str) -> None:
         """Call Meta's typing_indicator API. Silent fallback on any error.
