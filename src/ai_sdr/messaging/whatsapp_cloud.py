@@ -276,6 +276,12 @@ class WhatsAppCloudAPIAdapter(MessagingAdapter):
 
         raise RuntimeError("unreachable: tenacity exhausted without raising")
 
+    async def send_audio(self, to: str, audio: bytes, content_type: str) -> SendResult:
+        raise NotImplementedError("FE-05 Task 5 implements WhatsApp send_audio")
+
+    async def download_media(self, media_ref: str) -> tuple[bytes, str]:
+        raise NotImplementedError("FE-05 Task 5 implements WhatsApp download_media")
+
     async def mark_as_typing(self, to: str) -> None:
         """Call Meta's typing_indicator API. Silent fallback on any error.
 

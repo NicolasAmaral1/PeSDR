@@ -25,6 +25,8 @@ class FakeMessagingAdapter(MessagingAdapter):
         self.sent_messages: list[dict[str, str]] = []
         self.sent_templates: list[tuple[str, str, str, list[str]]] = []
         self.typing_calls: list[str] = []
+        self.sent_audio: list[dict[str, object]] = []
+        self.media_blobs: dict[str, tuple[bytes, str]] = {}
 
     # --- scripting hooks --------------------------------------------------
 
@@ -80,6 +82,23 @@ class FakeMessagingAdapter(MessagingAdapter):
             external_id=f"faketmpl_{uuid.uuid4().hex[:12]}",
             sent_at_iso=datetime.now(UTC).isoformat(),
         )
+
+    def stage_media(self, media_ref: str, data: bytes, content_type: str) -> None:
+        self.media_blobs[media_ref] = (data, content_type)
+
+    async def send_audio(self, to: str, audio: bytes, content_type: str) -> SendResult:
+        if self._pending_failure is not None:
+            exc = self._pending_failure
+            self._pending_failure = None
+            raise exc
+        self.sent_audio.append({"to": to, "content_type": content_type, "n_bytes": len(audio)})
+        return SendResult(
+            external_id=f"fakeaud_{uuid.uuid4().hex[:12]}",
+            sent_at_iso=datetime.now(UTC).isoformat(),
+        )
+
+    async def download_media(self, media_ref: str) -> tuple[bytes, str]:
+        return self.media_blobs[media_ref]
 
     def verification_challenge(self, params: Mapping[str, str]) -> str | None:
         return params.get("hub.challenge")
