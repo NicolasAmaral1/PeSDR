@@ -46,3 +46,6 @@ secrets.yaml
 keys.txt
 *.age
 .superpowers/
+
+# SDD scratch (briefs, reports, diffs, ledger)
+.superpowers/
