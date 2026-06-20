@@ -5,6 +5,8 @@ render_and_send (Task 9) performs the synthesis + send.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 from dataclasses import dataclass
 from typing import Literal
@@ -40,6 +42,10 @@ async def _send_text(
     chunks = humanize(response_text, humanization, is_voice=False)
     last_id: str | None = None
     for chunk in chunks:
+        if chunk.delay_before_ms > 0:
+            with contextlib.suppress(NotImplementedError, AttributeError):
+                await messaging.mark_as_typing(to)
+            await asyncio.sleep(chunk.delay_before_ms / 1000.0)
         out = await messaging.send_text(to, chunk.text)
         last_id = out.external_id
     return last_id
