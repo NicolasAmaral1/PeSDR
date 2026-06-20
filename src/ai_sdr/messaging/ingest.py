@@ -97,6 +97,7 @@ async def ingest_inbound_message(
             received_at=received_at,
             raw=dict(msg.raw),
             status="queued",
+            media_type=msg.media_type,
         )
         .on_conflict_do_nothing(index_elements=["tenant_id", "provider", "external_id"])
     )
