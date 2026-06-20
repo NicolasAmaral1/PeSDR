@@ -7,7 +7,7 @@ from ai_sdr.messaging.fake import FakeMessagingAdapter
 from ai_sdr.schemas.tenant_yaml import SpeechSynthesisConfig, VoiceConfig
 from ai_sdr.storage.fake import FakeStorageAdapter
 from ai_sdr.voice.fake import FakeSynthesizer
-from ai_sdr.voice.renderer import render_and_send
+from ai_sdr.voice.renderer import VoiceSynthesisError, render_and_send
 
 
 def _voice_cfg(mode="always", fallback=True) -> VoiceConfig:
@@ -70,7 +70,7 @@ async def test_synthesis_failure_without_fallback_raises():
         async def synthesize(self, *a, **k):
             raise RuntimeError("eleven down")
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(VoiceSynthesisError):
         await render_and_send(
             response_text="oi", response_format=None, voice_emotion=None,
             to="+5511", message_id="m3", voice_cfg=_voice_cfg(fallback=False),

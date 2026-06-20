@@ -20,6 +20,10 @@ from ai_sdr.voice.base import SpeechSynthesizer
 logger = logging.getLogger(__name__)
 
 
+class VoiceSynthesisError(Exception):
+    """Raised when voice synthesis/upload/send fails and fallback is disabled."""
+
+
 @dataclass(frozen=True)
 class RenderResult:
     external_id: str | None
@@ -38,8 +42,12 @@ async def _send_text(
     to: str,
     response_text: str,
     humanization: HumanizationConfig,
+    response_format: str | None = None,
 ) -> str | None:
-    chunks = humanize(response_text, humanization, is_voice=False)
+    chunks = humanize(response_text, humanization, is_voice=(response_format == "voice"))
+    if not chunks:
+        logger.warning("humanize_returned_empty_chunks")
+        return None
     last_id: str | None = None
     for chunk in chunks:
         if chunk.delay_before_ms > 0:
@@ -72,7 +80,7 @@ async def render_and_send(
     )
 
     if modality == "text" or voice_cfg is None or synthesizer is None or storage is None:
-        last_id = await _send_text(messaging, to, response_text, humanization)
+        last_id = await _send_text(messaging, to, response_text, humanization, response_format)
         return RenderResult(external_id=last_id, modality="text", media_type="text")
 
     assert voice_cfg.synthesis is not None  # guaranteed by VoiceConfig validator
@@ -89,9 +97,9 @@ async def render_and_send(
     except Exception as exc:
         if voice_cfg.fallback_to_text_on_failure:
             logger.warning("render.voice_failed_fallback_text msg=%s err=%s", message_id, exc)
-            last_id = await _send_text(messaging, to, response_text, humanization)
+            last_id = await _send_text(messaging, to, response_text, humanization, response_format)
             return RenderResult(external_id=last_id, modality="text", media_type="text")
-        raise
+        raise VoiceSynthesisError(str(exc)) from exc
 
     return RenderResult(
         external_id=send_out.external_id,

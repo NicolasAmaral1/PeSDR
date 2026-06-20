@@ -16,6 +16,7 @@ RequiresReviewReason = Literal[
     "validator_exhausted",
     "treeflow_version_missing",
     "objection_treatment_exhausted",
+    "voice_synthesis_failed",
 ]
 
 ALL_REASONS: tuple[str, ...] = get_args(RequiresReviewReason)

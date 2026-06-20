@@ -37,6 +37,7 @@ from ai_sdr.flowengine.preprocessing import (
 )
 from ai_sdr.flowengine.routing import validate_transition
 from ai_sdr.flowengine.sender import send_response_text
+from ai_sdr.voice.renderer import VoiceSynthesisError
 from ai_sdr.flowengine.system_prompt import (
     CorrectionContext,
     FreshLayer,
@@ -273,17 +274,38 @@ async def run_turn(
             max_delay_ms=tenant_cfg.humanization.max_delay_ms,
             apply_to_voice=tenant_cfg.humanization.apply_to_voice,
         )
-        send_result = await send_response_text(
-            adapter=adapter,
-            lead=ctx.lead,
-            decision=decision,
-            humanization_config=humanization,
-            voice_cfg=voice_cfg,
-            synthesizer=synthesizer,
-            storage=storage,
-            last_inbound_media_type=inbound.media_type,
-            message_id=str(inbound.id),
-        )
+        try:
+            send_result = await send_response_text(
+                adapter=adapter,
+                lead=ctx.lead,
+                decision=decision,
+                humanization_config=humanization,
+                voice_cfg=voice_cfg,
+                synthesizer=synthesizer,
+                storage=storage,
+                last_inbound_media_type=inbound.media_type,
+                message_id=str(inbound.id),
+            )
+        except VoiceSynthesisError as e:
+            ctx.talk.status = "requires_review"
+            ctx.talk.escalated_at = now
+            ctx.talk.escalation_category = "system_exhausted"
+            ctx.talk.escalation_reason = str(e)
+            ctx.talk.requires_review_reason = "voice_synthesis_failed"
+            logger.warning(
+                "turn_escalated_via_voice_synthesis talk=%s reason=%s",
+                ctx.talk.id,
+                e,
+            )
+            await adapter.send_text(
+                to=ctx.lead.whatsapp_e164 or "",
+                text=guardrail_cfg.fallback_text,
+            )
+            return RunTurnResult(
+                outcome="escalated",
+                current_node_after=state.current_node,
+                response_text=guardrail_cfg.fallback_text,
+            )
 
         if send_result.synthesis_chars:
             accumulate_voice_usage(tokens, synthesis_chars=send_result.synthesis_chars)
