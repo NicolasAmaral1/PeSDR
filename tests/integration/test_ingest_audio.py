@@ -43,7 +43,10 @@ async def test_ingest_persists_audio_media_type(db_session) -> None:
     await set_tenant_context(db_session, tenant.id)
     row = (
         await db_session.execute(
-            select(InboundMessageRow).where(InboundMessageRow.external_id == "wamid.A1")
+            select(InboundMessageRow).where(
+                InboundMessageRow.tenant_id == tenant.id,
+                InboundMessageRow.external_id == "wamid.A1",
+            )
         )
     ).scalar_one()
     assert row.media_type == "audio"
