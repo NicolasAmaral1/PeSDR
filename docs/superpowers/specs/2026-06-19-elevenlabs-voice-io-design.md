@@ -277,3 +277,13 @@ schemas/tenant_yaml.py      (VoiceConfig, StorageConfig + campos em TenantConfig
 - **`download_media` da Meta:** o `media_id` exige duas chamadas (GET metadata → GET URL com bearer). Encapsular no adapter.
 - **MinIO público vs privado:** como o áudio vai pra Meta por upload (media_id), o bucket pode ser privado; URLs assinadas só pra UI interna.
 - **`handle_inbound` value-type:** mudar `InboundMessage` (frozen dataclass) é breaking pra qualquer consumidor — auditar usos antes.
+
+## 13. Notas de implementação (pós-execução, 2026-06-20)
+
+Correção ao §3/§10 ("sem migration"): as **colunas** de mídia já existiam, mas duas **CHECK constraints** precisaram de migration:
+- **0030** — estende `ck_outbound_message_type` (+`ck_outbound_body_consistency`) para aceitar `message_type='audio'` (linhas de áudio carregam `body_text`=transcript). Sem ela, o INSERT de áudio falha no DB.
+- **0031** — estende `ck_talks_requires_review_reason` para aceitar `voice_synthesis_failed` (usado quando síntese falha e `fallback_to_text_on_failure: false` → escala em vez de virar poison message; ver §8).
+
+Caveat de rollback: downgrade de 0030 falha se houver linhas `media_type='audio'` (purgar antes).
+
+Follow-ups deixados para o time (não-bloqueantes): custo de transcrição (`voice_transcription_ms`, §6.3) ainda não acumulado; cache de instância de adapter por `(tenant, provider)` não implementado (rebuild por drain); migrations 0025/0031 importam `ALL_REASONS` dinamicamente (afeta só replay histórico em DB novo, não o estado final).
