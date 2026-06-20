@@ -37,3 +37,15 @@ def accumulate_tokens(running: dict[str, Any], increment: dict[str, int]) -> Non
         running[key] = int(running.get(key, 0) or 0) + int(increment.get(key, 0) or 0)
     # total_cost_usd is a reserved slot; FE-06 populates it from a pricing table.
     running.setdefault("total_cost_usd", 0)
+
+
+def accumulate_voice_usage(
+    running: dict[str, Any], *, synthesis_chars: int = 0, transcription_ms: int = 0
+) -> None:
+    """Add voice cost counters into the running Talk.tokens_consumed dict."""
+    running["voice_synthesis_chars"] = int(running.get("voice_synthesis_chars", 0) or 0) + int(
+        synthesis_chars
+    )
+    running["voice_transcription_ms"] = int(running.get("voice_transcription_ms", 0) or 0) + int(
+        transcription_ms
+    )
