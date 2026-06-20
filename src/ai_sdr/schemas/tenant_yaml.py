@@ -166,6 +166,72 @@ class ConsoleConfig(BaseModel):
     enabled: bool = False
 
 
+def _require_secrets_prefix(value: str | None) -> str | None:
+    if value is not None and not value.startswith("secrets/"):
+        raise ValueError(f"ref must start with 'secrets/' (got {value!r})")
+    return value
+
+
+class SpeechSynthesisConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str
+    credentials_ref: str
+    voice_id: str
+    format: str = "ogg_opus"
+    timeout_seconds: int = Field(default=8, ge=1, le=60)
+    default_emotion: str | None = None
+
+    @field_validator("credentials_ref")
+    @classmethod
+    def _check_ref(cls, v: str) -> str:
+        return _require_secrets_prefix(v)  # type: ignore[return-value]
+
+
+class SpeechTranscriptionConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str
+    credentials_ref: str
+    language: str = "pt-BR"
+    min_confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+
+    @field_validator("credentials_ref")
+    @classmethod
+    def _check_ref(cls, v: str) -> str:
+        return _require_secrets_prefix(v)  # type: ignore[return-value]
+
+
+class VoiceConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    response_mode: Literal["always", "match_lead", "never", "context_driven"] = "never"
+    fallback_to_text_on_failure: bool = True
+    synthesis: SpeechSynthesisConfig | None = None
+    transcription: SpeechTranscriptionConfig | None = None
+
+    @model_validator(mode="after")
+    def _check_synthesis_present(self) -> Self:
+        if self.response_mode != "never" and self.synthesis is None:
+            raise ValueError("voice.synthesis is required when response_mode != 'never'")
+        return self
+
+
+class StorageConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str
+    bucket: str
+    endpoint_ref: str | None = None
+    access_key_ref: str | None = None
+    secret_key_ref: str | None = None
+
+    @field_validator("endpoint_ref", "access_key_ref", "secret_key_ref")
+    @classmethod
+    def _check_refs(cls, v: str | None) -> str | None:
+        return _require_secrets_prefix(v)
+
+
 class TenantConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -180,6 +246,8 @@ class TenantConfig(BaseModel):
     guardrails: GuardrailsConfig | None = None
     objections: ObjectionsConfig | None = None  # Plan 4a
     humanization: HumanizationConfig = Field(default_factory=HumanizationConfig)
+    voice: VoiceConfig | None = None
+    storage: StorageConfig | None = None
     sdr_persona: dict[str, Any] | None = (
         None  # FE-01b: pass-through slot (architecture_version stays in DB)
     )
