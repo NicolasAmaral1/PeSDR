@@ -1,19 +1,18 @@
 """Outbound send for FlowEngine v2.
 
-Humanization (chunking + typing indicator + delays) lands in FE-03b.
-The function is split-aware: humanizer returns list[Chunk] and we
-iterate. Voice paths still fall back to text (FE-05 implements VoiceAdapter).
+Humanization (chunking + typing indicator + delays) is owned by the
+Outbound Renderer (ai_sdr.voice.renderer). Voice paths delegate to
+render_and_send (FE-05 Task 9); text-only turns go through the same
+function with voice_cfg=None so the code path is unified.
 """
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ai_sdr.flowengine.decision import TurnDecision
-from ai_sdr.flowengine.humanizer import HumanizationConfig, humanize
+from ai_sdr.flowengine.humanizer import HumanizationConfig
 from ai_sdr.messaging.base import MessagingAdapter
 from ai_sdr.models.lead import Lead
 
@@ -26,11 +25,22 @@ class SendResult:
 
     status is always "sent" on success (adapter raises on failure so we
     never reach this point with a terminal error).
+
+    Media fields are populated only when a voice/audio path was taken;
+    they default to the text-path no-op values so callers don't need to
+    branch on None for every field.
     """
 
     external_id: str | None
     status: str
     error_detail: str | None = None
+    media_type: str = "text"
+    audio_url: str | None = None
+    media_storage_key: str | None = None
+    synthesis_voice_id: str | None = None
+    voice_emotion: str | None = None
+    audio_duration_ms: int | None = None
+    synthesis_chars: int = 0
 
 
 async def send_response_text(
@@ -39,52 +49,49 @@ async def send_response_text(
     lead: Lead,
     decision: TurnDecision,
     humanization_config: HumanizationConfig,
+    voice_cfg=None,
+    synthesizer=None,
+    storage=None,
+    last_inbound_media_type: str = "text",
+    message_id: str | None = None,
 ) -> SendResult:
-    """Send the assistant response as one or more humanized chunks.
+    """Send the assistant response, delegating to render_and_send.
 
-    Voice mode falls back to text and logs a warning (FE-05 will wire the
-    real VoiceAdapter).
+    When voice_cfg is None the text path is taken — byte-identical to
+    the pre-FE-05 behaviour. When voice deps are present the renderer
+    decides the modality (text vs audio) and returns a RenderResult
+    that is mapped to SendResult.
+
+    message_id: deterministic storage key seed (`outbound/{id}.ogg`).
+    Defaults to str(lead.id) when not provided (unit tests without an
+    inbound). The pipeline always passes str(inbound.id).
     """
-    if decision.response_format in ("voice", "both"):
-        logger.warning(
-            "voice_format_not_implemented_fe03b lead_id=%s format=%s — falling back to text",
-            lead.id,
-            decision.response_format,
-        )
+    from ai_sdr.voice.renderer import render_and_send
 
-    chunks = humanize(
-        decision.response_text,
-        humanization_config,
-        is_voice=(decision.response_format == "voice"),
-    )
+    resolved_message_id = message_id if message_id is not None else str(lead.id)
 
-    if not chunks:
-        logger.warning(
-            "humanize_returned_empty_chunks lead_id=%s text_len=%d",
-            lead.id,
-            len(decision.response_text),
-        )
-        return SendResult(external_id=None, status="sent", error_detail=None)
-
-    last_external_id: str | None = None
-    for chunk in chunks:
-        if chunk.delay_before_ms > 0:
-            with contextlib.suppress(NotImplementedError, AttributeError):
-                await adapter.mark_as_typing(lead.whatsapp_e164)
-            await asyncio.sleep(chunk.delay_before_ms / 1000.0)
-
-        send_outcome = await adapter.send_text(lead.whatsapp_e164, chunk.text)
-        last_external_id = send_outcome.external_id
-
-    logger.info(
-        "humanization.chunks_emitted lead_id=%s chunk_count=%d total_chars=%d",
-        lead.id,
-        len(chunks),
-        sum(len(c.text) for c in chunks),
+    render = await render_and_send(
+        response_text=decision.response_text,
+        response_format=decision.response_format,
+        voice_emotion=decision.voice_emotion,
+        to=lead.whatsapp_e164,
+        message_id=resolved_message_id,
+        voice_cfg=voice_cfg,
+        last_inbound_media_type=last_inbound_media_type,
+        synthesizer=synthesizer,
+        storage=storage,
+        messaging=adapter,
+        humanization=humanization_config,
     )
 
     return SendResult(
-        external_id=last_external_id,
+        external_id=render.external_id,
         status="sent",
-        error_detail=None,
+        media_type=render.media_type,
+        audio_url=render.audio_url,
+        media_storage_key=render.media_storage_key,
+        synthesis_voice_id=render.synthesis_voice_id,
+        voice_emotion=render.voice_emotion,
+        audio_duration_ms=render.audio_duration_ms,
+        synthesis_chars=render.synthesis_chars,
     )

@@ -17,8 +17,33 @@ from ai_sdr.guardrails.validator import GuardrailConfig
 from ai_sdr.messaging.fake import FakeMessagingAdapter
 from ai_sdr.models.inbound_message import InboundMessageRow
 from ai_sdr.models.outbound_message import OutboundMessage
+from ai_sdr.schemas.tenant_yaml import TenantConfig
 
 from tests.integration.avelum_helpers import seed_avelum_v2
+
+
+def _stub_tenant_cfg(slug: str) -> TenantConfig:
+    return TenantConfig.model_validate(
+        {
+            "id": slug,
+            "display_name": "Smoke stub",
+            "timezone": "America/Sao_Paulo",
+            "schedule": {"mon-fri": "08:00-22:00"},
+            "conversation": {"optout_stop_words": ["sair"]},
+            "llm": {
+                "default": {
+                    "provider": "openai",
+                    "model": "gpt-5-mini",
+                    "api_key_ref": "secrets/openai_key",
+                },
+            },
+            "guardrails": {
+                "allowed_products": ["sdr_smoke"],
+                "disallowed_price_pattern": r"R\$\s?\d+",
+                "fallback_text": "Vou validar com a equipe.",
+            },
+        }
+    )
 
 
 def _td(text: str, *, collected=None, next_node=None, advance=False) -> TurnDecision:
@@ -53,6 +78,7 @@ async def test_three_turn_happy_path(db_session: AsyncSession) -> None:
     treeflow = load_treeflow_v2(tfv.content_yaml)
     adapter = FakeMessagingAdapter()
     llm = AsyncMock()
+    tenant_cfg = _stub_tenant_cfg(tenant.slug)
     gcfg = GuardrailConfig(
         disallowed_price_pattern=r"R\$\d+",
         allowed_prices=[],
@@ -66,6 +92,7 @@ async def test_three_turn_happy_path(db_session: AsyncSession) -> None:
     r1 = await run_turn(
         db_session,
         tenant=tenant,
+        tenant_cfg=tenant_cfg,
         treeflow=treeflow,
         treeflow_version=tfv,
         inbound=inbound1,
@@ -91,6 +118,7 @@ async def test_three_turn_happy_path(db_session: AsyncSession) -> None:
     r2 = await run_turn(
         db_session,
         tenant=tenant,
+        tenant_cfg=tenant_cfg,
         treeflow=treeflow,
         treeflow_version=tfv,
         inbound=inbound2,
@@ -114,6 +142,7 @@ async def test_three_turn_happy_path(db_session: AsyncSession) -> None:
     r3 = await run_turn(
         db_session,
         tenant=tenant,
+        tenant_cfg=tenant_cfg,
         treeflow=treeflow,
         treeflow_version=tfv,
         inbound=inbound3,
