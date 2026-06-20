@@ -6,7 +6,7 @@ render_and_send (Task 9) performs the synthesis + send.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Literal
 
 from ai_sdr.flowengine.humanizer import HumanizationConfig, humanize

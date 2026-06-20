@@ -9,7 +9,7 @@ function with voice_cfg=None so the code path is unified.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from ai_sdr.flowengine.decision import TurnDecision
 from ai_sdr.flowengine.humanizer import HumanizationConfig

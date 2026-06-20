@@ -21,7 +21,6 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
 from ai_sdr.flowengine.treeflow_loader import TreeflowDef, TreeflowNode
 
-
 OPERATING_INSTRUCTIONS = """\
 OPERATING INSTRUCTIONS:
 - Operate strictly within current_node. Never use information from future
