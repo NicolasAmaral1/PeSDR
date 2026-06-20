@@ -167,6 +167,7 @@ async def run_turn(
                 active_treatment=state.active_treatment,
                 correction=correction,
                 current_inbound_text=inbound_text,
+                voice_response_mode=(voice_cfg.response_mode if voice_cfg else None),
             )
 
         fresh = _fresh(None)

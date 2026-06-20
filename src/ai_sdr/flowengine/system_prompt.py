@@ -127,6 +127,19 @@ class FreshLayer:
     text: str
 
 
+def voice_mode_instruction(response_mode: str | None) -> str:
+    """Guidance appended to the fresh layer so the LLM can choose audio in
+    context_driven mode. Empty for all other modes (the runtime decides)."""
+    if response_mode != "context_driven":
+        return ""
+    return (
+        "\n\nMODALIDADE DE RESPOSTA: você pode responder em áudio quando for mais "
+        "natural (ex.: o lead mandou áudio, ou a mensagem é longa/emocional). "
+        "Para isso, defina response_format='voice'. Caso contrário use "
+        "response_format='text' ou deixe nulo."
+    )
+
+
 def build_fresh_layer(
     *,
     current_node: TreeflowNode,
@@ -140,6 +153,7 @@ def build_fresh_layer(
     active_treatment: dict[str, Any] | None,
     correction: CorrectionContext | None,
     current_inbound_text: str,
+    voice_response_mode: str | None = None,
 ) -> FreshLayer:
     """Build the per-turn dense context.
 
@@ -241,6 +255,10 @@ def build_fresh_layer(
     parts.append("")
 
     parts.append(f"CURRENT INBOUND: {current_inbound_text}")
+
+    voice_instr = voice_mode_instruction(voice_response_mode)
+    if voice_instr:
+        parts.append(voice_instr)
 
     return FreshLayer(text="\n".join(parts).strip() + "\n")
 
