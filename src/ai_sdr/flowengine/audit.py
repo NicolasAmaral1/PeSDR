@@ -40,6 +40,12 @@ async def record_outbound_audit(
     provider: str,
     sent_at: datetime,
     chunk_index: int = 0,
+    media_type: str = "text",
+    audio_url: str | None = None,
+    media_storage_key: str | None = None,
+    synthesis_voice_id: str | None = None,
+    voice_emotion: str | None = None,
+    audio_duration_ms: int | None = None,
 ) -> OutboundMessage | None:
     """Insert one OutboundMessage row (idempotent by (talk, turn, chunk))."""
     existing = (
@@ -60,7 +66,7 @@ async def record_outbound_audit(
         talkflow_id=talk.id,
         lead_id=talk.lead_id,
         provider=provider,
-        message_type="text",
+        message_type=("audio" if media_type == "audio" else "text"),
         body_text=response_text,
         template_ref=None,
         template_language=None,
@@ -72,12 +78,12 @@ async def record_outbound_audit(
         inbound_message_id=inbound.id,
         follow_up_job_id=None,
         sent_at=sent_at,
-        media_type="text",
-        media_storage_key=None,
-        audio_url=None,
-        audio_duration_ms=None,
-        synthesis_voice_id=None,
-        voice_emotion=None,
+        media_type=media_type,
+        media_storage_key=media_storage_key,
+        audio_url=audio_url,
+        audio_duration_ms=audio_duration_ms,
+        synthesis_voice_id=synthesis_voice_id,
+        voice_emotion=voice_emotion,
     )
     session.add(row)
     return row

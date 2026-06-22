@@ -38,5 +38,11 @@ def test_complete_subclass_instantiates() -> None:
         def verification_challenge(self, params):
             return None
 
+        async def send_audio(self, to, audio, content_type):
+            raise NotImplementedError
+
+        async def download_media(self, media_ref):
+            raise NotImplementedError
+
     a = _Complete()
     assert isinstance(a, MessagingAdapter)

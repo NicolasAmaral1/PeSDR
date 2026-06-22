@@ -37,6 +37,7 @@ from ai_sdr.flowengine.preprocessing import (
 )
 from ai_sdr.flowengine.routing import validate_transition
 from ai_sdr.flowengine.sender import send_response_text
+from ai_sdr.voice.renderer import VoiceSynthesisError
 from ai_sdr.flowengine.system_prompt import (
     CorrectionContext,
     FreshLayer,
@@ -45,7 +46,7 @@ from ai_sdr.flowengine.system_prompt import (
     build_fresh_layer,
 )
 from ai_sdr.flowengine.treeflow_loader import TreeflowDef
-from ai_sdr.flowengine.usage import accumulate_tokens, extract_usage
+from ai_sdr.flowengine.usage import accumulate_tokens, accumulate_voice_usage, extract_usage
 from ai_sdr.guardrails.validator import (
     GuardrailConfig,
     validate_response_text,
@@ -95,6 +96,9 @@ async def run_turn(
     opt_out_keywords: list[str],
     guardrail_cfg: GuardrailConfig,
     now: datetime | None = None,
+    voice_cfg=None,
+    synthesizer=None,
+    storage=None,
 ) -> RunTurnResult:
     """Execute one FlowEngine v2 turn. See module docstring."""
     now = now or datetime.now(timezone.utc)
@@ -164,6 +168,7 @@ async def run_turn(
                 active_treatment=state.active_treatment,
                 correction=correction,
                 current_inbound_text=inbound_text,
+                voice_response_mode=(voice_cfg.response_mode if voice_cfg else None),
             )
 
         fresh = _fresh(None)
@@ -253,10 +258,9 @@ async def run_turn(
             treeflow=treeflow,
         )
 
-        # [11] Token bookkeeping (best-effort)
+        # [11] Token bookkeeping (best-effort); voice cost accumulated after send
         tokens = dict(ctx.talk.tokens_consumed or {})
         accumulate_tokens(tokens, extract_usage(getattr(decision, "_raw_message", None)))
-        ctx.talk.tokens_consumed = tokens
 
         # [12] Send to lead via adapter
         # FE-03b T10: humanization config sourced from tenant.yaml > humanization.
@@ -270,12 +274,42 @@ async def run_turn(
             max_delay_ms=tenant_cfg.humanization.max_delay_ms,
             apply_to_voice=tenant_cfg.humanization.apply_to_voice,
         )
-        send_result = await send_response_text(
-            adapter=adapter,
-            lead=ctx.lead,
-            decision=decision,
-            humanization_config=humanization,
-        )
+        try:
+            send_result = await send_response_text(
+                adapter=adapter,
+                lead=ctx.lead,
+                decision=decision,
+                humanization_config=humanization,
+                voice_cfg=voice_cfg,
+                synthesizer=synthesizer,
+                storage=storage,
+                last_inbound_media_type=inbound.media_type,
+                message_id=str(inbound.id),
+            )
+        except VoiceSynthesisError as e:
+            ctx.talk.status = "requires_review"
+            ctx.talk.escalated_at = now
+            ctx.talk.escalation_category = "system_exhausted"
+            ctx.talk.escalation_reason = str(e)
+            ctx.talk.requires_review_reason = "voice_synthesis_failed"
+            logger.warning(
+                "turn_escalated_via_voice_synthesis talk=%s reason=%s",
+                ctx.talk.id,
+                e,
+            )
+            await adapter.send_text(
+                to=ctx.lead.whatsapp_e164 or "",
+                text=guardrail_cfg.fallback_text,
+            )
+            return RunTurnResult(
+                outcome="escalated",
+                current_node_after=state.current_node,
+                response_text=guardrail_cfg.fallback_text,
+            )
+
+        if send_result.synthesis_chars:
+            accumulate_voice_usage(tokens, synthesis_chars=send_result.synthesis_chars)
+        ctx.talk.tokens_consumed = tokens
 
         # [13] Audit row
         await record_outbound_audit(
@@ -287,6 +321,12 @@ async def run_turn(
             send_result=send_result,
             provider=inbound.provider,
             sent_at=now,
+            media_type=send_result.media_type,
+            audio_url=send_result.audio_url,
+            media_storage_key=send_result.media_storage_key,
+            synthesis_voice_id=send_result.synthesis_voice_id,
+            voice_emotion=send_result.voice_emotion,
+            audio_duration_ms=send_result.audio_duration_ms,
         )
 
     return RunTurnResult(

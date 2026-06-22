@@ -141,6 +141,26 @@ async def _mark_queued_as_skipped(db: AsyncSession, lead_id: uuid.UUID, reason: 
     )
 
 
+def _build_voice_stack(tenant_cfg, secrets):
+    """Return (synthesizer|None, transcriber|None, storage|None) for a tenant.
+
+    Returns (None, None, None) when tenant_cfg.voice is None so callers can
+    branch on ``if transcriber is not None`` without knowing about voice config.
+    Imports are deferred to avoid mandatory deps for non-voice tenants.
+    """
+    from ai_sdr.storage.factory import build_storage_adapter
+    from ai_sdr.voice.factory import build_synthesizer, build_transcriber
+
+    voice = getattr(tenant_cfg, "voice", None)
+    storage_cfg = getattr(tenant_cfg, "storage", None)
+    if voice is None:
+        return None, None, None
+    synth = build_synthesizer(voice.synthesis, secrets) if voice.synthesis else None
+    trans = build_transcriber(voice.transcription, secrets) if voice.transcription else None
+    storage = build_storage_adapter(storage_cfg, secrets) if storage_cfg else None
+    return synth, trans, storage
+
+
 async def _run_v2_inbox(
     db: AsyncSession,
     *,
@@ -349,6 +369,7 @@ async def _run_v2_inbox(
     )
 
     window_seconds = _concat_window_seconds()
+    synth, transcriber, storage = _build_voice_stack(tenant_cfg, secrets)
 
     while True:
         msg = await _fetch_next_queued(db, lead.id)
@@ -385,6 +406,26 @@ async def _run_v2_inbox(
                 window_seconds=window_seconds,
             )
 
+        if transcriber is not None and storage is not None and msg.media_type == "audio":
+            from ai_sdr.voice.normalizer import normalize_inbound
+
+            outcome = await normalize_inbound(
+                msg,
+                messaging=adapter,
+                transcriber=transcriber,
+                storage=storage,
+                transcription_cfg=tenant_cfg.voice.transcription,
+            )
+            if outcome != "processed":
+                await adapter.send_text(
+                    msg.from_address,
+                    "Não consegui entender o áudio, pode mandar por escrito?",
+                )
+                msg.status = "processed"
+                msg.processed_at = datetime.now(UTC)
+                await db.commit()
+                continue
+
         try:
             result = await run_turn(
                 db,
@@ -397,6 +438,9 @@ async def _run_v2_inbox(
                 adapter=adapter,
                 opt_out_keywords=opt_out_keywords,
                 guardrail_cfg=guardrail_cfg,
+                voice_cfg=tenant_cfg.voice,
+                synthesizer=synth,
+                storage=storage,
             )
         except RecipientUnreachable as e:
             # Restore the in-memory text so the persisted row reflects the

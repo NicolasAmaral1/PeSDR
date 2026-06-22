@@ -34,6 +34,8 @@ class InboundMessage:
     text: str
     received_at_iso: str
     raw: Mapping[str, object]
+    media_type: str = "text"
+    media_ref: str | None = None
 
 
 @dataclass(frozen=True)
@@ -88,6 +90,17 @@ class MessagingAdapter(ABC):
         WindowExpiredError should NEVER fire for templates — HSM messages
         bypass the 24h window. If it does, treat as adapter bug.
         """
+
+    @abstractmethod
+    async def send_audio(self, to: str, audio: bytes, content_type: str) -> SendResult:
+        """Deliver an audio message. Implementations upload the bytes to the
+        provider's media endpoint then send by media id. Same retry/error
+        contract as send_text."""
+
+    @abstractmethod
+    async def download_media(self, media_ref: str) -> tuple[bytes, str]:
+        """Fetch inbound media bytes by the provider-native reference.
+        Returns (bytes, mime_type)."""
 
     @abstractmethod
     def verification_challenge(self, params: Mapping[str, str]) -> str | None:

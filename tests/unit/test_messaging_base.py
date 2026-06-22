@@ -55,5 +55,11 @@ def test_concrete_subclass_can_be_instantiated() -> None:
         def verification_challenge(self, params: Mapping[str, str]) -> str | None:
             return None
 
+        async def send_audio(self, to: str, audio: bytes, content_type: str) -> SendResult:
+            raise NotImplementedError
+
+        async def download_media(self, media_ref: str) -> tuple[bytes, str]:
+            raise NotImplementedError
+
     d = Dummy()
     assert isinstance(d, MessagingAdapter)
