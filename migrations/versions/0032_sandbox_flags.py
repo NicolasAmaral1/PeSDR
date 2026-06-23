@@ -21,8 +21,8 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0032"
-down_revision = "0031"
+revision = "0032_sandbox_flags"
+down_revision = "0031_add_voice_synthesis_failed_reason"
 branch_labels = None
 depends_on = None
 
