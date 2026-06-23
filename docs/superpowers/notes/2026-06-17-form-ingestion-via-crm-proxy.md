@@ -453,16 +453,69 @@ Manoela / Lana fazem (uma vez):
 
 ---
 
+## 13.bis. Ajustes do review do Nicolas (2026-06-23)
+
+Após review da spec, Nicolas aprovou a direção com 1 ajuste obrigatório + 1 recomendação:
+
+### 13.bis.1. Gate de produção obrigatório
+
+A spec original classificava OQ-A1 (origin filter) como "não-bloqueador da Fase A". Nicolas concorda que não bloqueia *implementar*, mas **bloqueia LIGAR EM PRODUÇÃO**:
+
+> Sem o `origin_filter`, qualquer contato criado à mão no RD Station (pela Lana, import em massa, ou o próprio vendedor) dispara Talk + HSM proativo pra um lead que nunca pediu contato. Isso é um incidente de UX/LGPD esperando acontecer.
+
+🔴 **Gate explícito:** O `crm.inbound.rdstation.enabled: true` no `tenant.yaml` de PRODUÇÃO fica bloqueado até OQ-A1 (origin filter) E OQ-A2 (auth) estarem resolvidas e validadas com payload real.
+
+Em código:
+- Implementação da Fase A pode ir até o fim com `RDStationCRMInboundAdapter` funcional
+- `tenant.yaml` da Manoela mantém `crm.inbound.rdstation.enabled: false` até as 2 OQs serem resolvidas
+- Validator no `tenant_loader` emite warning se `enabled: true` sem `origin_filter` configurado (advisory, não erro)
+
+### 13.bis.2. Confirmar OQ-A2 antes de implementar A8
+
+O `CRMInboundProviderConfig` originalmente exigia `hmac_secret_ref` obrigatório. RD Station pode não suportar HMAC nativo. Antes de implementar `_validate_signature`, Pedro confirma:
+- HMAC → mantém `hmac_secret_ref` obrigatório
+- URL secret → ajusta contract: `hmac_secret_ref` opcional + `url_secret_ref` opcional, validator exige um dos dois
+
+### 13.bis.3. Observability emit (recomendação Nicolas — barata, evita falha silenciosa)
+
+`RDStationCRMInboundAdapter` emit structlog event toda vez que filtrar evento por origem:
+
+```python
+log.info(
+    "crm.event.filtered_origin",
+    tenant=tenant.slug, provider="rdstation",
+    event_id=payload.event_id,
+    source_meta_raw=payload.source_meta,   # payload bruto pra depurar
+    accept_sources_configured=origin_filter.accept_sources,
+    decision="ignored",
+)
+```
+
+Operador inspeciona `logs/crm.event.filtered_origin` quando "lead chegou no RD mas não veio mensagem" — sem precisar abrir DB.
+
+### 13.bis.4. Não-bloqueantes adicionais
+
+- **OQ-A7 (novo):** `synced_via: "inbound_webhook"` basta pro sync engine Fase 3 distinguir, ou precisa de mais campo?
+- **OQ-A8 (novo):** Validator pra avisar quando `crm.provider` (saída) ≠ `crm.inbound.<provider>` (entrada)?
+
+### 13.bis.5. Nota separada do Nicolas
+
+> Como esse fluxo adiciona um 3º caminho de find-or-create de lead, reforça que Identity Resolver / Plano 6 deveria vir junto/antes do CRM — mas não bloqueia esta spec pro piloto Manoela.
+
+---
+
 ## 14. Open questions desta decisão (não da spec original)
 
-| # | Pergunta | Quando resolver |
-|---|---|---|
-| **14.1** | RD Station documenta como filtrar webhook por "criado via integração" vs "criado manualmente"? Se não, qual o fallback? (Tag? UTM? Pipeline específico?) | Antes de A5 — Pedro investiga ao configurar webhook |
-| **14.2** | Múltiplos forms Respondi (Mentoria + Aceleradora futuro) podem ser distinguidos no contact que chega no RD Station? Por exemplo, com tag específica setada pela integração nativa? | Antes de Aceleradora entrar como segundo form |
-| **14.3** | RD Station tem HMAC nos webhooks ou só URL secreta? | Antes de A5 — Pedro confirma na documentação |
-| **14.4** | RD Station retenta webhook falhado? Quantas vezes? | Antes de A8 — Pedro confirma na documentação |
-| **14.5** | Sandbox RD Station existe? (Já em aberto da spec original, #12) | Antes de Fase C |
-| **14.6** | OAuth refresh_token rotaciona? (Já em aberto da spec original, #5) | Antes de Fase B |
+| # | Pergunta | Status | Quando resolver |
+|---|---|---|---|
+| **14.1 / OQ-A1** | RD Station marca origem ("via integração" vs "manual") no payload? | 🔴 **GATE DE PRODUÇÃO** | Pedro investiga ao configurar webhook |
+| **14.2 / OQ-A2** | HMAC ou URL secret nos webhooks RD? | 🟠 **Bloqueia A8** | Pedro confirma antes de implementar A8 |
+| **14.3 / OQ-A3** | Retry policy do webhook falhado? | 🟡 Não-bloqueador | Pedro confirma na doc |
+| **14.4 / OQ-A4** | Múltiplos forms Respondi distinguíveis no contact RD? | 🟡 Não-bloqueador | Antes de Aceleradora |
+| **14.5 / OQ-A5** | RD Station tem sandbox? | 🟡 Não-bloqueador | Antes de Fase C |
+| **14.6 / OQ-A6** | `refresh_token` rotaciona? | 🟡 Não-bloqueador | Antes de Fase B |
+| **14.7 / OQ-A7** | `synced_via: "inbound_webhook"` basta pro sync engine Fase 3? | 🟢 Diferido | Quando Fase 3 entrar |
+| **14.8 / OQ-A8** | Validator pra provider mismatch? | 🟢 Diferido | Quando entrar 2º vendor |
 
 ---
 
