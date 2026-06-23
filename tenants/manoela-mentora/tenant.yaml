@@ -72,3 +72,8 @@ objections:
 # Manoela) usar UI de assign de leads em /console/manoela-mentora/leads.
 console:
   enabled: true
+  sandbox:
+    enabled: true       # PR #24 — habilita /console/manoela-mentora/sandbox/*
+    llm_mode: toggle    # operador escolhe (Lana pode demonstrar com real ou fake)
+    default_mode: fake
+    max_concurrent_talks: 10

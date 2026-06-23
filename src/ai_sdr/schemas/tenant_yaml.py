@@ -152,6 +152,26 @@ class ObjectionsConfig(BaseModel):
     history_window: int = Field(default=4, ge=1, le=20)
 
 
+class SandboxConfig(BaseModel):
+    """Sandbox web UI sub-config (PR #24 — sandbox console extension).
+
+    enabled=true exposes /console/{slug}/sandbox/* routes for this tenant.
+    Gated separately from console.enabled because some tenants in prod may
+    want console but NOT sandbox (e.g., Manoela once stabilized).
+
+    llm_mode default ('toggle') lets the operator choose per-Talk in the UI.
+    'real' forces Anthropic always (validates production behavior). 'fake'
+    forces FakeListChatModel (zero cost, determinístic — útil pra CI/dev).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    llm_mode: Literal["real", "fake", "toggle"] = "toggle"
+    default_mode: Literal["real", "fake"] = "fake"
+    max_concurrent_talks: int = Field(default=10, ge=1, le=100)
+
+
 class ConsoleConfig(BaseModel):
     """Operator console toggle per tenant (Plano 11).
 
@@ -159,11 +179,14 @@ class ConsoleConfig(BaseModel):
     do NOT live here — see the users table + user_tenant_access in
     migration 0009 + spec §5. Tenants that use Vialum Tasks Inbox as
     their HITL surface should set enabled=false (or omit the block).
+
+    sandbox block (PR #24) gates /console/{slug}/sandbox/* separately.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
+    sandbox: SandboxConfig | None = None
 
 
 def _require_secrets_prefix(value: str | None) -> str | None:

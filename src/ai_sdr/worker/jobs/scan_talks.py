@@ -64,7 +64,7 @@ async def scan_active_talks(session: AsyncSession, *, now: datetime) -> ScanResu
                 Talk.created_at,
             )
             .join(TreeflowVersion, Talk.treeflow_version_id == TreeflowVersion.id)
-            .where(Talk.status == "active")
+            .where(Talk.status == "active", Talk.is_sandbox.is_(False))  # PR #24: skip sandbox
         )
     ).all()
     # End the read transaction; per-Talk transactions follow.

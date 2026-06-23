@@ -82,6 +82,13 @@ class Lead(Base):
         JSONB(), nullable=False, server_default=func.cast("{}", JSONB())
     )
 
+    # Sandbox flag (migration 0032 — PR #24, Nicolas option (a))
+    # Carried explicitly on Lead so crons + inbox queries can filter via
+    # WHERE is_sandbox = false without JOINing to talks.
+    is_sandbox: Mapped[bool] = mapped_column(
+        Boolean(), nullable=False, server_default=func.cast("false", Boolean())
+    )
+
     # Multi-channel pre-paving (Hedge 1) — added by migration 0029.
     # When a tenant gains multiple messaging channels (e.g., 2 WhatsApp numbers),
     # this records which channel originated the lead. Today all leads default
