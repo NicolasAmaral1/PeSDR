@@ -611,6 +611,87 @@ Sandbox é "pronto pra uso" quando:
 
 ---
 
+## 14. Decisões finais do review do Nicolas (2026-06-23)
+
+Nicolas revisou a spec contra o código atual e definiu as 3 questões abertas que estavam segurando o plano. Boa notícia: tudo se resolve **reusando padrões que já existem em produção**.
+
+### 14.1. Q1 — `run_turn` na rota web: **REUSAR arq, não chamar inline**
+
+Produção já desacopla `run_turn` da request (ver `webhooks.py:134`: `pool.enqueue_job("process_lead_inbox", ...)`). Sandbox copia esse pattern:
+
+1. **`POST /sandbox/talks/{id}/send`** → grava a msg do operador como `inbound_messages` (status `queued`) → `pool.enqueue_job("process_sandbox_turn", tenant_id, talk_id)` → retorna **202 + "digitando…"**
+2. **HTMX poll de 2s** (mesmo do console existente) chama `GET /sandbox/talks/{id}`, que renderiza conversa a partir das **linhas persistidas** (`inbound_messages` + `outbound_messages`) + state debugger de `talkflow_states`
+3. **Novo job `process_sandbox_turn`** espelha `_run_v2_inbox` mas injeta `FakeMessagingAdapter` + `LoggingActionAdapter` + LLM (real ou stub conforme `sandbox_llm_mode`), e **NÃO agenda follow-ups**
+
+**Bônus arquitetural:** isso também resolve o problema do `FakeMessagingAdapter.sent_messages` ser in-memory (inalcançável pela rota). Como o turno roda no worker e a resposta é persistida em `outbound_messages`, a UI lê do banco. **Fonte da verdade = DB.**
+
+### 14.2. Q2 — Escopo do filtro `is_sandbox`: **isolamento-na-fonte + 4 pontos enumerados**
+
+Conjunto de consumidores que *agem* sobre talks é pequeno e fechado:
+
+| Local | Filtro a aplicar |
+|---|---|
+| `scan_talks.py:67` (`Talk.status=="active"` cross-tenant) | filtrar `is_sandbox=false` (cinto) |
+| `follow_up_scanner.py:61` (FollowUpJob cross-tenant) | **na fonte:** sandbox NÃO cria `follow_up_job` + filtro cinto |
+| `web/routes.py:98` (inbox console — `Lead.status=="pending_assignment"`) | excluir sandbox |
+| `leads.py:85` (route REST list pending) | excluir sandbox |
+
+**Modelo:** isolar na fonte (fake adapter, sem follow-up, lead sandbox fora de `pending_assignment`) **+ filtro nesses 4 pontos**.
+
+### 14.3. Q3 — Toggle LLM real/stub: **coluna `sandbox_llm_mode` em `talks`, na migration 0032**
+
+Como o `process_sandbox_turn` precisa saber o modo do Talk, `sandbox_llm_mode` entra junto do `is_sandbox` na mesma migration (já resolvido pelo desenho de Q1).
+
+```sql
+ALTER TABLE talks ADD COLUMN is_sandbox BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE talks ADD COLUMN sandbox_llm_mode TEXT;
+ALTER TABLE talks ADD CONSTRAINT ck_sandbox_llm_mode
+    CHECK (sandbox_llm_mode IS NULL OR sandbox_llm_mode IN ('real', 'fake'));
+```
+
+`sandbox_llm_mode IS NULL` quando `is_sandbox=false` (talks de produção). Valor obrigatório quando `is_sandbox=true`.
+
+### 14.4. Pergunta do Nicolas pra Pedro — **RESPOSTA: opção (a) — `is_sandbox` também no Lead**
+
+Nicolas perguntou: inbox do operador é chaveado em `Lead.status`, mas `is_sandbox` está no `Talk`. Pra lead de sandbox não aparecer pro operador, qual prefere:
+- **(a)** `is_sandbox` também no Lead (recomendação Nicolas — explícito + crons varrem ambos)
+- **(b)** lead de sandbox criado sem `pending_assignment`
+
+**Pedro escolhe (a)** — seguindo a recomendação do Nicolas.
+
+Justificativa:
+- Mais explícito — queries que filtram leads por estado podem usar `WHERE is_sandbox = false` diretamente
+- Crons que varrem leads (futuros — análises, exports, métricas) automaticamente excluem sandbox
+- Symmetric com o flag no Talk (mais fácil de raciocinar)
+- Custo zero (1 coluna BOOLEAN com partial index)
+
+Migration 0032 atualizada:
+
+```sql
+-- Talks
+ALTER TABLE talks ADD COLUMN is_sandbox BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE talks ADD COLUMN sandbox_llm_mode TEXT;
+ALTER TABLE talks ADD CONSTRAINT ck_sandbox_llm_mode
+    CHECK (sandbox_llm_mode IS NULL OR sandbox_llm_mode IN ('real', 'fake'));
+CREATE INDEX ix_talks_sandbox ON talks (tenant_id, is_sandbox) WHERE is_sandbox = true;
+
+-- Leads
+ALTER TABLE leads ADD COLUMN is_sandbox BOOLEAN NOT NULL DEFAULT false;
+CREATE INDEX ix_leads_sandbox ON leads (tenant_id, is_sandbox) WHERE is_sandbox = true;
+```
+
+### 14.5. Impacto no plano fasado
+
+Com Q1/Q2/Q3 resolvidos, a spec fica **plan-ready** (próximo passo: writing-plans gera plan executável).
+
+Mudanças no plano fasado:
+- **S1.5** muda de "POST /sandbox/talks/new — cria Lead+Talk direto" pra "POST /sandbox/talks/new — cria Lead (`is_sandbox=true`) + Talk (`is_sandbox=true`, `sandbox_llm_mode='real'|'fake'`)"
+- **S2.3** muda de "rota /send invoca `SandboxService.send_inbound` → `run_turn` direto" pra "rota /send grava em `inbound_messages` (queued) + enqueue `process_sandbox_turn`"
+- **S2 ganha task nova:** S2.7 — implementar `worker/jobs/process_sandbox_turn.py` espelhando `_run_v2_inbox` com fakes
+- **S4 ganha tasks novas:** tests pra cada um dos 4 pontos de filtro de Q2
+
+---
+
 ## Referências
 
 - [Plano 11 — HITL Console](../plans/2026-05-26-hitl-console.md) (base de auth/RBAC/stack)
