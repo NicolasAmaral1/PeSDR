@@ -414,7 +414,7 @@ def run_turn_human_harness(db_session):
         result, adapter, llm_called = await run_turn_human_harness(handling_mode="human")
     """
 
-    async def _harness(handling_mode: str = "human"):
+    async def _harness(handling_mode: str = "human", inbound_text: str = "oi"):
         # 1. Seed tenant + treeflow using the same helper as the smoke tests.
         tenant, tfv = await seed_avelum_v2(db_session)
         treeflow = load_treeflow_v2(tfv.content_yaml)
@@ -462,13 +462,14 @@ def run_turn_human_harness(db_session):
         await db_session.flush()
 
         # 5. Seed the inbound message from the same phone.
+        #    inbound_text is parameterized so callers can supply an opt-out keyword.
         inbound = InboundMessageRow(
             tenant_id=tenant.id,
             provider="fake",
             external_id=f"ext-{uuid.uuid4().hex[:6]}",
             from_address=phone,
-            text="oi",
-            raw={"body": "oi"},
+            text=inbound_text,
+            raw={"body": inbound_text},
             media_type="text",
             received_at=datetime.now(timezone.utc),
         )
