@@ -5,9 +5,10 @@ export default {
   theme: {
     extend: {
       colors: {
-        accent: "var(--accent)",
-        "accent-action": "var(--accent-action)",
-        teal: "var(--teal)",
+        // rgb(<channels> / <alpha-value>) lets opacity modifiers like bg-accent/10 work
+        accent: "rgb(var(--accent-rgb) / <alpha-value>)",
+        "accent-action": "rgb(var(--accent-action-rgb) / <alpha-value>)",
+        teal: "rgb(var(--teal-rgb) / <alpha-value>)",
       },
       fontFamily: {
         display: ["var(--font-display)"],
