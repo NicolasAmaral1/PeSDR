@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import func, literal, select, union_all
@@ -32,8 +32,10 @@ from ai_sdr.models.outbound_message import OutboundMessage
 from ai_sdr.models.talk import Talk
 from ai_sdr.models.talkflow_state import TalkFlowState
 
-# Statuses that constitute an "active" Talk (mirrors TalkRepository)
-_ACTIVE_STATUSES = ("active", "paused", "requires_review")
+# Statuses that constitute an "active" Talk (mirrors TalkRepository).
+# "paused" is excluded: derive_state has no branch for it (would render "closed"),
+# and it is a v1-unused reserved status.
+_ACTIVE_STATUSES = ("active", "requires_review")
 
 
 # ---------------------------------------------------------------------------
@@ -124,7 +126,10 @@ async def list_contacts(
     # ------------------------------------------------------------------
     inbound_max_sq = (
         select(func.max(InboundMessageRow.received_at))
-        .where(InboundMessageRow.lead_id == Lead.id)
+        .where(
+            InboundMessageRow.lead_id == Lead.id,
+            InboundMessageRow.tenant_id == tenant_id,
+        )
         .correlate(Lead)
         .scalar_subquery()
     )
@@ -134,7 +139,10 @@ async def list_contacts(
     # ------------------------------------------------------------------
     outbound_max_sq = (
         select(func.max(OutboundMessage.sent_at))
-        .where(OutboundMessage.lead_id == Lead.id)
+        .where(
+            OutboundMessage.lead_id == Lead.id,
+            OutboundMessage.tenant_id == tenant_id,
+        )
         .correlate(Lead)
         .scalar_subquery()
     )
@@ -153,7 +161,10 @@ async def list_contacts(
     # We need the text from the row with the highest received_at.
     latest_inbound_text_sq = (
         select(InboundMessageRow.text)
-        .where(InboundMessageRow.lead_id == Lead.id)
+        .where(
+            InboundMessageRow.lead_id == Lead.id,
+            InboundMessageRow.tenant_id == tenant_id,
+        )
         .order_by(InboundMessageRow.received_at.desc())
         .limit(1)
         .correlate(Lead)
@@ -165,7 +176,10 @@ async def list_contacts(
     # ------------------------------------------------------------------
     latest_outbound_text_sq = (
         select(OutboundMessage.body_text)
-        .where(OutboundMessage.lead_id == Lead.id)
+        .where(
+            OutboundMessage.lead_id == Lead.id,
+            OutboundMessage.tenant_id == tenant_id,
+        )
         .order_by(OutboundMessage.sent_at.desc())
         .limit(1)
         .correlate(Lead)
@@ -176,12 +190,16 @@ async def list_contacts(
     # Correlated subquery: unread inbound count
     # LEFT JOIN operator_read_markers on (user_id, lead_id).
     # null marker → count ALL inbound for this lead.
+    # Epoch sentinel: no marker ↔ all messages are unread.
     # ------------------------------------------------------------------
+    _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
     marker_sq = (
         select(OperatorReadMarker.last_read_message_at)
         .where(
             OperatorReadMarker.user_id == user_id,
             OperatorReadMarker.lead_id == Lead.id,
+            OperatorReadMarker.tenant_id == tenant_id,
         )
         .correlate(Lead)
         .scalar_subquery()
@@ -190,27 +208,7 @@ async def list_contacts(
         select(func.count())
         .where(
             InboundMessageRow.lead_id == Lead.id,
-            # When marker_sq is NULL (no marker), the condition below
-            # evaluates to TRUE for every row (count all).
-            # When marker_sq has a value, count rows newer than it.
-            InboundMessageRow.received_at
-            > func.coalesce(marker_sq, InboundMessageRow.received_at - literal("1 second").cast(type_=None)),
-        )
-        .correlate(Lead)
-        .scalar_subquery()
-    )
-
-    # Simpler unread: when no marker exists count all; otherwise count newer.
-    # Rewrite: unread = COUNT(*) WHERE received_at > COALESCE(marker, epoch)
-    # We use a Python datetime for the epoch sentinel so asyncpg gets the right type.
-    from datetime import timezone as _tz
-
-    _EPOCH = datetime(1970, 1, 1, tzinfo=_tz.utc)
-
-    unread_sq2 = (
-        select(func.count())
-        .where(
-            InboundMessageRow.lead_id == Lead.id,
+            InboundMessageRow.tenant_id == tenant_id,
             InboundMessageRow.received_at
             > func.coalesce(marker_sq, literal(_EPOCH)),
         )
@@ -225,6 +223,7 @@ async def list_contacts(
         select(Talk)
         .where(
             Talk.lead_id == Lead.id,
+            Talk.tenant_id == tenant_id,
             Talk.status.in_(_ACTIVE_STATUSES),
         )
         .order_by(Talk.created_at.desc())
@@ -261,7 +260,7 @@ async def list_contacts(
             latest_outbound_text_sq.label("latest_outbound_text"),
             inbound_max_sq.label("inbound_max"),
             outbound_max_sq.label("outbound_max"),
-            unread_sq2.label("unread"),
+            unread_sq.label("unread"),
             funnel_node_sq.label("funnel_node"),
         )
         .outerjoin(active_talk_sq, active_talk_sq.c.lead_id == Lead.id)
