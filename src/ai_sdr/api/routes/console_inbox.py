@@ -23,18 +23,22 @@ from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ai_sdr.api.deps import db_session
+from ai_sdr.api.deps import adapter_registry, db_session
 from ai_sdr.api.schemas.console_inbox import (
     ContactDetailOut,
     ContactOut,
     InstanceOut,
     MessageOut,
     ReadBody,
+    SendBody,
 )
+from ai_sdr.messaging.errors import WindowExpiredError
+from ai_sdr.messaging.registry import AdapterRegistry
 from ai_sdr.models.inbound_message import InboundMessageRow
 from ai_sdr.models.instance import Instance
 from ai_sdr.models.lead import Lead
 from ai_sdr.models.operator_read_marker import OperatorReadMarker
+from ai_sdr.models.outbound_message import OutboundMessage
 from ai_sdr.models.talk import Talk
 from ai_sdr.models.talkflow_state import TalkFlowState
 from ai_sdr.models.tenant import Tenant
@@ -50,6 +54,7 @@ router = APIRouter(prefix="/api/console/tenants/{tenant_slug}")
 
 TenantCtx = Annotated[tuple[Tenant, User], Depends(require_tenant_access)]
 DbSession = Annotated[AsyncSession, Depends(db_session)]
+RegistryDep = Annotated[AdapterRegistry, Depends(adapter_registry)]
 
 
 # ---------------------------------------------------------------------------
@@ -398,3 +403,102 @@ async def release_talk(
 
     await db.commit()
     return {"talk_id": active_talk.id, "handling_mode": "ai"}
+
+
+# ---------------------------------------------------------------------------
+# POST /contacts/{lead_id}/send  -> 200 | 404 | 409 | 422
+# ---------------------------------------------------------------------------
+
+@router.post("/contacts/{lead_id}/send")
+async def send_operator_message(
+    lead_id: uuid.UUID,
+    body: SendBody,
+    ctx: TenantCtx,
+    db: DbSession,
+    registry: RegistryDep,
+) -> dict:
+    """Send a free-text message from the operator to a lead.
+
+    Requires the lead's active talk to be in 'human' handling_mode.
+    Idempotent: a duplicate client_message_id returns the existing
+    OutboundMessage without re-sending.
+    Raises 422 if the WhatsApp 24h window has expired.
+    """
+    tenant, _user = ctx
+
+    # 1. Load lead (404 if missing or foreign).
+    lead = (
+        await db.execute(select(Lead).where(Lead.id == lead_id))
+    ).scalar_one_or_none()
+    if lead is None or lead.tenant_id != tenant.id:
+        raise HTTPException(status_code=404, detail=f"contact {lead_id} not found")
+
+    # 2. Find the lead's ACTIVE talk (status in active/requires_review, latest).
+    active_talk: Talk | None = (
+        await db.execute(
+            select(Talk)
+            .where(
+                Talk.lead_id == lead_id,
+                Talk.tenant_id == tenant.id,
+                Talk.status.in_(("active", "requires_review")),
+            )
+            .order_by(Talk.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if active_talk is None:
+        raise HTTPException(status_code=404, detail="no active talk found")
+
+    # 3. Require human handling_mode.
+    if active_talk.handling_mode != "human":
+        raise HTTPException(status_code=409, detail="take over the conversation first")
+
+    # 4. Idempotency: return existing OutboundMessage if client_message_id already seen.
+    existing: OutboundMessage | None = (
+        await db.execute(
+            select(OutboundMessage).where(
+                OutboundMessage.tenant_id == tenant.id,
+                OutboundMessage.talkflow_id == active_talk.id,
+                OutboundMessage.client_message_id == body.client_message_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        return {
+            "outbound_id": existing.id,
+            "external_id": existing.external_id,
+            "status": existing.status,
+        }
+
+    # 5. Resolve adapter and send.
+    adapter = registry.get_for_tenant(tenant)
+    try:
+        result = await adapter.send_text(lead.whatsapp_e164, body.text)
+    except WindowExpiredError as exc:
+        raise HTTPException(
+            status_code=422, detail="24h window closed; template required"
+        ) from exc
+
+    # 6. Insert OutboundMessage and commit.
+    now = datetime.now(UTC)
+    outbound = OutboundMessage(
+        tenant_id=tenant.id,
+        talkflow_id=active_talk.id,
+        lead_id=lead.id,
+        provider="whatsapp_cloud",
+        message_type="text",
+        body_text=body.text,
+        status="sent",
+        external_id=result.external_id,
+        triggered_by="operator",
+        client_message_id=body.client_message_id,
+        sent_at=now,
+    )
+    db.add(outbound)
+    await db.commit()
+
+    return {
+        "outbound_id": outbound.id,
+        "external_id": outbound.external_id,
+        "status": outbound.status,
+    }

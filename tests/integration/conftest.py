@@ -13,6 +13,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, text
 
 from ai_sdr.db.rls import set_tenant_context
+from ai_sdr.messaging.fake import FakeMessagingAdapter
 from ai_sdr.models.inbound_message import InboundMessageRow
 from ai_sdr.models.instance import Instance
 from ai_sdr.models.lead import Lead
@@ -241,3 +242,105 @@ def seeded_talk_factory(db_session):
         return talk, tenant
 
     return _factory
+
+
+# ---------------------------------------------------------------------------
+# authed_inbox_client_with_fake_adapter
+# ---------------------------------------------------------------------------
+
+class _FakeRegistryStub:
+    """Minimal registry stub: get_for_tenant always returns the shared FakeMessagingAdapter."""
+
+    def __init__(self, adapter: FakeMessagingAdapter) -> None:
+        self._adapter = adapter
+
+    def get_for_tenant(self, tenant: object) -> FakeMessagingAdapter:  # noqa: ARG002
+        return self._adapter
+
+
+@pytest.fixture
+async def authed_inbox_client_with_fake_adapter(app, db_session, isolated_tenants_dir, monkeypatch):
+    """Like authed_inbox_client but replaces app.state.adapter_registry with a
+    _FakeRegistryStub backed by a shared FakeMessagingAdapter.
+
+    Yields (client, ctx) where ctx contains:
+      - slug: tenant slug
+      - tenant: Tenant ORM object
+      - user: User ORM object
+      - lead: Lead ORM object
+      - lead_id: UUID of the seeded lead (convenience alias)
+      - instance: Instance ORM object
+      - fake_adapter: the shared FakeMessagingAdapter instance (for inspection/forcing errors)
+    """
+    _patch_settings(monkeypatch, isolated_tenants_dir)
+
+    tenant = Tenant(slug=f"inbox-{uuid.uuid4().hex[:6]}", display_name="InboxTest")
+    db_session.add(tenant)
+    await db_session.flush()
+    _make_tenant_yaml(isolated_tenants_dir, tenant.slug)
+
+    await set_tenant_context(db_session, tenant.id)
+
+    user = User(username=f"u_{uuid.uuid4().hex[:6]}", password_hash=hash_password("pw"))
+    db_session.add(user)
+    await db_session.flush()
+    db_session.add(UserTenantAccess(user_id=user.id, tenant_id=tenant.id, role="operator"))
+
+    instance = Instance(tenant_id=tenant.id, channel_label="main", display_name="Main")
+    db_session.add(instance)
+    await db_session.flush()
+
+    lead = Lead(
+        tenant_id=tenant.id,
+        whatsapp_e164="+5511988887777",
+        status="pending_assignment",
+        inbound_channel_label="main",
+    )
+    db_session.add(lead)
+    await db_session.flush()
+
+    db_session.add(
+        InboundMessageRow(
+            tenant_id=tenant.id,
+            provider="whatsapp_cloud",
+            external_id=f"wamid.{uuid.uuid4().hex}",
+            lead_id=lead.id,
+            from_address="+5511988887777",
+            text="oi, queria saber sobre a mentoria",
+            received_at=datetime.now(UTC),
+            raw={},
+        )
+    )
+    await db_session.commit()
+
+    # Wire up the fake adapter registry BEFORE creating the client.
+    fake_adapter = FakeMessagingAdapter()
+    app.state.adapter_registry = _FakeRegistryStub(fake_adapter)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+        follow_redirects=False,
+    ) as client:
+        login_resp = await client.post(
+            "/console/login",
+            data={"username": user.username, "password": "pw"},
+        )
+        assert login_resp.status_code == 303, f"Login failed: {login_resp.status_code} {login_resp.text}"
+        cookie = login_resp.cookies["pesdr_session"]
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+        follow_redirects=False,
+        cookies={"pesdr_session": cookie},
+    ) as client:
+        yield client, {
+            "slug": tenant.slug,
+            "tenant": tenant,
+            "user": user,
+            "lead": lead,
+            "lead_id": lead.id,
+            "instance": instance,
+            "fake_adapter": fake_adapter,
+        }

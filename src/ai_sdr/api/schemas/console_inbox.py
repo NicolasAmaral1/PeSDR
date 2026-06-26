@@ -54,3 +54,8 @@ class ContactDetailOut(BaseModel):
 
 class ReadBody(BaseModel):
     last_read_message_at: datetime
+
+
+class SendBody(BaseModel):
+    text: str
+    client_message_id: uuid.UUID
