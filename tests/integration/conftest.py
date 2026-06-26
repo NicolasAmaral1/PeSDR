@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import tempfile
 import uuid
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select, text
+from sqlalchemy import select
 
 from ai_sdr.db.rls import set_tenant_context
 from ai_sdr.flowengine.pipeline import run_turn
@@ -167,7 +166,7 @@ def seeded_talk_factory(db_session):
     async def _factory(
         handling_mode: str = "ai",
         status: str = "active",
-        lead_id: Optional[uuid.UUID] = None,
+        lead_id: uuid.UUID | None = None,
     ) -> tuple[Talk, Tenant]:
         if lead_id is not None:
             # --- lead_id path: attach Talk to an existing lead's tenant ---
@@ -471,7 +470,7 @@ def run_turn_human_harness(db_session):
             text=inbound_text,
             raw={"body": inbound_text},
             media_type="text",
-            received_at=datetime.now(timezone.utc),
+            received_at=datetime.now(UTC),
         )
         db_session.add(inbound)
         await db_session.flush()
@@ -499,7 +498,7 @@ def run_turn_human_harness(db_session):
             adapter=adapter,
             opt_out_keywords=["sair"],
             guardrail_cfg=gcfg,
-            now=datetime(2026, 6, 26, 10, 0, tzinfo=timezone.utc),
+            now=datetime(2026, 6, 26, 10, 0, tzinfo=UTC),
         )
 
         return result, adapter, llm_called

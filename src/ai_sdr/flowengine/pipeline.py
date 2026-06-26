@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from langchain_core.runnables import Runnable
@@ -37,7 +37,6 @@ from ai_sdr.flowengine.preprocessing import (
 )
 from ai_sdr.flowengine.routing import validate_transition
 from ai_sdr.flowengine.sender import send_response_text
-from ai_sdr.voice.renderer import VoiceSynthesisError
 from ai_sdr.flowengine.system_prompt import (
     CorrectionContext,
     FreshLayer,
@@ -57,6 +56,7 @@ from ai_sdr.models.tenant import Tenant
 from ai_sdr.models.treeflow_version import TreeflowVersion
 from ai_sdr.repositories.talkflow_state_repository import TalkFlowStateRepository
 from ai_sdr.schemas.tenant_yaml import TenantConfig
+from ai_sdr.voice.renderer import VoiceSynthesisError
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +101,7 @@ async def run_turn(
     storage=None,
 ) -> RunTurnResult:
     """Execute one FlowEngine v2 turn. See module docstring."""
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
 
     # [1-3] Preprocessing — resolve Lead, Talk, State; opt-out detection
     try:
