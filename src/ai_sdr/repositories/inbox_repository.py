@@ -11,8 +11,8 @@ Task 4 delivers:
   - list_contacts(session, *, ...) -> list[ContactRow]
   - list_messages(session, *, lead_id, ...) -> list[MessageRow]
 
-Status / funnel / q filters (Task 6) are accepted in the signature but not
-applied yet — the base ordered list is the deliverable for Task 4.
+Task 6 adds:
+  - status / funnel / q filters wired in list_contacts
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import func, literal, select, union_all
+from sqlalchemy import and_, exists, func, literal, or_, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_sdr.models.inbound_message import InboundMessageRow
@@ -118,8 +118,10 @@ async def list_contacts(
     count, and the latest message preview.  Leads with no messages sort last
     (NULLS LAST).
 
-    Task 4: status / funnel / q filters are accepted but not yet applied.
-    Task 6 will add the WHERE clauses.
+    Filters (Task 6):
+      status: one of awaiting|ai|requires_review|human|closed
+      funnel: active talk's treeflow_id must match
+      q:      ILIKE match on display_name or whatsapp_e164
     """
 
     # ------------------------------------------------------------------
@@ -274,6 +276,72 @@ async def list_contacts(
     if before is not None:
         stmt = stmt.where(
             func.greatest(inbound_max_sq, outbound_max_sq) < before
+        )
+
+    # ------------------------------------------------------------------
+    # Task 6 filters
+    # ------------------------------------------------------------------
+
+    # status filter: translate the derive_state semantics into SQL predicates
+    # on the active_talk subquery columns (joined via LEFT OUTER JOIN above).
+    if status is not None:
+        _CLOSED_STATUSES = (
+            "closed_completed",
+            "closed_inactivity",
+            "closed_optout",
+            "closed_banned",
+        )
+        if status == "awaiting":
+            # No active talk
+            stmt = stmt.where(active_talk_sq.c.id.is_(None))
+        elif status == "ai":
+            # Active talk, status active, handling_mode ai
+            stmt = stmt.where(
+                active_talk_sq.c.id.is_not(None),
+                active_talk_sq.c.status == "active",
+                active_talk_sq.c.handling_mode == "ai",
+            )
+        elif status == "requires_review":
+            # Active talk with status requires_review
+            stmt = stmt.where(
+                active_talk_sq.c.id.is_not(None),
+                active_talk_sq.c.status == "requires_review",
+            )
+        elif status == "human":
+            # Active talk, handling_mode human
+            stmt = stmt.where(
+                active_talk_sq.c.id.is_not(None),
+                active_talk_sq.c.handling_mode == "human",
+            )
+        elif status == "closed":
+            # No active talk but ≥1 closed talk for this lead
+            closed_exists_sq = (
+                select(Talk.id)
+                .where(
+                    Talk.lead_id == Lead.id,
+                    Talk.tenant_id == tenant_id,
+                    Talk.status.in_(_CLOSED_STATUSES),
+                )
+                .correlate(Lead)
+                .exists()
+            )
+            stmt = stmt.where(
+                active_talk_sq.c.id.is_(None),
+                closed_exists_sq,
+            )
+
+    # funnel filter: active talk's treeflow_id must match
+    if funnel is not None:
+        stmt = stmt.where(active_talk_sq.c.treeflow_id == funnel)
+
+    # q filter: display_name or whatsapp_e164 ILIKE %q%
+    if q is not None:
+        pattern = f"%{q}%"
+        stmt = stmt.where(
+            or_(
+                Lead.display_name.ilike(pattern),
+                Lead.whatsapp_e164.ilike(pattern),
+            )
         )
 
     stmt = stmt.order_by(last_message_at_expr.desc().nullslast()).limit(limit)
