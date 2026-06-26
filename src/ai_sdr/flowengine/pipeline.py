@@ -139,6 +139,13 @@ async def run_turn(
         await set_tenant_context(session, tenant.id)
         await acquire_lead_lock(session, tenant.id, ctx.lead.id)
 
+        # Re-fetch the Talk row from the DB while holding the advisory lock.
+        # resolve_pipeline_context loaded ctx.talk BEFORE the lock was acquired,
+        # so a human takeover that landed between preprocessing and this point
+        # would not be visible on the cached ORM object. session.refresh() issues
+        # a SELECT under the lock, closing that race window.
+        await session.refresh(ctx.talk)
+
         # Load runtime state
         state_repo = TalkFlowStateRepository(session)
         state = await state_repo.load(ctx.talk.id)
