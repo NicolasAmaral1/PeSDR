@@ -37,3 +37,26 @@ def test_ws_rejects_unauthenticated(ws_authed_ctx):
     ):
         pass
     assert exc_info.value.code == 4401
+
+
+def test_ws_rejects_cross_tenant(ws_authed_ctx):
+    """An authenticated user with access to tenant A must be rejected (4401)
+    when connecting to an instance belonging to tenant B.
+
+    The instance for tenant B is seeded by ws_authed_ctx (cross_tenant_instance_id),
+    so the route reaches the UserTenantAccess check — not the instance-not-found
+    branch — proving it is the ACCESS check that rejects the request.
+    """
+    from starlette.websockets import WebSocketDisconnect
+
+    client, ctx = ws_authed_ctx
+    cross_inst = ctx["cross_tenant_instance_id"]
+    with (
+        pytest.raises(WebSocketDisconnect) as exc_info,
+        client.websocket_connect(
+            f"/ws/instances/{cross_inst}",
+            cookies={"pesdr_session": ctx["cookie"]},
+        ),
+    ):
+        pass
+    assert exc_info.value.code == 4401

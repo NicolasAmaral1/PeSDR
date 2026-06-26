@@ -555,6 +555,17 @@ async def ws_authed_ctx(app, db_session, isolated_tenants_dir, monkeypatch):
 
     instance_id = instance.id
 
+    # Seed a second tenant (B) + instance with NO UserTenantAccess for the
+    # authenticated user. Used by test_ws_rejects_cross_tenant to prove the
+    # ACCESS check fires (not the instance-not-found branch).
+    tenant_b = Tenant(slug=f"ws-b-{uuid.uuid4().hex[:6]}", display_name="WsTestB")
+    db_session.add(tenant_b)
+    await db_session.flush()
+    instance_b = Instance(tenant_id=tenant_b.id, channel_label="main", display_name="MainB")
+    db_session.add(instance_b)
+    await db_session.flush()
+    cross_tenant_instance_id = instance_b.id
+
     # Seed a Lead + TreeflowVersion + Talk so an operator can takeover+send on
     # this instance. inbound_channel_label='main' makes publish_message_created
     # resolve back to the seeded Instance. Talk starts in 'ai' mode so takeover
@@ -659,6 +670,7 @@ async def ws_authed_ctx(app, db_session, isolated_tenants_dir, monkeypatch):
                 "lead_id": lead_id,
                 "fake_adapter": fake_adapter,
                 "takeover_and_send": takeover_and_send,
+                "cross_tenant_instance_id": cross_tenant_instance_id,
             }
         finally:
             # Unconditional restore: None is the correct "unset" state, so we
