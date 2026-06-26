@@ -4,6 +4,7 @@ import { AppShell } from "./components/AppShell";
 import { InstanceSelector } from "./components/InstanceSelector";
 import { ContactList } from "./components/ContactList";
 import { ConversationView } from "./components/ConversationView";
+import { DetailsSidebar } from "./components/DetailsSidebar";
 
 export default function App() {
   const me = useMe();
@@ -50,7 +51,7 @@ export default function App() {
           <div className="grid h-full place-items-center text-slate-400">Selecione um contato</div>
         )
       }
-      sidebar={<div data-testid="sidebar-pane" />}
+      sidebar={leadId ? <DetailsSidebar slug={slug} leadId={leadId} /> : <div className="p-4 text-xs text-slate-400">Selecione um contato.</div>}
     />
   );
 }
