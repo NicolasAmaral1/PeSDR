@@ -19,7 +19,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -296,3 +296,105 @@ async def mark_contact_read(
     await db.execute(stmt)
     await db.commit()
     return Response(status_code=204)
+
+
+# ---------------------------------------------------------------------------
+# POST /contacts/{lead_id}/takeover  -> 200 | 404 | 409
+# ---------------------------------------------------------------------------
+
+@router.post("/contacts/{lead_id}/takeover")
+async def takeover_talk(
+    lead_id: uuid.UUID,
+    ctx: TenantCtx,
+    db: DbSession,
+) -> dict:
+    tenant, user = ctx
+
+    lead = (
+        await db.execute(select(Lead).where(Lead.id == lead_id))
+    ).scalar_one_or_none()
+    if lead is None or lead.tenant_id != tenant.id:
+        raise HTTPException(status_code=404, detail=f"contact {lead_id} not found")
+
+    active_talk: Talk | None = (
+        await db.execute(
+            select(Talk)
+            .where(
+                Talk.lead_id == lead_id,
+                Talk.tenant_id == tenant.id,
+                Talk.status.in_(("active", "requires_review")),
+            )
+            .order_by(Talk.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if active_talk is None:
+        raise HTTPException(status_code=404, detail="no active talk found")
+
+    # Atomic check-and-set: only updates if handling_mode is currently 'ai'
+    result = await db.execute(
+        update(Talk)
+        .where(
+            Talk.id == active_talk.id,
+            Talk.tenant_id == tenant.id,
+            Talk.handling_mode == "ai",
+        )
+        .values(handling_mode="human", assigned_operator_id=user.id)
+        .returning(Talk.id)
+    )
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=409, detail="already human")
+
+    await db.commit()
+    return {"talk_id": active_talk.id, "handling_mode": "human"}
+
+
+# ---------------------------------------------------------------------------
+# POST /contacts/{lead_id}/release  -> 200 | 404 | 409
+# ---------------------------------------------------------------------------
+
+@router.post("/contacts/{lead_id}/release")
+async def release_talk(
+    lead_id: uuid.UUID,
+    ctx: TenantCtx,
+    db: DbSession,
+) -> dict:
+    tenant, user = ctx
+
+    lead = (
+        await db.execute(select(Lead).where(Lead.id == lead_id))
+    ).scalar_one_or_none()
+    if lead is None or lead.tenant_id != tenant.id:
+        raise HTTPException(status_code=404, detail=f"contact {lead_id} not found")
+
+    active_talk: Talk | None = (
+        await db.execute(
+            select(Talk)
+            .where(
+                Talk.lead_id == lead_id,
+                Talk.tenant_id == tenant.id,
+                Talk.status.in_(("active", "requires_review")),
+            )
+            .order_by(Talk.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if active_talk is None:
+        raise HTTPException(status_code=404, detail="no active talk found")
+
+    # Atomic check-and-set: only updates if handling_mode is currently 'human'
+    result = await db.execute(
+        update(Talk)
+        .where(
+            Talk.id == active_talk.id,
+            Talk.tenant_id == tenant.id,
+            Talk.handling_mode == "human",
+        )
+        .values(handling_mode="ai", assigned_operator_id=None)
+        .returning(Talk.id)
+    )
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=409, detail="not human")
+
+    await db.commit()
+    return {"talk_id": active_talk.id, "handling_mode": "ai"}
