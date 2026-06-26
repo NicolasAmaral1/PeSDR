@@ -1,0 +1,8 @@
+:root {
+  --accent: #0057ff;
+  --accent-action: #0038ff;
+  --teal: #44cdce;
+  --brand-gradient: linear-gradient(52deg, #0057ff, #1a63f7, #f9c5b4);
+  --font-display: "Syne", system-ui, sans-serif;
+  --font-body: "Madefor Text", system-ui, sans-serif;
+}
