@@ -4,12 +4,15 @@ Tests:
   1. send while talk is in 'ai' mode → 409 (must takeover first)
   2. takeover → send → 200 with outbound_id
   3. same client_message_id → same outbound_id (idempotent, no re-send)
+  4. adapter raises WindowExpiredError → 422 with window-closed detail
 """
 from __future__ import annotations
 
 import uuid
 
 import pytest
+
+from ai_sdr.messaging.errors import WindowExpiredError
 
 pytestmark = pytest.mark.integration
 
@@ -54,3 +57,30 @@ async def test_send_requires_human_then_sends_idempotent(
     )
     assert r2.status_code == 200, r2.text
     assert r2.json()["outbound_id"] == first_id  # idempotent, no re-send
+
+
+async def test_send_window_expired_returns_422(
+    authed_inbox_client_with_fake_adapter, seeded_talk_factory, db_session
+):
+    """WindowExpiredError from adapter → 422 with informative detail (M3 coverage)."""
+    client, ctx = authed_inbox_client_with_fake_adapter
+    slug, lead = ctx["slug"], ctx["lead_id"]
+    fake_adapter = ctx["fake_adapter"]
+
+    # Seed a talk and takeover so we're in human mode.
+    await seeded_talk_factory(lead_id=lead, handling_mode="ai")
+    await db_session.commit()
+    takeover_resp = await client.post(
+        f"/api/console/tenants/{slug}/contacts/{lead}/takeover"
+    )
+    assert takeover_resp.status_code == 200, takeover_resp.text
+
+    # Force the adapter to raise WindowExpiredError on next send.
+    fake_adapter.fail_next_send(WindowExpiredError("window closed"))
+
+    r = await client.post(
+        f"/api/console/tenants/{slug}/contacts/{lead}/send",
+        json={"text": "oi", "client_message_id": str(uuid.uuid4())},
+    )
+    assert r.status_code == 422, r.text
+    assert "window" in r.json()["detail"].lower()

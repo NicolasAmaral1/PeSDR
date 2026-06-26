@@ -21,6 +21,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_sdr.api.deps import adapter_registry, db_session
@@ -32,7 +33,8 @@ from ai_sdr.api.schemas.console_inbox import (
     ReadBody,
     SendBody,
 )
-from ai_sdr.messaging.errors import WindowExpiredError
+from ai_sdr.db.advisory_lock import acquire_lead_lock
+from ai_sdr.messaging.errors import TerminalError, WindowExpiredError
 from ai_sdr.messaging.registry import AdapterRegistry
 from ai_sdr.models.inbound_message import InboundMessageRow
 from ai_sdr.models.instance import Instance
@@ -336,6 +338,10 @@ async def takeover_talk(
     if active_talk is None:
         raise HTTPException(status_code=404, detail="no active talk found")
 
+    # Serialize against run_turn: if a worker turn holds the lead lock we wait
+    # until it commits, ensuring no AI message is sent after the flip to 'human'.
+    await acquire_lead_lock(db, tenant.id, lead_id)
+
     # Atomic check-and-set: only updates if handling_mode is currently 'ai'
     result = await db.execute(
         update(Talk)
@@ -478,6 +484,10 @@ async def send_operator_message(
         raise HTTPException(
             status_code=422, detail="24h window closed; template required"
         ) from exc
+    except TerminalError as exc:
+        raise HTTPException(
+            status_code=422, detail=f"send failed: {type(exc).__name__}"
+        ) from exc
 
     # 6. Insert OutboundMessage and commit.
     now = datetime.now(UTC)
@@ -495,7 +505,27 @@ async def send_operator_message(
         sent_at=now,
     )
     db.add(outbound)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        # Concurrent POST with same client_message_id already committed first; return it.
+        existing_after_conflict: OutboundMessage | None = (
+            await db.execute(
+                select(OutboundMessage).where(
+                    OutboundMessage.tenant_id == tenant.id,
+                    OutboundMessage.talkflow_id == active_talk.id,
+                    OutboundMessage.client_message_id == body.client_message_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing_after_conflict is None:
+            raise
+        return {
+            "outbound_id": existing_after_conflict.id,
+            "external_id": existing_after_conflict.external_id,
+            "status": existing_after_conflict.status,
+        }
 
     return {
         "outbound_id": outbound.id,
