@@ -18,7 +18,8 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+import structlog
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
@@ -45,12 +46,16 @@ from ai_sdr.models.talk import Talk
 from ai_sdr.models.talkflow_state import TalkFlowState
 from ai_sdr.models.tenant import Tenant
 from ai_sdr.models.user import User
+from ai_sdr.realtime.events import publish_inbox_event
+from ai_sdr.realtime.producers import publish_message_created, resolve_instance_id
 from ai_sdr.repositories.inbox_repository import (
     derive_state,
     list_contacts,
     list_messages,
 )
 from ai_sdr.web.auth import require_tenant_access
+
+log = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/api/console/tenants/{tenant_slug}")
 
@@ -312,6 +317,7 @@ async def mark_contact_read(
 @router.post("/contacts/{lead_id}/takeover")
 async def takeover_talk(
     lead_id: uuid.UUID,
+    request: Request,
     ctx: TenantCtx,
     db: DbSession,
 ) -> dict:
@@ -357,6 +363,32 @@ async def takeover_talk(
         raise HTTPException(status_code=409, detail="already human")
 
     await db.commit()
+
+    # Best-effort realtime publish — failure MUST NOT fail the request.
+    redis = getattr(request.app.state, "redis", None)
+    if redis is not None:
+        try:
+            instance_id = await resolve_instance_id(
+                db, tenant_id=tenant.id, channel_label=lead.inbound_channel_label
+            )
+            if instance_id is not None:
+                # active_talk is now in 'human' mode; derive the new state.
+                active_talk.handling_mode = "human"
+                state = derive_state(active_talk)
+                await publish_inbox_event(
+                    redis,
+                    instance_id=instance_id,
+                    type="talk.updated",
+                    lead_id=lead_id,
+                    payload={
+                        "lead_id": str(lead_id),
+                        "handling_mode": "human",
+                        "state": state,
+                    },
+                )
+        except Exception:
+            log.exception("console_inbox.takeover_realtime_error", lead_id=str(lead_id))
+
     return {"talk_id": active_talk.id, "handling_mode": "human"}
 
 
@@ -367,6 +399,7 @@ async def takeover_talk(
 @router.post("/contacts/{lead_id}/release")
 async def release_talk(
     lead_id: uuid.UUID,
+    request: Request,
     ctx: TenantCtx,
     db: DbSession,
 ) -> dict:
@@ -408,6 +441,32 @@ async def release_talk(
         raise HTTPException(status_code=409, detail="not human")
 
     await db.commit()
+
+    # Best-effort realtime publish — failure MUST NOT fail the request.
+    redis = getattr(request.app.state, "redis", None)
+    if redis is not None:
+        try:
+            instance_id = await resolve_instance_id(
+                db, tenant_id=tenant.id, channel_label=lead.inbound_channel_label
+            )
+            if instance_id is not None:
+                # active_talk is now in 'ai' mode; derive the new state.
+                active_talk.handling_mode = "ai"
+                state = derive_state(active_talk)
+                await publish_inbox_event(
+                    redis,
+                    instance_id=instance_id,
+                    type="talk.updated",
+                    lead_id=lead_id,
+                    payload={
+                        "lead_id": str(lead_id),
+                        "handling_mode": "ai",
+                        "state": state,
+                    },
+                )
+        except Exception:
+            log.exception("console_inbox.release_realtime_error", lead_id=str(lead_id))
+
     return {"talk_id": active_talk.id, "handling_mode": "ai"}
 
 
@@ -418,6 +477,7 @@ async def release_talk(
 @router.post("/contacts/{lead_id}/send")
 async def send_operator_message(
     lead_id: uuid.UUID,
+    request: Request,
     body: SendBody,
     ctx: TenantCtx,
     db: DbSession,
@@ -526,6 +586,20 @@ async def send_operator_message(
             "external_id": existing_after_conflict.external_id,
             "status": existing_after_conflict.status,
         }
+
+    # Best-effort realtime publish — failure MUST NOT fail the request.
+    redis = getattr(request.app.state, "redis", None)
+    if redis is not None:
+        try:
+            await publish_message_created(
+                redis,
+                db,
+                tenant_id=tenant.id,
+                lead=lead,
+                body_preview=body.text[:120],
+            )
+        except Exception:
+            log.exception("console_inbox.send_realtime_error", lead_id=str(lead_id))
 
     return {
         "outbound_id": outbound.id,

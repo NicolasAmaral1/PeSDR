@@ -349,6 +349,7 @@ async def authed_inbox_client_with_fake_adapter(app, db_session, isolated_tenant
         yield client, {
             "slug": tenant.slug,
             "tenant": tenant,
+            "tenant_id": tenant.id,
             "user": user,
             "lead": lead,
             "lead_id": lead.id,
