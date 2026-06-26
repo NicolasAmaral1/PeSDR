@@ -37,6 +37,18 @@ from ai_sdr.models.talkflow_state import TalkFlowState
 # and it is a v1-unused reserved status.
 _ACTIVE_STATUSES = ("active", "requires_review")
 
+# All statuses that indicate a talk has been closed (every closed_* variant from TalkStatus).
+_CLOSED_STATUSES = (
+    "closed_completed",
+    "closed_completed_success",
+    "closed_completed_failure",
+    "closed_no_interest",
+    "closed_duration",
+    "closed_inactivity",
+    "closed_optout",
+    "closed_banned",
+)
+
 
 # ---------------------------------------------------------------------------
 # State derivation (pure)
@@ -252,6 +264,22 @@ async def list_contacts(
     )
 
     # ------------------------------------------------------------------
+    # Correlated EXISTS: lead has at least one closed talk (tenant-scoped).
+    # Built before the base query so it can be included in the SELECT list
+    # (for computing ContactRow.state) and reused in WHERE filters.
+    # ------------------------------------------------------------------
+    has_closed_sq = (
+        select(Talk.id)
+        .where(
+            Talk.lead_id == Lead.id,
+            Talk.tenant_id == tenant_id,
+            Talk.status.in_(_CLOSED_STATUSES),
+        )
+        .correlate(Lead)
+        .exists()
+    )
+
+    # ------------------------------------------------------------------
     # Base query: Lead LEFT JOIN active_talk
     # ------------------------------------------------------------------
     stmt = (
@@ -265,6 +293,7 @@ async def list_contacts(
             outbound_max_sq.label("outbound_max"),
             unread_sq.label("unread"),
             funnel_node_sq.label("funnel_node"),
+            has_closed_sq.label("has_closed"),
         )
         .outerjoin(active_talk_sq, active_talk_sq.c.lead_id == Lead.id)
         .where(
@@ -285,15 +314,12 @@ async def list_contacts(
     # status filter: translate the derive_state semantics into SQL predicates
     # on the active_talk subquery columns (joined via LEFT OUTER JOIN above).
     if status is not None:
-        _CLOSED_STATUSES = (
-            "closed_completed",
-            "closed_inactivity",
-            "closed_optout",
-            "closed_banned",
-        )
         if status == "awaiting":
-            # No active talk
-            stmt = stmt.where(active_talk_sq.c.id.is_(None))
+            # No active talk AND no closed talk (true fresh lead)
+            stmt = stmt.where(
+                active_talk_sq.c.id.is_(None),
+                ~has_closed_sq,
+            )
         elif status == "ai":
             # Active talk, status active, handling_mode ai
             stmt = stmt.where(
@@ -315,19 +341,9 @@ async def list_contacts(
             )
         elif status == "closed":
             # No active talk but ≥1 closed talk for this lead
-            closed_exists_sq = (
-                select(Talk.id)
-                .where(
-                    Talk.lead_id == Lead.id,
-                    Talk.tenant_id == tenant_id,
-                    Talk.status.in_(_CLOSED_STATUSES),
-                )
-                .correlate(Lead)
-                .exists()
-            )
             stmt = stmt.where(
                 active_talk_sq.c.id.is_(None),
-                closed_exists_sq,
+                has_closed_sq,
             )
 
     # funnel filter: active talk's treeflow_id must match
@@ -385,6 +401,17 @@ async def list_contacts(
 
         unread: int = row.unread or 0
         funnel_node: str | None = row.funnel_node
+        has_closed: bool = bool(row.has_closed)
+
+        # Compute state: active-talk case delegates to derive_state; for
+        # no-active-talk leads, distinguish closed (has prior closed talk)
+        # from awaiting (truly fresh, no talk history at all).
+        if talk is not None:
+            state = derive_state(talk)
+        elif has_closed:
+            state = "closed"
+        else:
+            state = "awaiting"
 
         results.append(
             ContactRow(
@@ -395,7 +422,7 @@ async def list_contacts(
                 status=lead.status,
                 inbound_channel_label=lead.inbound_channel_label,
                 created_at=lead.created_at,
-                state=derive_state(talk),
+                state=state,
                 last_message_at=last_msg_at,
                 last_message_preview=preview,
                 active_talk=talk,
