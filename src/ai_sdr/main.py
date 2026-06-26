@@ -10,6 +10,7 @@ import redis.asyncio as aioredis
 import structlog
 from arq.connections import RedisSettings, create_pool
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from ai_sdr.api.routes.console_inbox import router as console_inbox_router
 from ai_sdr.api.routes.console_me import router as console_me_router
@@ -26,6 +27,11 @@ from ai_sdr.tenant_loader.loader import TenantLoader
 from ai_sdr.treeflow.checkpointer import ensure_checkpointer_schema
 from ai_sdr.web.login import router as console_login_router
 from ai_sdr.web.routes import router as console_router
+
+
+def _inbox_static_dir() -> Path:
+    # src/ai_sdr/main.py -> src/ai_sdr/web/static/inbox
+    return Path(__file__).parent / "web" / "static" / "inbox"
 
 
 def _validate_console_secret_key_if_needed(settings: Settings) -> None:
@@ -124,6 +130,9 @@ def create_app() -> FastAPI:
     app.include_router(console_inbox_router)
     app.include_router(ws_inbox_router)
     app.include_router(console_me_router)
+    inbox_dir = _inbox_static_dir()
+    if (inbox_dir / "index.html").exists():
+        app.mount("/inbox", StaticFiles(directory=str(inbox_dir), html=True), name="inbox")
     return app
 
 
