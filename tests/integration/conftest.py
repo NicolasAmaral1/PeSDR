@@ -661,8 +661,10 @@ async def ws_authed_ctx(app, db_session, isolated_tenants_dir, monkeypatch):
                 "takeover_and_send": takeover_and_send,
             }
         finally:
-            if _orig_registry is not None:
-                app.state.adapter_registry = _orig_registry
+            # Unconditional restore: None is the correct "unset" state, so we
+            # must not leave the fake stub on app.state for a subsequent test
+            # sharing the same app fixture (test isolation hygiene).
+            app.state.adapter_registry = _orig_registry
             rconn.close()
             _dbsession._engine = None
             _dbsession._sessionmaker = None
