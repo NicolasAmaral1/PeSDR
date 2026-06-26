@@ -3,6 +3,7 @@ import { useMe, useInstances } from "./hooks/useInbox";
 import { AppShell } from "./components/AppShell";
 import { InstanceSelector } from "./components/InstanceSelector";
 import { ContactList } from "./components/ContactList";
+import { ConversationView } from "./components/ConversationView";
 
 export default function App() {
   const me = useMe();
@@ -44,7 +45,7 @@ export default function App() {
       }
       conversation={
         leadId ? (
-          <div data-testid="conversation-pane" data-lead={leadId} />
+          <ConversationView slug={slug} leadId={leadId} />
         ) : (
           <div className="grid h-full place-items-center text-slate-400">Selecione um contato</div>
         )
