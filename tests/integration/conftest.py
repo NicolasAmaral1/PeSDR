@@ -10,7 +10,7 @@ from typing import Optional
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text
+from sqlalchemy import select, text
 
 from ai_sdr.db.rls import set_tenant_context
 from ai_sdr.models.inbound_message import InboundMessageRow
@@ -162,28 +162,60 @@ def seeded_talk_factory(db_session):
         status: str = "active",
         lead_id: Optional[uuid.UUID] = None,
     ) -> tuple[Talk, Tenant]:
-        tenant = Tenant(slug=f"talk-{uuid.uuid4().hex[:6]}", display_name="TalkTest")
-        db_session.add(tenant)
-        await db_session.flush()
+        if lead_id is not None:
+            # --- lead_id path: attach Talk to an existing lead's tenant ---
+            existing_lead = await db_session.get(Lead, lead_id)
+            if existing_lead is None:
+                raise ValueError(f"seeded_talk_factory: lead {lead_id} not found")
 
-        # Set RLS tenant context (required by tenant-scoped tables).
-        await db_session.execute(
-            text("SELECT set_config('app.current_tenant', :t, true)"),
-            {"t": str(tenant.id)},
-        )
+            tenant = await db_session.get(Tenant, existing_lead.tenant_id)
+            if tenant is None:
+                raise ValueError(
+                    f"seeded_talk_factory: tenant {existing_lead.tenant_id} not found"
+                )
 
-        # Seed a TreeflowVersion so Talk FK is satisfied.
-        tfv = TreeflowVersion(
-            tenant_id=tenant.id,
-            treeflow_id="tf-seeded",
-            version="1",
-            content_hash=uuid.uuid4().hex,
-            content_yaml="nodes: []",
-        )
-        db_session.add(tfv)
-        await db_session.flush()
+            # Set RLS tenant context to the lead's tenant.
+            await set_tenant_context(db_session, tenant.id)
 
-        if lead_id is None:
+            # Reuse an existing TreeflowVersion for this tenant if available,
+            # otherwise create one.
+            tfv_result = await db_session.execute(
+                select(TreeflowVersion)
+                .where(TreeflowVersion.tenant_id == tenant.id)
+                .limit(1)
+            )
+            tfv = tfv_result.scalars().first()
+            if tfv is None:
+                tfv = TreeflowVersion(
+                    tenant_id=tenant.id,
+                    treeflow_id="tf-seeded",
+                    version="1",
+                    content_hash=uuid.uuid4().hex,
+                    content_yaml="nodes: []",
+                )
+                db_session.add(tfv)
+                await db_session.flush()
+
+        else:
+            # --- no lead_id path: create a fresh Tenant + Lead + TreeflowVersion ---
+            tenant = Tenant(slug=f"talk-{uuid.uuid4().hex[:6]}", display_name="TalkTest")
+            db_session.add(tenant)
+            await db_session.flush()
+
+            # Set RLS tenant context (required by tenant-scoped tables).
+            await set_tenant_context(db_session, tenant.id)
+
+            # Seed a TreeflowVersion so Talk FK is satisfied.
+            tfv = TreeflowVersion(
+                tenant_id=tenant.id,
+                treeflow_id="tf-seeded",
+                version="1",
+                content_hash=uuid.uuid4().hex,
+                content_yaml="nodes: []",
+            )
+            db_session.add(tfv)
+            await db_session.flush()
+
             lead = Lead(
                 tenant_id=tenant.id,
                 whatsapp_e164=f"+551{uuid.uuid4().int % 10**10:010d}",
