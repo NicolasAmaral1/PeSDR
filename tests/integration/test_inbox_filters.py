@@ -108,6 +108,123 @@ async def test_status_filter_awaiting(authed_inbox_client, db_session):
     )
 
 
+async def test_multi_lead_active_talk_lateral(authed_inbox_client, db_session):
+    """Two leads each have a DISTINCT active talk — lateral join must preserve both.
+
+    This is the regression test for the C1 bug where .subquery("active_talk")
+    collapsed LIMIT 1 globally, dropping all but one active-talk lead.
+
+    Seeds:
+      - lead_a: active talk with handling_mode="ai"   → state must be "ai"
+      - lead_b: active talk with handling_mode="human" → state must be "human"
+
+    Asserts:
+      1. Unfiltered contacts list shows lead_a state=="ai" AND lead_b state=="human"
+         (both active talks survive — fails before lateral fix).
+      2. ?status=ai  → lead_a present, lead_b absent.
+      3. ?status=human → lead_b present, lead_a absent.
+    """
+    client, ctx = authed_inbox_client
+    tenant = ctx["tenant"]
+
+    # Re-establish RLS context (fixture committed; new implicit TX).
+    await db_session.execute(
+        text("SELECT set_config('app.current_tenant', :t, true)"),
+        {"t": str(tenant.id)},
+    )
+
+    # Seed a TreeflowVersion so Talk FK is satisfied.
+    tfv = TreeflowVersion(
+        tenant_id=tenant.id,
+        treeflow_id="tf-lateral-test",
+        version="1",
+        content_hash=uuid.uuid4().hex,
+        content_yaml="nodes: []",
+    )
+    db_session.add(tfv)
+    await db_session.flush()
+
+    # Lead A — active talk, ai mode.
+    lead_a = Lead(
+        tenant_id=tenant.id,
+        whatsapp_e164="+5511900000010",
+        status="pending_assignment",
+        inbound_channel_label="main",
+    )
+    db_session.add(lead_a)
+    await db_session.flush()
+
+    talk_a = Talk(
+        tenant_id=tenant.id,
+        lead_id=lead_a.id,
+        treeflow_id="tf-lateral-test",
+        treeflow_version_id=tfv.id,
+        status="active",
+        handling_mode="ai",
+        last_message_at=datetime.now(UTC),
+    )
+    db_session.add(talk_a)
+
+    # Lead B — active talk, human mode.
+    lead_b = Lead(
+        tenant_id=tenant.id,
+        whatsapp_e164="+5511900000011",
+        status="pending_assignment",
+        inbound_channel_label="main",
+    )
+    db_session.add(lead_b)
+    await db_session.flush()
+
+    talk_b = Talk(
+        tenant_id=tenant.id,
+        lead_id=lead_b.id,
+        treeflow_id="tf-lateral-test",
+        treeflow_version_id=tfv.id,
+        status="active",
+        handling_mode="human",
+        last_message_at=datetime.now(UTC),
+    )
+    db_session.add(talk_b)
+    await db_session.commit()
+
+    insts = (
+        await client.get(f"/api/console/tenants/{ctx['slug']}/instances")
+    ).json()
+    main_id = next(i["id"] for i in insts if i["channel_label"] == "main")
+    base = f"/api/console/tenants/{ctx['slug']}/instances/{main_id}/contacts"
+
+    # --- 1. Unfiltered: both active talks must survive ---
+    resp_all = await client.get(base)
+    assert resp_all.status_code == 200
+    all_contacts = resp_all.json()
+    by_id = {c["lead_id"]: c for c in all_contacts}
+
+    assert str(lead_a.id) in by_id, "lead_a must appear in unfiltered contacts"
+    assert str(lead_b.id) in by_id, "lead_b must appear in unfiltered contacts"
+    assert by_id[str(lead_a.id)]["state"] == "ai", (
+        f"lead_a expected state='ai', got {by_id[str(lead_a.id)]['state']!r} "
+        "(likely C1 bug: LIMIT 1 collapsed active talks globally)"
+    )
+    assert by_id[str(lead_b.id)]["state"] == "human", (
+        f"lead_b expected state='human', got {by_id[str(lead_b.id)]['state']!r} "
+        "(likely C1 bug: LIMIT 1 collapsed active talks globally)"
+    )
+
+    # --- 2. ?status=ai includes lead_a, excludes lead_b ---
+    resp_ai = await client.get(f"{base}?status=ai")
+    assert resp_ai.status_code == 200
+    ai_ids = {c["lead_id"] for c in resp_ai.json()}
+    assert str(lead_a.id) in ai_ids, "lead_a must appear in ?status=ai"
+    assert str(lead_b.id) not in ai_ids, "lead_b must NOT appear in ?status=ai"
+
+    # --- 3. ?status=human includes lead_b, excludes lead_a ---
+    resp_human = await client.get(f"{base}?status=human")
+    assert resp_human.status_code == 200
+    human_ids = {c["lead_id"] for c in resp_human.json()}
+    assert str(lead_b.id) in human_ids, "lead_b must appear in ?status=human"
+    assert str(lead_a.id) not in human_ids, "lead_a must NOT appear in ?status=human"
+
+
 async def test_read_then_unread_zero(authed_inbox_client):
     """After posting read with the latest message timestamp, unread count drops to 0."""
     client, ctx = authed_inbox_client

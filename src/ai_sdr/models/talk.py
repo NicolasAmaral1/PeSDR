@@ -7,7 +7,7 @@ is bound to an immutable TreeFlow version snapshot for its lifetime.
 Lifecycle (status):
   - active                  : pipeline runs, lead is engaged
   - paused                  : reserved (operator pause, V1 unused)
-  - requires_review         : escalated to human; handling_mode flips to 'human'
+  - requires_review         : escalated to human; handling_mode stays 'ai' (status changes only)
   - closed_completed        : closure rule (success/failure/no_interest) fired
   - closed_inactivity       : exceeded talk_lifecycle.close_after_inactivity
   - closed_optout           : opt-out keyword detected

@@ -233,6 +233,8 @@ async def list_contacts(
 
     # ------------------------------------------------------------------
     # Active talk lateral join (LEFT OUTER, one per lead)
+    # Uses LATERAL so the subquery is evaluated once per lead row, giving
+    # one active talk PER lead (not one globally due to LIMIT 1).
     # ------------------------------------------------------------------
     active_talk_sq = (
         select(Talk)
@@ -244,7 +246,7 @@ async def list_contacts(
         .order_by(Talk.created_at.desc())
         .limit(1)
         .correlate(Lead)
-    ).subquery("active_talk")
+    ).lateral("active_talk")
 
     # ------------------------------------------------------------------
     # funnel_node: current_node from talkflow_states, or treeflow_id fallback
