@@ -6,15 +6,19 @@ import tempfile
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Optional
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text
 
 from ai_sdr.db.rls import set_tenant_context
 from ai_sdr.models.inbound_message import InboundMessageRow
 from ai_sdr.models.instance import Instance
 from ai_sdr.models.lead import Lead
+from ai_sdr.models.talk import Talk
 from ai_sdr.models.tenant import Tenant
+from ai_sdr.models.treeflow_version import TreeflowVersion
 from ai_sdr.models.user import User
 from ai_sdr.models.user_tenant_access import UserTenantAccess
 from ai_sdr.web.passwords import hash_password
@@ -129,3 +133,79 @@ async def authed_inbox_client(app, db_session, isolated_tenants_dir, monkeypatch
             "lead_id": lead.id,
             "instance": instance,
         }
+
+
+@pytest.fixture
+def seeded_talk_factory(db_session):
+    """Async factory fixture that seeds Tenant + Lead + TreeflowVersion + Talk.
+
+    Usage::
+
+        talk, tenant = await seeded_talk_factory(handling_mode="ai")
+        talk, tenant = await seeded_talk_factory(handling_mode="human", status="active")
+        talk, tenant = await seeded_talk_factory(lead_id=existing_lead.id)
+
+    Mirrors Talk-seeding in tests/integration/test_inbox_filters.py
+    (test_multi_lead_active_talk_lateral) — sets: treeflow_id,
+    treeflow_version_id, status, handling_mode, last_message_at.
+
+    Args:
+        handling_mode: "ai" | "human" | "auto_with_approval" (default "ai").
+        status: Talk status string (default "active").
+        lead_id: If provided, attach the Talk to this existing lead instead of
+                 creating a new one. The Lead's tenant_id must match the seeded
+                 tenant (caller's responsibility).
+    """
+
+    async def _factory(
+        handling_mode: str = "ai",
+        status: str = "active",
+        lead_id: Optional[uuid.UUID] = None,
+    ) -> tuple[Talk, Tenant]:
+        tenant = Tenant(slug=f"talk-{uuid.uuid4().hex[:6]}", display_name="TalkTest")
+        db_session.add(tenant)
+        await db_session.flush()
+
+        # Set RLS tenant context (required by tenant-scoped tables).
+        await db_session.execute(
+            text("SELECT set_config('app.current_tenant', :t, true)"),
+            {"t": str(tenant.id)},
+        )
+
+        # Seed a TreeflowVersion so Talk FK is satisfied.
+        tfv = TreeflowVersion(
+            tenant_id=tenant.id,
+            treeflow_id="tf-seeded",
+            version="1",
+            content_hash=uuid.uuid4().hex,
+            content_yaml="nodes: []",
+        )
+        db_session.add(tfv)
+        await db_session.flush()
+
+        if lead_id is None:
+            lead = Lead(
+                tenant_id=tenant.id,
+                whatsapp_e164=f"+551{uuid.uuid4().int % 10**10:010d}",
+                status="pending_assignment",
+                inbound_channel_label="main",
+            )
+            db_session.add(lead)
+            await db_session.flush()
+            lead_id = lead.id
+
+        talk = Talk(
+            tenant_id=tenant.id,
+            lead_id=lead_id,
+            treeflow_id="tf-seeded",
+            treeflow_version_id=tfv.id,
+            status=status,
+            handling_mode=handling_mode,
+            last_message_at=datetime.now(UTC),
+        )
+        db_session.add(talk)
+        await db_session.flush()
+
+        return talk, tenant
+
+    return _factory
