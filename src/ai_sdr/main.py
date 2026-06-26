@@ -12,6 +12,7 @@ from arq.connections import RedisSettings, create_pool
 from fastapi import FastAPI
 
 from ai_sdr.api.routes.console_inbox import router as console_inbox_router
+from ai_sdr.api.routes.console_me import router as console_me_router
 from ai_sdr.api.routes.health import router as health_router
 from ai_sdr.api.routes.leads import router as leads_router
 from ai_sdr.api.routes.webhooks import router as webhooks_router
@@ -122,6 +123,7 @@ def create_app() -> FastAPI:
     app.include_router(console_router)
     app.include_router(console_inbox_router)
     app.include_router(ws_inbox_router)
+    app.include_router(console_me_router)
     return app
 
 
