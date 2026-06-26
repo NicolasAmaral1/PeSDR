@@ -63,7 +63,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class RunTurnResult:
-    outcome: str  # 'sent' | 'escalated' | 'opt_out' | 'lead_banned' | 'error'
+    outcome: str  # 'sent' | 'escalated' | 'opt_out' | 'lead_banned' | 'skipped_human' | 'error'
     current_node_after: str | None
     response_text: str | None
 
@@ -143,6 +143,16 @@ async def run_turn(
         state_repo = TalkFlowStateRepository(session)
         state = await state_repo.load(ctx.talk.id)
         assert state is not None, "TalkFlowState missing after preprocessing"
+
+        # HITL gate: a human-held talk must never get an AI reply. Re-read here
+        # (under the lead lock) so a takeover that landed mid-turn is honored.
+        if ctx.talk.handling_mode == "human":
+            logger.info("run_turn.skipped_human talk=%s", ctx.talk.id)
+            return RunTurnResult(
+                outcome="skipped_human",
+                current_node_after=state.current_node,
+                response_text=None,
+            )
 
         # [6] Build layered system prompt
         cached = build_cached_layer(treeflow)
