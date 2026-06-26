@@ -93,6 +93,7 @@ class MessageRow:
     media_type: str
     audio_url: str | None
     created_at: datetime  # received_at or sent_at
+    triggered_by: str | None  # "operator" | "ai" | None (inbound always None)
 
 
 # ---------------------------------------------------------------------------
@@ -364,6 +365,7 @@ async def list_messages(
         InboundMessageRow.media_type,
         InboundMessageRow.audio_url,
         InboundMessageRow.received_at.label("ts"),
+        literal(None).label("triggered_by"),
     ).where(InboundMessageRow.lead_id == lead_id)
 
     outbound_q = select(
@@ -373,6 +375,7 @@ async def list_messages(
         OutboundMessage.media_type,
         OutboundMessage.audio_url,
         OutboundMessage.sent_at.label("ts"),
+        OutboundMessage.triggered_by,
     ).where(OutboundMessage.lead_id == lead_id)
 
     if before is not None:
@@ -397,6 +400,7 @@ async def list_messages(
             media_type=row.media_type,
             audio_url=row.audio_url,
             created_at=row.ts,
+            triggered_by=row.triggered_by,
         )
         for row in rows
     ]

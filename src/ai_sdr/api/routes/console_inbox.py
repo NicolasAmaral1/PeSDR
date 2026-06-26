@@ -35,6 +35,8 @@ from ai_sdr.models.inbound_message import InboundMessageRow
 from ai_sdr.models.instance import Instance
 from ai_sdr.models.lead import Lead
 from ai_sdr.models.operator_read_marker import OperatorReadMarker
+from ai_sdr.models.talk import Talk
+from ai_sdr.models.talkflow_state import TalkFlowState
 from ai_sdr.models.tenant import Tenant
 from ai_sdr.models.user import User
 from ai_sdr.repositories.inbox_repository import (
@@ -168,16 +170,42 @@ async def get_contact_detail(
         window_expires_at = last_inbound_at + timedelta(hours=24)
         window_open = datetime.now(UTC) < window_expires_at
 
-    # Determine state via active_talk (none for awaiting contacts)
-    state = derive_state(None)  # TODO: load active talk for full state; awaiting is correct default
+    # Load the lead's active talk (most recent active/requires_review)
+    active_talk: Talk | None = (
+        await db.execute(
+            select(Talk)
+            .where(
+                Talk.lead_id == lead_id,
+                Talk.tenant_id == tenant.id,
+                Talk.status.in_(("active", "requires_review")),
+            )
+            .order_by(Talk.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+    state = derive_state(active_talk)
+    active_talk_id = active_talk.id if active_talk else None
+
+    # Derive funnel_node from TalkFlowState.current_node, fall back to treeflow_id
+    funnel_node: str | None = None
+    if active_talk is not None:
+        funnel_node = (
+            await db.execute(
+                select(TalkFlowState.current_node)
+                .where(TalkFlowState.talk_id == active_talk.id)
+            )
+        ).scalar_one_or_none()
+        if funnel_node is None:
+            funnel_node = active_talk.treeflow_id
 
     return ContactDetailOut(
         lead_id=lead.id,
         display_name=lead.display_name,
         whatsapp_e164=lead.whatsapp_e164,
         state=state,  # type: ignore[arg-type]
-        funnel_node=None,
-        active_talk_id=None,
+        funnel_node=funnel_node,
+        active_talk_id=active_talk_id,
         ai_reasoning=None,
         window_open=window_open,
         window_expires_at=window_expires_at,
@@ -210,7 +238,11 @@ async def list_contact_messages(
         MessageOut(
             id=m.id,
             direction="in" if m.direction == "inbound" else "out",
-            origin="lead" if m.direction == "inbound" else "ai",
+            origin=(
+                "lead"
+                if m.direction == "inbound"
+                else ("operator" if m.triggered_by == "operator" else "ai")
+            ),
             text=m.text,
             media_type=m.media_type,
             audio_url=m.audio_url,
