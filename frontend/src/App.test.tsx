@@ -1,4 +1,4 @@
-// frontend/src/App.test.tsx  (replace the Task-2 smoke)
+// frontend/src/App.test.tsx  (updated in Task 6 — placeholder div replaced by ContactList)
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
@@ -21,13 +21,15 @@ function renderApp() {
   );
 }
 
-test("boots, resolves tenant + instance, renders the shell", async () => {
+test("boots, resolves tenant + instance, renders the shell with ContactList", async () => {
   mockFetch({
     "/api/console/me": { user: { id: "u", username: "op" }, tenants: [{ slug: "acme", display_name: "Acme" }] },
     "/api/console/tenants/acme/instances": [{ id: "inst-1", channel_label: "main", display_name: "Main", phone_e164: null }],
+    "/api/console/tenants/acme/instances/inst-1/contacts": [],
   });
   renderApp();
-  await waitFor(() => expect(screen.getByTestId("contacts-pane")).toBeInTheDocument());
-  expect(screen.getByTestId("contacts-pane")).toHaveAttribute("data-instance", "inst-1");
-  expect(screen.getByTestId("contacts-pane")).toHaveAttribute("data-slug", "acme");
+  // ContactList renders a search input placeholder once the shell is ready
+  await waitFor(() => expect(screen.getByPlaceholderText("Buscar contato…")).toBeInTheDocument());
+  // conversation placeholder is shown until a contact is selected
+  expect(screen.getByText("Selecione um contato")).toBeInTheDocument();
 });

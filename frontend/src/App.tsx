@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useMe, useInstances } from "./hooks/useInbox";
 import { AppShell } from "./components/AppShell";
 import { InstanceSelector } from "./components/InstanceSelector";
+import { ContactList } from "./components/ContactList";
 
 export default function App() {
   const me = useMe();
@@ -33,7 +34,14 @@ export default function App() {
   return (
     <AppShell
       selector={selector}
-      contacts={<div data-testid="contacts-pane" data-instance={effectiveInstanceId ?? ""} data-slug={slug ?? ""} />}
+      contacts={
+        <ContactList
+          slug={slug}
+          instanceId={effectiveInstanceId}
+          selectedLeadId={leadId}
+          onSelect={setLeadId}
+        />
+      }
       conversation={
         leadId ? (
           <div data-testid="conversation-pane" data-lead={leadId} />
@@ -44,6 +52,4 @@ export default function App() {
       sidebar={<div data-testid="sidebar-pane" />}
     />
   );
-  // setLeadId is wired to ContactList in Task 6.
-  void setLeadId;
 }
