@@ -20,7 +20,9 @@ from ai_sdr.db.base import Base
 
 class Instance(Base):
     __tablename__ = "instances"
-    __table_args__ = (UniqueConstraint("tenant_id", "channel_label", name="uq_instances_tenant_channel"),)
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "channel_label", name="uq_instances_tenant_channel"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()

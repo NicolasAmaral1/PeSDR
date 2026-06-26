@@ -19,10 +19,10 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import and_, exists, func, literal, or_, select, union_all
+from sqlalchemy import func, literal, or_, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_sdr.models.inbound_message import InboundMessageRow
@@ -207,7 +207,7 @@ async def list_contacts(
     # null marker → count ALL inbound for this lead.
     # Epoch sentinel: no marker ↔ all messages are unread.
     # ------------------------------------------------------------------
-    _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
     marker_sq = (
         select(OperatorReadMarker.last_read_message_at)

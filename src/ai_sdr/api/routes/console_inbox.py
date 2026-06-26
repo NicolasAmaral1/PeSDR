@@ -87,10 +87,10 @@ async def list_instance_contacts(
     instance_id: uuid.UUID,
     ctx: TenantCtx,
     db: DbSession,
-    status: str | None = Query(default=None),
-    funnel: str | None = Query(default=None),
-    q: str | None = Query(default=None),
-    before: datetime | None = Query(default=None),
+    status: Annotated[str | None, Query()] = None,
+    funnel: Annotated[str | None, Query()] = None,
+    q: Annotated[str | None, Query()] = None,
+    before: Annotated[datetime | None, Query()] = None,
 ) -> list[ContactOut]:
     tenant, user = ctx
 
@@ -221,7 +221,7 @@ async def list_contact_messages(
     lead_id: uuid.UUID,
     ctx: TenantCtx,
     db: DbSession,
-    before: datetime | None = Query(default=None),
+    before: Annotated[datetime | None, Query()] = None,
 ) -> list[MessageOut]:
     tenant, _user = ctx
 
