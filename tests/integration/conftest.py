@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+import redis as sync_redis
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
+from starlette.testclient import TestClient
 
 from ai_sdr.db.rls import set_tenant_context
 from ai_sdr.flowengine.pipeline import run_turn
@@ -25,7 +28,10 @@ from ai_sdr.models.tenant import Tenant
 from ai_sdr.models.treeflow_version import TreeflowVersion
 from ai_sdr.models.user import User
 from ai_sdr.models.user_tenant_access import UserTenantAccess
+from ai_sdr.realtime.events import channel_for
 from ai_sdr.schemas.tenant_yaml import TenantConfig
+from ai_sdr.settings import get_settings
+from ai_sdr.web.auth import sign_session_cookie
 from ai_sdr.web.passwords import hash_password
 from tests.integration.avelum_helpers import seed_avelum_v2
 
@@ -504,3 +510,91 @@ def run_turn_human_harness(db_session):
         return result, adapter, llm_called
 
     return _harness
+
+
+# ---------------------------------------------------------------------------
+# ws_authed_ctx — WebSocket inbox route (cookie auth + live delivery)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+async def ws_authed_ctx(app, db_session, isolated_tenants_dir, monkeypatch):
+    """Sync Starlette TestClient (lifespan run) + seeded instance + auth cookie.
+
+    Yields (client, ctx) where ctx contains:
+      - instance_id: UUID (str-able) of the seeded Instance
+      - cookie: signed pesdr_session value for a User with tenant access
+      - publish(*, type, lead_id, payload): publishes an inbox event to the
+        instance's channel via a SYNCHRONOUS redis client, replicating the
+        seq INCR + envelope shape of publish_inbox_event. This sidesteps the
+        sync/async bridge: the TestClient runs the app (and the hub's pubsub
+        reader) in its own portal thread; the test publishes from the main
+        thread, so the event genuinely round-trips through Redis.
+
+    Mirrors test_console_leads_page.py for tenant.yaml (console.enabled=true),
+    User + UserTenantAccess seeding, and cookie signing via sign_session_cookie.
+    """
+    _patch_settings(monkeypatch, isolated_tenants_dir)
+
+    tenant = Tenant(slug=f"ws-{uuid.uuid4().hex[:6]}", display_name="WsTest")
+    db_session.add(tenant)
+    await db_session.flush()
+    _make_tenant_yaml(isolated_tenants_dir, tenant.slug)
+
+    await set_tenant_context(db_session, tenant.id)
+
+    user = User(username=f"u_{uuid.uuid4().hex[:6]}", password_hash=hash_password("pw"))
+    db_session.add(user)
+    await db_session.flush()
+    db_session.add(UserTenantAccess(user_id=user.id, tenant_id=tenant.id, role="operator"))
+
+    instance = Instance(tenant_id=tenant.id, channel_label="main", display_name="Main")
+    db_session.add(instance)
+    await db_session.flush()
+
+    instance_id = instance.id
+    await db_session.commit()
+
+    cookie = sign_session_cookie(user.id)
+
+    redis_url = get_settings().redis_url
+    rconn = sync_redis.Redis.from_url(redis_url, decode_responses=True)
+
+    def publish(*, type: str, lead_id: uuid.UUID | None, payload: dict) -> int:
+        seq = rconn.incr(f"seq:inst:{instance_id}")
+        envelope = {
+            "seq": int(seq),
+            "type": type,
+            "instance_id": str(instance_id),
+            "lead_id": str(lead_id) if lead_id is not None else None,
+            "payload": payload,
+        }
+        rconn.publish(channel_for(instance_id), json.dumps(envelope))
+        return int(seq)
+
+    # The WS endpoint opens a DB session via the module-global sessionmaker
+    # (db.session._sessionmaker). It lazy-inits a *pooled* asyncpg engine bound
+    # to whatever loop first touches it. In the full suite, an earlier test may
+    # have left that global engine bound to a now-dead loop; reusing it inside
+    # the TestClient portal loop then raises "got Future attached to a different
+    # loop". So we reset the globals BOTH before (fresh engine on the portal
+    # loop) AND after (so the next test re-inits on its OWN loop).
+    import ai_sdr.db.session as _dbsession
+
+    _dbsession._engine = None
+    _dbsession._sessionmaker = None
+
+    # Enter the sync TestClient as a context manager so the app lifespan runs
+    # (creating app.state.redis + app.state.inbox_hub). The hub's psubscribe
+    # reader runs on the app's event loop inside the portal thread.
+    with TestClient(app) as client:
+        try:
+            yield client, {
+                "instance_id": instance_id,
+                "cookie": cookie,
+                "publish": publish,
+            }
+        finally:
+            rconn.close()
+            _dbsession._engine = None
+            _dbsession._sessionmaker = None
