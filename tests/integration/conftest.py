@@ -554,9 +554,48 @@ async def ws_authed_ctx(app, db_session, isolated_tenants_dir, monkeypatch):
     await db_session.flush()
 
     instance_id = instance.id
+
+    # Seed a Lead + TreeflowVersion + Talk so an operator can takeover+send on
+    # this instance. inbound_channel_label='main' makes publish_message_created
+    # resolve back to the seeded Instance. Talk starts in 'ai' mode so takeover
+    # transitions it to 'human' (the send route requires human handling_mode).
+    lead = Lead(
+        tenant_id=tenant.id,
+        whatsapp_e164="+5511977776666",
+        status="pending_assignment",
+        inbound_channel_label="main",
+    )
+    db_session.add(lead)
+    await db_session.flush()
+    lead_id = lead.id
+
+    tfv = TreeflowVersion(
+        tenant_id=tenant.id,
+        treeflow_id="tf-seeded",
+        version="1",
+        content_hash=uuid.uuid4().hex,
+        content_yaml="nodes: []",
+    )
+    db_session.add(tfv)
+    await db_session.flush()
+
+    talk = Talk(
+        tenant_id=tenant.id,
+        lead_id=lead.id,
+        treeflow_id=tfv.treeflow_id,
+        treeflow_version_id=tfv.id,
+        status="active",
+        handling_mode="ai",
+        last_message_at=datetime.now(UTC),
+    )
+    db_session.add(talk)
+    await db_session.flush()
+
     await db_session.commit()
 
     cookie = sign_session_cookie(user.id)
+    slug = tenant.slug
+    fake_adapter = FakeMessagingAdapter()
 
     redis_url = get_settings().redis_url
     rconn = sync_redis.Redis.from_url(redis_url, decode_responses=True)
@@ -589,13 +628,41 @@ async def ws_authed_ctx(app, db_session, isolated_tenants_dir, monkeypatch):
     # (creating app.state.redis + app.state.inbox_hub). The hub's psubscribe
     # reader runs on the app's event loop inside the portal thread.
     with TestClient(app) as client:
+        # The lifespan installs a real AdapterRegistry; swap in a fake so the
+        # operator send route resolves a FakeMessagingAdapter (no live WhatsApp
+        # / secrets). Restore the original in the finally to avoid leaking.
+        _orig_registry = getattr(app.state, "adapter_registry", None)
+        app.state.adapter_registry = _FakeRegistryStub(fake_adapter)
+
+        def takeover_and_send(*, text: str, client_message_id: str | None = None) -> None:
+            """POST takeover then send on the seeded human talk, via the SAME
+            sync TestClient (so WS + REST share one app/loop/redis)."""
+            base = f"/api/console/tenants/{slug}/contacts/{lead_id}"
+            tk = client.post(f"{base}/takeover", cookies={"pesdr_session": cookie})
+            assert tk.status_code == 200, f"takeover failed: {tk.status_code} {tk.text}"
+            sd = client.post(
+                f"{base}/send",
+                json={
+                    "text": text,
+                    "client_message_id": client_message_id or str(uuid.uuid4()),
+                },
+                cookies={"pesdr_session": cookie},
+            )
+            assert sd.status_code == 200, f"send failed: {sd.status_code} {sd.text}"
+
         try:
             yield client, {
                 "instance_id": instance_id,
                 "cookie": cookie,
                 "publish": publish,
+                "slug": slug,
+                "lead_id": lead_id,
+                "fake_adapter": fake_adapter,
+                "takeover_and_send": takeover_and_send,
             }
         finally:
+            if _orig_registry is not None:
+                app.state.adapter_registry = _orig_registry
             rconn.close()
             _dbsession._engine = None
             _dbsession._sessionmaker = None
