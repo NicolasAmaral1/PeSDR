@@ -8,8 +8,11 @@ const MAP: Record<ContactState, { emoji: string; label: string; cls: string }> =
   closed: { emoji: "⚪", label: "Encerrada", cls: "text-slate-400 bg-slate-50" },
 };
 
+const UNKNOWN = { emoji: "•", label: "—", cls: "text-slate-400 bg-slate-50" };
+
 export function StateBadge({ state }: { state: ContactState }) {
-  const m = MAP[state];
+  // Defensive: an unexpected state must not white-screen the whole list.
+  const m = MAP[state] ?? UNKNOWN;
   return (
     <span data-state={state} className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium ${m.cls}`}>
       <span aria-hidden>{m.emoji}</span>
