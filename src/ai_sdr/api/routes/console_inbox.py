@@ -33,6 +33,7 @@ from ai_sdr.api.schemas.console_inbox import (
     MessageOut,
     ReadBody,
     SendBody,
+    TalkBandOut,
 )
 from ai_sdr.db.advisory_lock import acquire_lead_lock
 from ai_sdr.messaging.errors import TerminalError, WindowExpiredError
@@ -222,6 +223,40 @@ async def get_contact_detail(
         window_open=window_open,
         window_expires_at=window_expires_at,
     )
+
+
+# ---------------------------------------------------------------------------
+# GET /contacts/{lead_id}/talks
+# ---------------------------------------------------------------------------
+
+@router.get("/contacts/{lead_id}/talks", response_model=list[TalkBandOut])
+async def list_contact_talks(
+    lead_id: uuid.UUID,
+    ctx: TenantCtx,
+    db: DbSession,
+) -> list[TalkBandOut]:
+    tenant, _user = ctx
+    lead = (
+        await db.execute(select(Lead).where(Lead.id == lead_id))
+    ).scalar_one_or_none()
+    if lead is None or lead.tenant_id != tenant.id:
+        raise HTTPException(status_code=404, detail=f"contact {lead_id} not found")
+    rows = (
+        await db.execute(
+            select(Talk)
+            .where(Talk.tenant_id == tenant.id, Talk.lead_id == lead_id)
+            .order_by(Talk.created_at.asc())
+        )
+    ).scalars().all()
+    return [
+        TalkBandOut(
+            talk_id=t.id,
+            status=t.status,
+            funnel_node=t.treeflow_id,
+            created_at=t.created_at,
+        )
+        for t in rows
+    ]
 
 
 # ---------------------------------------------------------------------------

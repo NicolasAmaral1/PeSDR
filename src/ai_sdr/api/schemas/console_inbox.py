@@ -59,3 +59,10 @@ class ReadBody(BaseModel):
 class SendBody(BaseModel):
     text: str
     client_message_id: uuid.UUID
+
+
+class TalkBandOut(BaseModel):
+    talk_id: uuid.UUID
+    status: str
+    funnel_node: str | None
+    created_at: datetime
