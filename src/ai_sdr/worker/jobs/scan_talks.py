@@ -64,7 +64,7 @@ async def scan_active_talks(session: AsyncSession, *, now: datetime) -> ScanResu
                 Talk.created_at,
             )
             .join(TreeflowVersion, Talk.treeflow_version_id == TreeflowVersion.id)
-            .where(Talk.status == "active")
+            .where(Talk.status == "active", Talk.handling_mode == "ai")
         )
     ).all()
     # End the read transaction; per-Talk transactions follow.
@@ -109,7 +109,7 @@ async def scan_active_talks(session: AsyncSession, *, now: datetime) -> ScanResu
         locked_talk = (
             await session.execute(
                 select(Talk)
-                .where(Talk.id == talk_id, Talk.status == "active")
+                .where(Talk.id == talk_id, Talk.status == "active", Talk.handling_mode == "ai")
                 .with_for_update(skip_locked=True)
             )
         ).scalar_one_or_none()
