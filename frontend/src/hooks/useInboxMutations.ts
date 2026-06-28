@@ -65,9 +65,11 @@ export function useSend(slug: string, leadId: string) {
     onError: (_err, _vars, context) => {
       if (context?.previous) qc.setQueryData(key, context.previous);
     },
-    // On success we keep the optimistic bubble in place (no immediate refetch):
-    // there is no live channel yet (3C), and the messages endpoint would not
-    // echo the just-sent message synchronously. A later natural refetch (remount
-    // / poll) reconciles the bubble with the server copy by id.
+    // The send route persists+commits the outbound BEFORE returning 200, so a
+    // refetch of /messages after settle includes the just-sent message — which
+    // replaces the optimistic bubble with the authoritative server copy.
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: key });
+    },
   });
 }

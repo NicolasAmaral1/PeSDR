@@ -7,10 +7,22 @@ import { ConversationView } from "./components/ConversationView";
 afterEach(() => vi.restoreAllMocks());
 
 function mockRoutes() {
+  // Stateful: after the operator send commits, the messages endpoint echoes the
+  // persisted operator message — so the onSettled refetch reconciles the
+  // optimistic bubble with the authoritative server copy (the real flow).
+  let sent = false;
+  const realMsg = {
+    id: "m-real", direction: "out", origin: "operator", text: "oi do operador",
+    media_type: "text", audio_url: null, transcription: null, at: "2026-06-27T10:00:00Z",
+  };
   vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-    if (url.includes("/contacts/l1/messages")) return new Response("[]", { status: 200 });
+    // most-specific first to avoid prefix collisions
+    if (url.includes("/contacts/l1/send")) {
+      sent = true;
+      return new Response(JSON.stringify({ outbound_id: "o1", external_id: "x", status: "sent" }), { status: 200 });
+    }
+    if (url.includes("/contacts/l1/messages")) return new Response(JSON.stringify(sent ? [realMsg] : []), { status: 200 });
     if (url.includes("/contacts/l1/talks")) return new Response("[]", { status: 200 });
-    if (url.includes("/contacts/l1/send")) return new Response(JSON.stringify({ outbound_id: "o1", external_id: "x", status: "sent" }), { status: 200 });
     if (url.endsWith("/contacts/l1")) return new Response(JSON.stringify({ lead_id: "l1", display_name: "Ana", whatsapp_e164: "+55", state: "human", funnel_node: "q", active_talk_id: "t1", ai_reasoning: null, window_open: true, window_expires_at: null }), { status: 200 });
     void init;
     return new Response("{}", { status: 200 });
