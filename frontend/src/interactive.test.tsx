@@ -41,7 +41,13 @@ test("human + open window → composer is usable and a message can be sent", asy
   const input = screen.getByTestId("composer-input") as HTMLTextAreaElement;
   expect(input).toBeEnabled();
   await userEvent.type(input, "oi do operador");
-  // optimistic pending bubble shows immediately
+  // optimistic pending bubble shows immediately ("enviando…")
   await userEvent.click(screen.getByTestId("composer-send"));
   await waitFor(() => expect(screen.getByText("oi do operador")).toBeInTheDocument());
+  // reconcile guard: after onSettled refetch, the optimistic _pending bubble is
+  // replaced by the persisted server message — so "enviando…" must disappear.
+  // (If useSend's onSettled invalidate regressed, the pending bubble would
+  // persist and this assertion would fail.)
+  await waitFor(() => expect(screen.queryByText("enviando…")).not.toBeInTheDocument());
+  expect(screen.getAllByText("oi do operador")).toHaveLength(1);
 });
