@@ -15,6 +15,10 @@ export function useTakeover(slug: string, leadId: string) {
       qc.invalidateQueries({ queryKey: ["contact", slug, leadId] });
       qc.invalidateQueries({ queryKey: ["contacts", slug] });
     },
+    // a 409 (e.g. someone else took over) reconciles the UI to server state
+    onError: () => {
+      qc.invalidateQueries({ queryKey: ["contact", slug, leadId] });
+    },
   });
 }
 
@@ -25,6 +29,10 @@ export function useRelease(slug: string, leadId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["contact", slug, leadId] });
       qc.invalidateQueries({ queryKey: ["contacts", slug] });
+    },
+    // a 409 (e.g. state changed under us) reconciles the UI to server state
+    onError: () => {
+      qc.invalidateQueries({ queryKey: ["contact", slug, leadId] });
     },
   });
 }
@@ -57,8 +65,9 @@ export function useSend(slug: string, leadId: string) {
     onError: (_err, _vars, context) => {
       if (context?.previous) qc.setQueryData(key, context.previous);
     },
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: key });
-    },
+    // On success we keep the optimistic bubble in place (no immediate refetch):
+    // there is no live channel yet (3C), and the messages endpoint would not
+    // echo the just-sent message synchronously. A later natural refetch (remount
+    // / poll) reconciles the bubble with the server copy by id.
   });
 }

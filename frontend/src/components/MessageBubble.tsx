@@ -1,7 +1,9 @@
 import type { MessageOut } from "../types";
 import { formatTime } from "../lib/format";
 
-export function MessageBubble({ msg }: { msg: MessageOut }) {
+type BubbleMsg = MessageOut & { _pending?: boolean };
+
+export function MessageBubble({ msg }: { msg: BubbleMsg }) {
   const out = msg.direction === "out";
   const senderLabel = msg.origin === "operator" ? "Você" : msg.origin === "ai" ? "IA" : null;
   return (
@@ -18,7 +20,9 @@ export function MessageBubble({ msg }: { msg: MessageOut }) {
         ) : (
           <div className="whitespace-pre-wrap">{msg.text}</div>
         )}
-        <div className="mt-1 text-right text-[10px] text-slate-400">{formatTime(msg.at)}</div>
+        <div className="mt-1 text-right text-[10px] text-slate-400">
+          {msg._pending ? "enviando…" : formatTime(msg.at)}
+        </div>
       </div>
     </div>
   );

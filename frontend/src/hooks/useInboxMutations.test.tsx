@@ -2,7 +2,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
-import { useSend, useTakeover } from "./useInboxMutations";
+import { useSend, useTakeover, useRelease } from "./useInboxMutations";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -47,4 +47,24 @@ test("useTakeover posts to the takeover route", async () => {
   await waitFor(() => expect(result.current.isSuccess).toBe(true));
   const tcalls = f.mock.calls as unknown as [string, RequestInit][];
   expect(String(tcalls[0][0])).toBe("/api/console/tenants/acme/contacts/l1/takeover");
+});
+
+test("a 409 on takeover reconciles by invalidating the contact-detail query (no crash)", async () => {
+  const { qc, wrapper } = wrap();
+  const spy = vi.spyOn(qc, "invalidateQueries");
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ detail: "conflict" }), { status: 409 })));
+  const { result } = renderHook(() => useTakeover("acme", "l1"), { wrapper });
+  act(() => { result.current.mutate(); });
+  await waitFor(() => expect(result.current.isError).toBe(true));
+  expect(spy).toHaveBeenCalledWith({ queryKey: ["contact", "acme", "l1"] });
+});
+
+test("a 409 on release reconciles by invalidating the contact-detail query (no crash)", async () => {
+  const { qc, wrapper } = wrap();
+  const spy = vi.spyOn(qc, "invalidateQueries");
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ detail: "conflict" }), { status: 409 })));
+  const { result } = renderHook(() => useRelease("acme", "l1"), { wrapper });
+  act(() => { result.current.mutate(); });
+  await waitFor(() => expect(result.current.isError).toBe(true));
+  expect(spy).toHaveBeenCalledWith({ queryKey: ["contact", "acme", "l1"] });
 });
