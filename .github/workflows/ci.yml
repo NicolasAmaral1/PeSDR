@@ -17,6 +17,11 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# CI auto-enables color; rich then interleaves ANSI codes that break a CLI
+# --help substring assertion (test_outbound_cli). NO_COLOR forces plain output.
+env:
+  NO_COLOR: "1"
+
 jobs:
   lint:
     name: Lint (ruff) — advisory
