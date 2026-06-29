@@ -7,7 +7,7 @@ is bound to an immutable TreeFlow version snapshot for its lifetime.
 Lifecycle (status):
   - active                  : pipeline runs, lead is engaged
   - paused                  : reserved (operator pause, V1 unused)
-  - requires_review         : escalated to human; handling_mode flips to 'human'
+  - requires_review         : escalated to human; handling_mode stays 'ai' (status changes only)
   - closed_completed        : closure rule (success/failure/no_interest) fired
   - closed_inactivity       : exceeded talk_lifecycle.close_after_inactivity
   - closed_optout           : opt-out keyword detected
@@ -63,6 +63,9 @@ class Talk(Base):
 
     status: Mapped[TalkStatus] = mapped_column(Text(), nullable=False)
     handling_mode: Mapped[str] = mapped_column(Text(), nullable=False, server_default="ai")
+    assigned_operator_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

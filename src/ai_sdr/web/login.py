@@ -38,7 +38,7 @@ def _cookie_kwargs() -> _CookieKwargs:
         "httponly": True,
         "samesite": "strict",
         "secure": get_settings().app_env != "development",
-        "path": "/console",  # scope cookie to the console; not sent to /webhooks etc.
+        "path": "/",  # app-wide: the SPA at /inbox calls /api/console/* with the cookie
     }
 
 
