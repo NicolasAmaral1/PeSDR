@@ -1,7 +1,9 @@
 import { useMemo, useState } from "react";
 import { useMe, useInstances } from "./hooks/useInbox";
+import { useInboxSocket } from "./hooks/useInboxSocket";
 import { AppShell } from "./components/AppShell";
 import { InstanceSelector } from "./components/InstanceSelector";
+import { LiveIndicator } from "./components/LiveIndicator";
 import { ContactList } from "./components/ContactList";
 import { ConversationView } from "./components/ConversationView";
 import { DetailsSidebar } from "./components/DetailsSidebar";
@@ -15,15 +17,20 @@ export default function App() {
 
   const effectiveInstanceId = instanceId ?? instances.data?.[0]?.id;
 
+  const { connected } = useInboxSocket(slug, effectiveInstanceId);
+
   const selector = useMemo(
     () => (
-      <InstanceSelector
-        instances={instances.data ?? []}
-        value={effectiveInstanceId}
-        onChange={setInstanceId}
-      />
+      <div>
+        <InstanceSelector
+          instances={instances.data ?? []}
+          value={effectiveInstanceId}
+          onChange={setInstanceId}
+        />
+        <LiveIndicator connected={connected} />
+      </div>
     ),
-    [instances.data, effectiveInstanceId],
+    [instances.data, effectiveInstanceId, connected],
   );
 
   if (me.isLoading || (slug && instances.isLoading)) {
