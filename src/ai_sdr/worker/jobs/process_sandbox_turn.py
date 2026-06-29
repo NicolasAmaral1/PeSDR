@@ -1,106 +1,120 @@
-"""process_sandbox_turn — worker job pra Talks sandbox (PR #24).
+"""process_sandbox_turn — arq worker job for sandbox Talks.
 
-VERSÃO MVP (2026-06-23): roda LLM diretamente sobre histórico de mensagens,
-SEM passar pelo pipeline completo do FlowEngine v2.
+V2 (post-#26 review): runs the production `run_turn` pipeline. The ONLY
+differences vs `_run_v2_inbox` are the edges:
 
-Trade-off explícito: NÃO testa guardrails, objection classifier, actions,
-critic pass, off-topic detection. Testa SÓ "interface + LLM responde".
+  - `adapter` = SandboxMessagingAdapter (returns fake SendResult, no Meta).
+  - `llm` is resolved from `talk.sandbox_llm_mode`:
+      * 'real' → `main_llm_for_tenant` (same as production).
+      * 'fake' → constant-response Runnable returning a valid TurnDecision.
+        Useful for CI / dev work that must not spend tokens.
 
-Por que essa simplificação: a assinatura completa do run_turn exige session
-+ adapter + voice_stack + guardrail_cfg + ... — complexo de configurar
-corretamente pra sandbox sem tocar produção. Pro MVP "mostrar pra Lana
-hoje", chat com LLM já entrega valor enorme.
-
-Próximas iterações (S2-S4 da spec): integrar run_turn completo quando o
-contract de injeção de adapter sandbox-aware estiver maduro.
+Everything else — guardrails, objection classifier, actions, critic, KB,
+voice stack, audit, advisory locks, transaction shape — runs exactly as
+production. This is the "same motor, different edges" contract Nicolas
+called out in the PR #26 review.
 """
+
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import structlog
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.runnables import Runnable, RunnableLambda
 from sqlalchemy import select, text
 
 from ai_sdr.db.rls import set_tenant_context
-from ai_sdr.db.session import session_factory
+from ai_sdr.flowengine.decision import TurnDecision
+from ai_sdr.flowengine.llm_client import main_llm_for_tenant
+from ai_sdr.flowengine.pipeline import run_turn
+from ai_sdr.flowengine.treeflow_loader import load_treeflow_v2
+from ai_sdr.guardrails.validator import GuardrailConfig
+from ai_sdr.messaging.errors import (
+    AuthError,
+    MessagingError,
+    PolicyError,
+    RecipientUnreachable,
+    WindowExpiredError,
+)
+from ai_sdr.messaging.sandbox import SandboxMessagingAdapter
 from ai_sdr.models.inbound_message import InboundMessageRow
 from ai_sdr.models.lead import Lead
-from ai_sdr.models.outbound_message import OutboundMessage
 from ai_sdr.models.talk import Talk
 from ai_sdr.models.tenant import Tenant
 from ai_sdr.models.treeflow_version import TreeflowVersion
+from ai_sdr.secrets.sops_loader import SopsLoader
+from ai_sdr.settings import get_settings
+from ai_sdr.tenant_loader.loader import TenantLoader
 
-log = structlog.get_logger()
-
-
-_SANDBOX_FAKE_RESPONSES = [
-    "Oi! Tudo bem? 👋 Aqui é a SDR sandbox. Pra começar, qual seu nome?",
-    "Prazer em te conhecer! Pra te ajudar melhor, qual o faturamento mensal aproximado da sua operação?",
-    "Show, com esse faturamento faz total sentido a Mentoria. Quer que eu te apresente?",
-    "Perfeito! Vou te passar pra Manoela então.",
-    "Ok, qualquer coisa estamos por aqui!",
-]
+log = logging.getLogger(__name__)
 
 
-def _build_llm(mode: str, tenant_cfg, secrets):
-    """Resolve LLM conforme sandbox_llm_mode ('real'|'fake')."""
-    if mode == "real":
-        # Anthropic real via init_chat_model
-        from langchain.chat_models import init_chat_model
+def _build_fake_llm() -> Runnable:
+    """Constant-response Runnable that satisfies the run_turn contract.
 
-        api_key = secrets[tenant_cfg.llm.default.api_key_ref.removeprefix("secrets/")]
-        kwargs: dict[str, Any] = {"api_key": api_key}
-        if tenant_cfg.llm.default.temperature is not None:
-            kwargs["temperature"] = tenant_cfg.llm.default.temperature
-        if tenant_cfg.llm.default.max_tokens is not None:
-            kwargs["max_tokens"] = tenant_cfg.llm.default.max_tokens
-        return init_chat_model(
-            f"{tenant_cfg.llm.default.provider}:{tenant_cfg.llm.default.model}",
-            **kwargs,
+    Returns a TurnDecision with a generic prompt. Use 'real' mode for any
+    serious validation; this exists so CI and dev work don't spend tokens.
+    """
+
+    async def _decide(_messages: object, _config: object = None) -> TurnDecision:
+        return TurnDecision(
+            response_text=(
+                "[sandbox fake mode] Selecione 'real' no Talk pra rodar com "
+                "Anthropic e validar o fluxo completo."
+            ),
+            collected_fields={},
+            reasoning="sandbox fake LLM — constant response, no provider call",
         )
 
-    # Fake mode — scripted responses
-    from langchain_core.language_models import FakeListChatModel
-
-    return FakeListChatModel(responses=_SANDBOX_FAKE_RESPONSES)
+    return RunnableLambda(_decide)
 
 
-def _build_persona_prompt(tenant_cfg, treeflow_version: TreeflowVersion) -> str:
-    """Constrói system prompt mínimo baseado no tenant + treeflow."""
-    persona_parts = [
-        f"Você é uma SDR (Sales Development Representative) virtual da {tenant_cfg.display_name}.",
-        "Sua função é qualificar leads via WhatsApp em tom amigável, brasileiro, sem formalismo.",
-        "Mensagens curtas (1-2 frases). Sempre cumprimente pelo nome quando souber.",
-    ]
-
-    if tenant_cfg.guardrails:
-        if tenant_cfg.guardrails.allowed_products:
-            prods = ", ".join(tenant_cfg.guardrails.allowed_products)
-            persona_parts.append(f"Produtos que você pode mencionar: {prods}.")
-        if tenant_cfg.guardrails.allowed_prices:
-            prices = ", ".join(f"R$ {p:,}".replace(",", ".") for p in tenant_cfg.guardrails.allowed_prices)
-            persona_parts.append(f"Valores permitidos: {prices}.")
-
-    persona_parts.append(
-        "Você está em MODO SANDBOX (teste). Responda como se fosse uma conversa real "
-        "mas saiba que isso é um teste interno."
-    )
-
-    return "\n".join(persona_parts)
+def _build_llm_for_sandbox(
+    mode: str, tenant_cfg: Any, secrets: dict[str, str]
+) -> Runnable:
+    if mode == "real":
+        if tenant_cfg.llm is None or tenant_cfg.llm.default is None:
+            raise ValueError(
+                "sandbox 'real' mode requires tenant.llm.default block"
+            )
+        return main_llm_for_tenant(tenant_cfg.llm.default, secrets=secrets)
+    return _build_fake_llm()
 
 
-async def process_sandbox_turn(ctx: dict[str, Any], tenant_id_str: str, talk_id_str: str) -> None:
-    """Processa 1 turno de Talk sandbox — versão MVP simplificada."""
+async def _mark_inbound_error(
+    db: Any, inbound: InboundMessageRow, detail: str
+) -> None:
+    inbound.status = "error"
+    inbound.error_detail = detail
+    inbound.processed_at = datetime.now(UTC)
+    await db.commit()
+
+
+async def process_sandbox_turn(
+    ctx: dict[str, Any], tenant_id_str: str, talk_id_str: str
+) -> None:
+    """Drain ONE queued inbound for a sandbox Talk through the production pipeline."""
     tenant_id = uuid.UUID(tenant_id_str)
     talk_id = uuid.UUID(talk_id_str)
+    session_factory = ctx["session_factory"]
 
     async with session_factory() as db:
+        # Cross-tenant lookup of the Tenant + Talk needs RLS off, same as
+        # other worker jobs. Tenant context is then re-set for all subsequent
+        # reads/writes inside the run_turn pipeline.
         await db.execute(text("SET LOCAL row_security = off"))
-        await set_tenant_context(db, tenant_id)
+
+        tenant = (
+            await db.execute(select(Tenant).where(Tenant.id == tenant_id))
+        ).scalar_one_or_none()
+        if tenant is None:
+            log.warning("sandbox.turn.tenant_not_found tenant_id=%s", tenant_id_str)
+            return
+
+        await set_tenant_context(db, tenant.id)
 
         talk = (
             await db.execute(
@@ -111,142 +125,188 @@ async def process_sandbox_turn(ctx: dict[str, Any], tenant_id_str: str, talk_id_
                 )
             )
         ).scalar_one_or_none()
-
         if talk is None:
-            log.warning("sandbox.turn.talk_not_found", talk_id=talk_id_str)
+            log.warning(
+                "sandbox.turn.talk_not_found talk_id=%s", talk_id_str
+            )
             return
 
         if talk.status != "active":
-            log.info("sandbox.turn.talk_inactive", talk_id=talk_id_str, status=talk.status)
+            log.info(
+                "sandbox.turn.talk_inactive talk=%s status=%s",
+                talk_id_str,
+                talk.status,
+            )
             return
 
-        tenant = (await db.execute(select(Tenant).where(Tenant.id == tenant_id))).scalar_one()
-        lead = (await db.execute(select(Lead).where(Lead.id == talk.lead_id))).scalar_one()
+        if not talk.sandbox_llm_mode:
+            log.warning(
+                "sandbox.turn.missing_llm_mode talk=%s", talk_id_str
+            )
+            return
+
+        lead = (
+            await db.execute(
+                select(Lead).where(
+                    Lead.id == talk.lead_id,
+                    Lead.tenant_id == tenant_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if lead is None:
+            log.warning(
+                "sandbox.turn.lead_not_found talk=%s lead=%s",
+                talk_id_str,
+                talk.lead_id,
+            )
+            return
+
         tfv = (
             await db.execute(
-                select(TreeflowVersion).where(TreeflowVersion.id == talk.treeflow_version_id)
+                select(TreeflowVersion).where(
+                    TreeflowVersion.id == talk.treeflow_version_id,
+                    TreeflowVersion.tenant_id == tenant_id,
+                )
             )
-        ).scalar_one()
+        ).scalar_one_or_none()
+        if tfv is None:
+            log.error(
+                "sandbox.turn.treeflow_version_missing talk=%s tfv=%s",
+                talk_id_str,
+                talk.treeflow_version_id,
+            )
+            return
 
-        # Drena 1 inbound queued
-        inbound_row = (
+        # Fetch the head queued inbound for THIS Talk's lead.
+        inbound = (
             await db.execute(
                 select(InboundMessageRow)
                 .where(
                     InboundMessageRow.lead_id == lead.id,
+                    InboundMessageRow.tenant_id == tenant_id,
                     InboundMessageRow.status == "queued",
                 )
                 .order_by(InboundMessageRow.received_at.asc())
                 .limit(1)
             )
         ).scalar_one_or_none()
-
-        if inbound_row is None:
-            log.info("sandbox.turn.no_inbound", talk_id=talk_id_str)
+        if inbound is None:
+            log.info("sandbox.turn.no_inbound talk=%s", talk_id_str)
             return
 
-        # Carrega tenant config + secrets
-        from ai_sdr.secrets.sops_loader import SopsLoader
-        from ai_sdr.settings import get_settings
-        from ai_sdr.tenant_loader.loader import TenantLoader
-
+        # Load tenant config + secrets + parsed TreeFlow.
         tdir = Path(get_settings().tenants_dir)
         tenant_cfg = TenantLoader(tdir).load(tenant.slug)
         secrets = SopsLoader(tdir).load(tenant.slug)
 
-        # Constrói history das mensagens anteriores (inbound + outbound interleaved)
-        inbound_history = (
-            (
-                await db.execute(
-                    select(InboundMessageRow)
-                    .where(
-                        InboundMessageRow.lead_id == lead.id,
-                        InboundMessageRow.id != inbound_row.id,
-                        InboundMessageRow.status == "processed",
-                    )
-                    .order_by(InboundMessageRow.received_at.asc())
-                    .limit(20)
-                )
-            ).scalars().all()
-        )
-        outbound_history = (
-            (
-                await db.execute(
-                    select(OutboundMessage)
-                    .where(OutboundMessage.talk_id == talk.id)
-                    .order_by(OutboundMessage.sent_at.asc())
-                    .limit(20)
-                )
-            ).scalars().all()
-        )
-
-        messages = [SystemMessage(content=_build_persona_prompt(tenant_cfg, tfv))]
-
-        # Interleave por timestamp (simplificado)
-        timeline = []
-        for m in inbound_history:
-            timeline.append((m.received_at, "user", m.text))
-        for m in outbound_history:
-            timeline.append((m.sent_at, "assistant", m.body_text or ""))
-        timeline.sort(key=lambda x: x[0] or datetime.min.replace(tzinfo=UTC))
-
-        for _, role, txt in timeline:
-            if role == "user":
-                messages.append(HumanMessage(content=txt))
-            else:
-                messages.append(AIMessage(content=txt))
-
-        # Adiciona inbound atual
-        messages.append(HumanMessage(content=inbound_row.text))
-
-        # Chama LLM
-        mode = talk.sandbox_llm_mode or "fake"
         try:
-            llm = _build_llm(mode, tenant_cfg, secrets)
-            response = await llm.ainvoke(messages)
-            outbound_text = response.content if hasattr(response, "content") else str(response)
+            treeflow = load_treeflow_v2(tfv.content_yaml)
         except Exception as exc:
             log.error(
-                "sandbox.turn.llm_failed",
-                talk_id=talk_id_str,
-                mode=mode,
-                err=str(exc),
-                err_type=type(exc).__name__,
+                "sandbox.turn.treeflow_load_failed talk=%s err=%s",
+                talk_id_str,
+                exc,
             )
-            inbound_row.status = "error"
-            inbound_row.error_detail = f"LLM error: {type(exc).__name__}: {exc}"
-            await db.commit()
+            await _mark_inbound_error(
+                db, inbound, f"treeflow_load_failed: {exc}"
+            )
             return
 
-        # Persiste outbound + marca inbound processed + bump turn
-        now = datetime.now(UTC)
-        outbound = OutboundMessage(
-            id=uuid.uuid4(),
-            tenant_id=tenant_id,
-            lead_id=lead.id,
-            talk_id=talk.id,
-            provider="sandbox",
-            message_type="text",
-            body_text=str(outbound_text),
-            external_id=str(uuid.uuid4()),
-            sent_at=now,
-            triggered_by="sandbox",
-            status="sent",
+        # Build LLM per sandbox mode.
+        try:
+            llm = _build_llm_for_sandbox(talk.sandbox_llm_mode, tenant_cfg, secrets)
+        except (KeyError, ValueError) as exc:
+            log.error(
+                "sandbox.turn.llm_build_failed talk=%s mode=%s err=%s",
+                talk_id_str,
+                talk.sandbox_llm_mode,
+                exc,
+            )
+            await _mark_inbound_error(db, inbound, f"llm_build_failed: {exc}")
+            return
+
+        # Production guardrail config, verbatim.
+        gcfg = tenant_cfg.guardrails
+        guardrail_cfg = GuardrailConfig(
+            disallowed_price_pattern=(gcfg.disallowed_price_pattern if gcfg else ""),
+            allowed_prices=[str(p) for p in (gcfg.allowed_prices if gcfg else [])],
+            allowed_products=list(gcfg.allowed_products) if gcfg else [],
+            fallback_text=(gcfg.fallback_text if gcfg else "Vou validar com a equipe."),
         )
-        db.add(outbound)
 
-        inbound_row.status = "processed"
-        inbound_row.processed_at = now
+        adapter = SandboxMessagingAdapter()
+        opt_out_keywords = (
+            list(tenant_cfg.conversation.optout_stop_words)
+            if tenant_cfg.conversation
+            else []
+        )
 
-        talk.turn_count = (talk.turn_count or 0) + 1
-        talk.last_message_at = now
+        # Voice stack stays off for sandbox MVP — FE-05 sandbox wiring later.
+        synth, _trans, storage = None, None, None
+
+        try:
+            result = await run_turn(
+                db,
+                tenant=tenant,
+                tenant_cfg=tenant_cfg,
+                treeflow=treeflow,
+                treeflow_version=tfv,
+                inbound=inbound,
+                llm=llm,
+                adapter=adapter,
+                opt_out_keywords=opt_out_keywords,
+                guardrail_cfg=guardrail_cfg,
+                voice_cfg=None,
+                synthesizer=synth,
+                storage=storage,
+            )
+        except (
+            RecipientUnreachable,
+            AuthError,
+            PolicyError,
+            WindowExpiredError,
+            MessagingError,
+        ) as exc:
+            # Sandbox adapter never raises these — but defensive logging in
+            # case someone wires it to send_text against a real provider.
+            log.error(
+                "sandbox.turn.messaging_error talk=%s err=%s",
+                talk_id_str,
+                exc,
+            )
+            await _mark_inbound_error(
+                db, inbound, f"{type(exc).__name__}: {exc}"
+            )
+            return
+        except Exception as exc:
+            log.exception(
+                "sandbox.turn.run_turn_unhandled talk=%s err=%s",
+                talk_id_str,
+                exc,
+            )
+            await _mark_inbound_error(
+                db, inbound, f"{type(exc).__name__}: {exc}"
+            )
+            return
+
+        now_ts = datetime.now(UTC)
+        if result.outcome == "sent":
+            inbound.status = "processed"
+            inbound.processed_at = now_ts
+        elif result.outcome in ("opt_out", "lead_banned", "escalated"):
+            inbound.status = "processed"
+            inbound.processed_at = now_ts
+            inbound.error_detail = f"v2_outcome: {result.outcome}"
+        else:
+            inbound.status = "error"
+            inbound.error_detail = f"v2_outcome: {result.outcome}"
 
         await db.commit()
 
         log.info(
-            "sandbox.turn.completed",
-            talk_id=talk_id_str,
-            turn=talk.turn_count,
-            mode=mode,
-            response_chars=len(str(outbound_text)),
+            "sandbox.turn.completed talk=%s outcome=%s mode=%s node=%s",
+            talk_id_str,
+            result.outcome,
+            talk.sandbox_llm_mode,
+            result.current_node_after,
         )

@@ -11,7 +11,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from arq.connections import ArqRedis
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
@@ -80,7 +80,11 @@ async def sandbox_dashboard(
     talk_ctx = []
     for talk in talks:
         lead = (
-            await db.execute(select(Lead).where(Lead.id == talk.lead_id))
+            await db.execute(
+                select(Lead).where(
+                    Lead.id == talk.lead_id, Lead.tenant_id == tenant.id
+                )
+            )
         ).scalar_one_or_none()
         if lead is None:
             continue
@@ -132,7 +136,7 @@ async def sandbox_create_talk(
             display_name=display_name,
         )
     except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        raise HTTPException(400, str(exc)) from exc
 
     return JSONResponse(
         {"talk_id": str(talk.id)},
@@ -210,7 +214,7 @@ async def sandbox_send_inbound(
             tenant_id=tenant.id, talk_id=talk_id, text=text
         )
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        raise HTTPException(404, str(exc)) from exc
 
     # Enqueue worker job
     await pool.enqueue_job(
@@ -262,14 +266,18 @@ async def sandbox_messages_partial(
         )
     ).scalars().all()
 
-    # Interleave by timestamp
-    items = []
+    # Interleave by raw datetime — sorting by the formatted "%H:%M" string
+    # would break across midnight (00:10 < 23:50 lexicographically) or when
+    # one day rolls into the next-day "%d/%m %H:%M" format.
+    _EPOCH = datetime.min.replace(tzinfo=UTC)
+    items: list[dict[str, Any]] = []
     for m in inbounds:
         items.append(
             {
                 "direction": "in",  # operador "simula" lead → bubble esquerda
                 "text": m.text,
                 "time": _format_time(m.received_at),
+                "_sort": m.received_at or _EPOCH,
                 "status": m.status,
             }
         )
@@ -279,10 +287,11 @@ async def sandbox_messages_partial(
                 "direction": "out",  # agente → bubble direita
                 "text": m.body_text or m.template_ref or "",
                 "time": _format_time(m.sent_at) if m.sent_at else "",
+                "_sort": m.sent_at or _EPOCH,
                 "status": m.status,
             }
         )
-    items.sort(key=lambda x: x["time"])  # cheap chronological-ish sort
+    items.sort(key=lambda x: x["_sort"])
 
     return templates.TemplateResponse(
         request, "_sandbox_messages.html", {"messages": items, "talk_id": str(talk_id)}

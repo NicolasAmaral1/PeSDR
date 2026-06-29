@@ -155,9 +155,14 @@ class SandboxService:
         if talk is None:
             raise ValueError(f"sandbox talk {talk_id} not found")
 
-        # Lead lookup pra pegar phone fake (necessário pro adapter contract)
+        # Lead lookup pra pegar phone fake (necessário pro adapter contract).
+        # Defense-in-depth: filter by tenant_id even though RLS already gates.
         lead = (
-            await self.session.execute(select(Lead).where(Lead.id == talk.lead_id))
+            await self.session.execute(
+                select(Lead).where(
+                    Lead.id == talk.lead_id, Lead.tenant_id == tenant_id
+                )
+            )
         ).scalar_one_or_none()
         if lead is None:
             raise ValueError(f"lead {talk.lead_id} not found")
