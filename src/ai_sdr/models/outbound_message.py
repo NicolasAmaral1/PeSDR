@@ -75,6 +75,8 @@ class OutboundMessage(Base):
     synthesis_voice_id: Mapped[str | None] = mapped_column(Text(), nullable=True)
     voice_emotion: Mapped[str | None] = mapped_column(Text(), nullable=True)
 
+    client_message_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+
     sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import redis.asyncio as aioredis
 import structlog
 from arq import cron
 from arq.connections import RedisSettings
@@ -40,6 +41,12 @@ async def _on_startup(ctx: dict[str, Any]) -> None:
     ctx["engine"] = build_engine(settings.database_url)
     ctx["session_factory"] = session_factory_for(ctx["engine"])
 
+    # Realtime publisher: a shared redis client jobs use to broadcast inbox
+    # events (e.g. the AI reply via publish_message_created). The worker is a
+    # separate process from the API; it only PUBLISHES to Redis — the API's
+    # InboxHub fans out to connected browsers.
+    ctx["redis"] = aioredis.from_url(settings.redis_url, decode_responses=True)
+
     tenants_dir = Path(settings.tenants_dir)
     ctx["adapter_registry"] = AdapterRegistry(
         tenant_loader=TenantLoader(tenants_dir),
@@ -49,6 +56,9 @@ async def _on_startup(ctx: dict[str, Any]) -> None:
 
 
 async def _on_shutdown(ctx: dict[str, Any]) -> None:
+    redis = ctx.get("redis")
+    if redis is not None:
+        await redis.aclose()
     engine = ctx.get("engine")
     if engine is not None:
         await engine.dispose()

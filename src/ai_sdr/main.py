@@ -6,15 +6,21 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import redis.asyncio as aioredis
 import structlog
 from arq.connections import RedisSettings, create_pool
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
+from ai_sdr.api.routes.console_inbox import router as console_inbox_router
+from ai_sdr.api.routes.console_me import router as console_me_router
 from ai_sdr.api.routes.health import router as health_router
 from ai_sdr.api.routes.leads import router as leads_router
 from ai_sdr.api.routes.webhooks import router as webhooks_router
+from ai_sdr.api.routes.ws_inbox import router as ws_inbox_router
 from ai_sdr.logging_setup import configure_logging
 from ai_sdr.messaging.registry import AdapterRegistry
+from ai_sdr.realtime.hub import InboxHub
 from ai_sdr.secrets.sops_loader import SopsLoader
 from ai_sdr.settings import Settings, get_settings
 from ai_sdr.tenant_loader.loader import TenantLoader
@@ -22,6 +28,11 @@ from ai_sdr.treeflow.checkpointer import ensure_checkpointer_schema
 from ai_sdr.web.login import router as console_login_router
 from ai_sdr.web.routes import router as console_router
 from ai_sdr.web.sandbox import router as sandbox_router  # PR #24
+
+
+def _inbox_static_dir() -> Path:
+    # src/ai_sdr/main.py -> src/ai_sdr/web/static/inbox
+    return Path(__file__).parent / "web" / "static" / "inbox"
 
 
 def _validate_console_secret_key_if_needed(settings: Settings) -> None:
@@ -95,7 +106,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     log.info("messaging.ready")
 
+    # Realtime inbox: shared redis client + per-process pubsub fan-out hub.
+    app.state.redis = aioredis.from_url(  # type: ignore[no-untyped-call]
+        settings.redis_url, decode_responses=True
+    )
+    app.state.inbox_hub = InboxHub()
+    await app.state.inbox_hub.start(app.state.redis)
+    log.info("realtime.ready")
+
     yield
+    await app.state.inbox_hub.stop()
+    await app.state.redis.aclose()
     await app.state.arq_pool.aclose()
     log.info("app.stopping")
 
@@ -108,6 +129,12 @@ def create_app() -> FastAPI:
     app.include_router(console_login_router)
     app.include_router(console_router)
     app.include_router(sandbox_router)  # PR #24 — sandbox console extension
+    app.include_router(console_inbox_router)
+    app.include_router(ws_inbox_router)
+    app.include_router(console_me_router)
+    inbox_dir = _inbox_static_dir()
+    if (inbox_dir / "index.html").exists():
+        app.mount("/inbox", StaticFiles(directory=str(inbox_dir), html=True), name="inbox")
     return app
 
 

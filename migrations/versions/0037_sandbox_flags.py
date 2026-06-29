@@ -1,7 +1,7 @@
 """sandbox flags on talks and leads
 
-Revision ID: 0032
-Revises: 0031
+Revision ID: 0037_sandbox_flags
+Revises: 0036_outbound_operator_send
 Create Date: 2026-06-23 00:00:00
 
 Adds sandbox marking columns per PR #24 (Sandbox Console Extension):
@@ -21,8 +21,8 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0032_sandbox_flags"
-down_revision = "0031_add_voice_synthesis_failed_reason"
+revision = "0037_sandbox_flags"
+down_revision = "0036_outbound_operator_send"
 branch_labels = None
 depends_on = None
 

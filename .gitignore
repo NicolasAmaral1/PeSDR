@@ -49,3 +49,6 @@ keys.txt
 
 # SDD scratch (briefs, reports, diffs, ledger)
 .superpowers/
+
+# Frontend build output (Vite → FastAPI static dir; build artifact, never commit)
+src/ai_sdr/web/static/inbox/
