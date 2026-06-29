@@ -33,7 +33,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -96,6 +96,17 @@ class Lead(Base):
     # channel label here.
     inbound_channel_label: Mapped[str] = mapped_column(
         Text(), nullable=False, server_default="main"
+    )
+
+    # CRM refs (migration 0033, ADR CRM Fase 1 "write-only + refs").
+    # Per-vendor external CRM ids. Shape:
+    #   {"rdstation": {"contact_id": "...", "deal_id": "...",
+    #                  "last_synced_at": "..."}}
+    # Read at template render time so Jinja2 can pull contact_external_id
+    # for `create_or_update_deal`. Backends update via UPDATE leads SET
+    # crm_refs = jsonb_set(...) after each external write.
+    crm_refs: Mapped[dict[str, Any]] = mapped_column(
+        JSONB(), nullable=False, server_default=text("'{}'::jsonb")
     )
 
     created_at: Mapped[datetime] = mapped_column(

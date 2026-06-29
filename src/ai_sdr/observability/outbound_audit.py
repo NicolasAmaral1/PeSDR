@@ -29,7 +29,12 @@ if TYPE_CHECKING:
 
 
 MessageType = Literal["text", "template"]
-TriggeredBy = Literal["inbound", "follow_up_scanner", "window_expired_recovery"]
+TriggeredBy = Literal[
+    "inbound",
+    "follow_up_scanner",
+    "window_expired_recovery",
+    "form_inbound",
+]
 
 
 async def record_outbound_sent(

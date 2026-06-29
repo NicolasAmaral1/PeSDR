@@ -10,6 +10,7 @@ import structlog
 from arq.connections import RedisSettings, create_pool
 from fastapi import FastAPI
 
+from ai_sdr.api.routes.forms import router as forms_router
 from ai_sdr.api.routes.health import router as health_router
 from ai_sdr.api.routes.leads import router as leads_router
 from ai_sdr.api.routes.webhooks import router as webhooks_router
@@ -105,6 +106,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(leads_router)
     app.include_router(webhooks_router)
+    app.include_router(forms_router)
     app.include_router(console_login_router)
     app.include_router(console_router)
     app.include_router(sandbox_router)  # PR #24 — sandbox console extension
