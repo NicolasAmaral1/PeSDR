@@ -109,8 +109,8 @@ class SandboxService:
             current_node=treeflow_dom.entry_node,
             collected={},
             extracted_facts={},
+            messages=[],
             objections_handled=[],
-            decision_audit={},
             updated_at=now,
         )
         self.session.add(state)

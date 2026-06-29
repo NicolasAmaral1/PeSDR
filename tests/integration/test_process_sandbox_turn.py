@@ -96,8 +96,8 @@ async def _seed_sandbox_talk(
         current_node="qualificacao",  # any node id present in the fixture treeflow
         collected={},
         extracted_facts={},
+        messages=[],
         objections_handled=[],
-        decision_audit={},
         updated_at=now,
     )
     db_session.add(state)
