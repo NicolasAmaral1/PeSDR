@@ -26,6 +26,10 @@ from ai_sdr.models.lead import Lead
 from ai_sdr.models.talk import Talk
 from ai_sdr.models.tenant import Tenant
 from ai_sdr.models.treeflow_version import TreeflowVersion
+from ai_sdr.models.user import User
+from ai_sdr.models.user_tenant_access import UserTenantAccess
+from ai_sdr.repositories.inbox_repository import list_contacts
+from ai_sdr.web.passwords import hash_password
 from ai_sdr.web.routes import _list_pending_lead_rows
 from ai_sdr.worker.jobs.scan_talks import scan_active_talks
 
@@ -168,3 +172,66 @@ async def test_scan_active_talks_e2e_skips_sandbox(
     await db_session.refresh(sandbox_talk)
     assert sandbox_talk.status == "active"
     assert sandbox_talk.closed_at is None
+
+
+@pytest.mark.asyncio
+async def test_sandbox_lead_absent_from_console_inbox(
+    db_session, seeded_talk_factory
+):
+    """`inbox_repository.list_contacts` MUST hide sandbox leads from the operator inbox.
+
+    Regression test for Nicolas's PR #26 round-2 review: without the
+    `Lead.is_sandbox.is_(False)` filter in `list_contacts`, a sandbox Lead
+    with an active AI Talk would surface in `/inbox` alongside real
+    prospects. This is the same failure mode the pending-inbox test
+    guards, but on the Chat Operator Inbox path (PR #27).
+    """
+    real_talk, tenant = await seeded_talk_factory(handling_mode="ai")
+    await set_tenant_context(db_session, tenant.id)
+
+    sandbox_lead = Lead(
+        tenant_id=tenant.id,
+        whatsapp_e164="+5550777777777",
+        status="active",
+        is_sandbox=True,
+        inbound_channel_label="main",
+    )
+    db_session.add(sandbox_lead)
+    await db_session.flush()
+
+    sandbox_talk = Talk(
+        tenant_id=tenant.id,
+        lead_id=sandbox_lead.id,
+        treeflow_id=real_talk.treeflow_id,
+        treeflow_version_id=real_talk.treeflow_version_id,
+        status="active",
+        handling_mode="ai",
+        last_message_at=datetime.now(UTC),
+        created_at=datetime.now(UTC),
+        is_sandbox=True,
+        sandbox_llm_mode="fake",
+    )
+    db_session.add(sandbox_talk)
+
+    # An operator user (list_contacts requires a user_id for the read markers join).
+    operator = User(
+        username=f"op_{uuid.uuid4().hex[:6]}", password_hash=hash_password("pw")
+    )
+    db_session.add(operator)
+    await db_session.flush()
+    db_session.add(
+        UserTenantAccess(user_id=operator.id, tenant_id=tenant.id, role="operator")
+    )
+    await db_session.commit()
+
+    rows = await list_contacts(
+        db_session,
+        tenant_id=tenant.id,
+        channel_label="main",
+        user_id=operator.id,
+        status="ai",
+    )
+    returned_lead_ids = {row.lead_id for row in rows}
+
+    assert real_talk.lead_id in returned_lead_ids
+    assert sandbox_lead.id not in returned_lead_ids
