@@ -1,7 +1,7 @@
 """form ingestion + CRM refs (spec 2026-06-16)
 
-Revision ID: 0033_form_ingestion_and_crm_refs
-Revises: 0032_sandbox_flags
+Revision ID: 0038_form_ingestion_and_crm_refs
+Revises: 0037_sandbox_flags
 Create Date: 2026-06-25 00:00:00
 
 Implements the schema half of the Form ingestion + CRM write-only design
@@ -21,8 +21,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision = "0033_form_ingestion_and_crm_refs"
-down_revision = "0032_sandbox_flags"
+revision = "0038_form_ingestion_and_crm_refs"
+down_revision = "0037_sandbox_flags"
 branch_labels = None
 depends_on = None
 
