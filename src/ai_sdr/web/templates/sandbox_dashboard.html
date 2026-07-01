@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% block title %}Sandbox · {{ current_tenant.display_name }}{% endblock %}
+
+{% block content %}
+<style>
+  .sandbox-warn {
+    background: #fef3c7;
+    color: #92400e;
+    padding: 10px 16px;
+    border-bottom: 1px solid #fbbf24;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .sandbox-warn::before { content: "⚠️ "; }
+
+  .new-talk-bar {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 24px;
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .new-talk-bar form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .new-talk-bar select, .new-talk-bar input {
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: white;
+    font: inherit;
+  }
+  .new-talk-bar button {
+    padding: 8px 16px;
+    background: var(--primary);
+    color: white;
+    border: none;
+    border-radius: var(--radius-sm);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .new-talk-bar button:hover { background: var(--primary-hover); }
+
+  .talks-grid {
+    padding: 24px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
+  }
+  .talk-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 16px;
+    box-shadow: var(--shadow-sm);
+    text-decoration: none;
+    color: inherit;
+    transition: border-color 0.15s, transform 0.15s;
+  }
+  .talk-card:hover { border-color: var(--primary); transform: translateY(-1px); }
+  .talk-card .label {
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  .talk-card .meta {
+    font-size: 12px;
+    color: var(--text-muted);
+    display: flex;
+    gap: 8px;
+    margin-bottom: 4px;
+  }
+  .badge {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .badge-real { background: #dcfce7; color: #166534; }
+  .badge-fake { background: #dbeafe; color: #1e40af; }
+
+  .empty-state {
+    text-align: center;
+    padding: 48px 24px;
+    color: var(--text-muted);
+  }
+</style>
+
+<div class="sandbox-warn">
+  AMBIENTE SANDBOX — Talks aqui são de teste, não tocam Meta API nem CRM externo. NÃO usar pra produção real.
+</div>
+
+<div class="new-talk-bar">
+  <strong>Nova Talk:</strong>
+  <form
+    hx-post="/console/{{ current_tenant.slug }}/sandbox/talks/new"
+    hx-trigger="submit"
+    hx-swap="none"
+  >
+    <select name="treeflow_id" required>
+      {% for tf in treeflows %}
+      <option value="{{ tf }}">{{ tf }}</option>
+      {% endfor %}
+    </select>
+    <select name="sandbox_llm_mode" required>
+      <option value="fake">🤖 Modo fake (instantâneo, $0)</option>
+      <option value="real">🧠 Modo real (Anthropic)</option>
+    </select>
+    <input type="text" name="display_name" placeholder="Nome do lead (opcional)" maxlength="60">
+    <button type="submit">+ Criar Talk</button>
+  </form>
+</div>
+
+<div class="talks-grid">
+  {% if talks %}
+    {% for t in talks %}
+    <a class="talk-card" href="/console/{{ current_tenant.slug }}/sandbox/talks/{{ t.id }}">
+      <div class="label">{{ t.lead_label }}</div>
+      <div class="meta">
+        <span class="badge badge-{{ t.llm_mode }}">{{ t.llm_mode }}</span>
+        <span>{{ t.treeflow_id }}</span>
+      </div>
+      <div class="meta">
+        <span>Turnos: {{ t.turn_count }}</span>
+        <span>Último: {{ t.last_message_at }}</span>
+      </div>
+      <div class="meta">
+        <span style="font-family: var(--mono); color: var(--text-faint);">#{{ t.id_short }}</span>
+      </div>
+    </a>
+    {% endfor %}
+  {% else %}
+    <div class="empty-state">
+      <p>Nenhum Talk sandbox criado ainda.</p>
+      <p>Use o formulário acima pra criar o primeiro.</p>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

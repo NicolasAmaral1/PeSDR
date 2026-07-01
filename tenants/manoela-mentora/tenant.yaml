@@ -72,3 +72,83 @@ objections:
 # Manoela) usar UI de assign de leads em /console/manoela-mentora/leads.
 console:
   enabled: true
+  sandbox:
+    enabled: true       # PR #24 — habilita /console/manoela-mentora/sandbox/*
+    llm_mode: toggle    # operador escolhe (Lana pode demonstrar com real ou fake)
+    default_mode: fake
+    max_concurrent_talks: 10
+
+# ---------------------------------------------------------------------------
+# Form ingestion (spec 2026-06-16) — Respondi → PeSDR direto.
+#
+# Lead preenche o formulário "Aplicação | Mentoria Icônica" no Respondi (id
+# QWHmKbnx), Respondi POSTa aqui em
+#   https://<host>/webhooks/manoela-mentora/form/respondi?secret=<respondi_webhook_secret>
+# e o worker cria Talk + envia HSM proativo `saudacao_mentoria_v1`.
+#
+# field_mapping = question_id (Respondi, estável mesmo ao mudar título) → nome
+# do campo em `collected` do TalkFlowState. Mapeamentos especiais:
+#   whatsapp_e164 → LeadIdentifier (não vai pra collected; vai pra Lead.whatsapp_e164)
+#   email         → tanto pra Lead.acquisition_metadata quanto pra collected
+# ---------------------------------------------------------------------------
+forms:
+  respondi:
+    enabled: true
+    shared_secret_ref: secrets/respondi_webhook_secret
+    start_treeflow: qualificacao_inicial
+    field_mapping:
+      # Identificação — vão pra Lead.whatsapp_e164 / email
+      xlcbkl7s88q:   nome
+      x6xfxr865en4:  email
+      xwdh1ovnyvsg:  whatsapp_e164
+      # Qualificação (radio) — texto legível ("De R$50.000 a R$100.000")
+      x5f9e9l6a1a3:  faturamento_mensal_faixa
+      # Sinais de mercado (text/textarea/radio)
+      xauob9ycp36c:  instagram
+      x242gwiqx96gj: nicho
+      x4susi11shlt:  descricao_marca
+      xka3kjt1vvrd:  canais_ativos
+      x4rnact8azx5:  posts_por_semana
+      xn3dldeajcq:   dificuldade_conteudo
+      x9z8o30es3j5:  produtos_atuais
+      xefr7brvmauk:  investiu_mentoria_antes
+      xazeixtkuskl:  meta_90_dias
+      xg52do5eohdc:  expectativa_tutoria
+    proactive_first_message:
+      enabled: true
+      template_ref: "saudacao_mentoria_v1"   # HSM em análise pela Meta (Categoria Marketing)
+      language: "pt_BR"
+      params:
+        - "{{ collected.nome | default('') }}"
+
+# ---------------------------------------------------------------------------
+# CRM out (spec 2026-06-16 + ADR CRM Fase 1 write-only + refs).
+#
+# CRMActionAdapter → RDStationCRMBackend usa o Token de Instância cifrado em
+# secrets.enc.yaml (rd_token). IDs abaixo vêm da instância real da Manoela:
+#   pipeline_id: "Manoela — Mentoria Icônica"
+#   stage_mapping.open: "Sem contato" (entry stage)
+#   won/lost são marcados via endpoint POST /deals/:id/{win,loss} — não
+#     precisam de stage_id no funil (RD não modela ganho/perdido como stage).
+#     Deixamos o open aqui apontando pra "Sem contato" e o backend usa esse id
+#     como stage_mapping.won e .lost por default; a chamada de fato vai pro
+#     endpoint próprio, o valor não é lido.
+#
+# custom_field_mapping: nome canônico (o que o TreeFlow YAML usa nos params
+# da action) → id do custom field no RD (categoria Contato).
+# ---------------------------------------------------------------------------
+crm:
+  provider: rdstation
+  rdstation:
+    token_ref: secrets/rd_token
+    pipeline_id: "6a3d398f92a5e7002883942e"          # Manoela — Mentoria Icônica
+    stage_mapping:
+      open: "6a3d398f92a5e70028839430"                # "Sem contato" (entry)
+      won:  "6a3d398f92a5e70028839430"                # informativo — win via /win endpoint
+      lost: "6a3d398f92a5e70028839430"                # informativo — loss via /loss endpoint
+    custom_field_mapping:
+      origem_lead:               "6a3db68c4272b10022e61be0"
+      faturamento_mensal_faixa:  "6a4569d78e958a002be89418"
+      instagram:                 "6a4569e8771096002208a232"
+      nicho:                     "6a4569f68017b2001dace163"
+      meta_90_dias:              "6a456a045ff79f0020010d87"

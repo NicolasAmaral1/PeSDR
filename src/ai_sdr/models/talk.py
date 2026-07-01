@@ -25,7 +25,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -90,4 +90,14 @@ class Talk(Base):
     turn_count: Mapped[int] = mapped_column(Integer(), nullable=False, server_default="0")
     tokens_consumed: Mapped[dict[str, Any]] = mapped_column(
         JSONB(), nullable=False, server_default=func.cast("{}", JSONB())
+    )
+
+    # Sandbox flags (migration 0032 — PR #24)
+    is_sandbox: Mapped[bool] = mapped_column(
+        Boolean(), nullable=False, server_default=func.cast("false", Boolean())
+    )
+    sandbox_llm_mode: Mapped[str | None] = mapped_column(
+        Text(),
+        nullable=True,
+        # 'real' (Anthropic) | 'fake' (FakeListChatModel). NULL when is_sandbox=false.
     )

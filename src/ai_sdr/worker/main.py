@@ -27,6 +27,8 @@ from ai_sdr.treeflow.checkpointer import ensure_checkpointer_schema
 from ai_sdr.worker.jobs.execute_action import execute_action
 from ai_sdr.worker.jobs.follow_up_scanner import follow_up_scanner
 from ai_sdr.worker.jobs.inbound import process_lead_inbox
+from ai_sdr.worker.jobs.process_form_inbound import process_form_inbound
+from ai_sdr.worker.jobs.process_sandbox_turn import process_sandbox_turn  # PR #24
 from ai_sdr.worker.jobs.scan_talks import scan_active_talks
 
 
@@ -84,7 +86,12 @@ cron_jobs = [
 class WorkerSettings:
     """arq looks up class attributes by name."""
 
-    functions = [process_lead_inbox, execute_action]
+    functions = [
+        process_lead_inbox,
+        execute_action,
+        process_sandbox_turn,  # PR #24
+        process_form_inbound,  # spec 2026-06-16 (form ingestion)
+    ]
     cron_jobs = cron_jobs
     on_startup = _on_startup
     on_shutdown = _on_shutdown

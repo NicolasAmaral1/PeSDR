@@ -563,3 +563,27 @@ When `adapter.send_*` succeeds but the worker's `db.commit()` then fails (DB hic
 - Alerts / paging — log structured serves; alert routing is a future plan.
 - Cost dashboard custom — LangSmith UI already reports tokens + cost per provider.
 - Trace of DB queries / arq jobs — only LLM calls are traced. Add via `@traceable` decorator in a future plan if needed.
+
+## Form ingestion + CRM out (spec 2026-06-16)
+
+- **Fluxo:** Respondi → `POST /webhooks/{slug}/form/{provider}?secret=X` → `RespondiFormAdapter.handle_submission` (auth constant-time compare + parse) → `ingest_form_submission` (find_or_create Lead, dedup UNIQUE `(tenant, provider, external_id)`) → arq `process_form_inbound` → cria Talk pré-populado + envia HSM proativo.
+- **URL path segment `form/`** distingue de messaging webhooks (`/webhooks/{slug}/{provider}`).
+- **Auth Respondi:** shared secret na URL (`?secret=…`) — Respondi não suporta HMAC. Cifrado em `secrets.enc.yaml` como `respondi_webhook_secret`.
+- **field_mapping em `tenant.yaml > forms.<provider>`** mapeia `question_id` (Respondi devolve estável mesmo trocando título) → nome canônico em `collected`. Destinos especiais: `whatsapp_e164` vai pra Lead (não pra collected); `email` vai pra Lead.acquisition_metadata + collected.
+- **Phone shape:** `{"country": "55", "phone": "43996819949"}` → adapter normaliza pra E.164 (`+5543996819949`).
+- **Radio field:** Respondi devolve array com 1 elemento (`["De R$50k a R$100k"]`) mesmo pra single-select — adapter faz `array[0]`.
+- **HSM proativo:** primeira mensagem via `send_template` (categoria Marketing). Sem HSM aprovado, Talk fica em `requires_review` — operador vê no console.
+
+### CRM out — CRMActionAdapter + RDStationCRMBackend
+
+- **Adapter único `crm` no registry FE-03c** (não N adapters por vendor). Dispatch de vendor por `tenant.yaml > crm.provider`. Trocar de RD Station pra HubSpot é 1 linha no tenant.yaml (nenhum TreeFlow reescrito).
+- **Handlers canônicos:** `create_or_update_contact`, `create_or_update_deal`, `update_deal_stage`, `record_qualification_note`. Cada backend implementa contra API do vendor.
+- **RDStationCRMBackend usa Token de Instância** (`rd_token`) — simples, sem OAuth refresh dance. Cifrado em `secrets.enc.yaml`.
+- **3 níveis de idempotência em `create_or_update_contact`:**
+  1. Lookup local em `Lead.crm_refs.rdstation.contact_id` → PUT update
+  2. Lookup remoto por phone (`GET /contacts?phone=…`) → adopt id + PUT update
+  3. POST create + persist novo id em `Lead.crm_refs`
+- **`update_deal_stage('won'|'lost')`** vai pros endpoints dedicados `/deals/{id}/win` e `/deals/{id}/loss` (RD não modela won/lost como stage). Stage IDs em `stage_mapping.won/lost` do tenant.yaml são informacionais — não são lidos.
+- **`custom_field_mapping`** em `tenant.yaml > crm.rdstation` mapeia nome canônico (usado nos params da action do TreeFlow) → id do custom field no RD.
+- **Erros:** 401 → `RDStationAuthError` (terminal, worker não retry); 422 → `RDStationValidationError` (terminal); 429/5xx → tenacity retry interno (3x); network → tenacity retry.
+- **Wipe pra dev fresh (novas colunas):** `docker exec ai_sdr_postgres psql -U ai_sdr_app -d ai_sdr -c "TRUNCATE inbound_form_submissions; UPDATE leads SET crm_refs = '{}'::jsonb;"`

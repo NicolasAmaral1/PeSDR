@@ -152,6 +152,26 @@ class ObjectionsConfig(BaseModel):
     history_window: int = Field(default=4, ge=1, le=20)
 
 
+class SandboxConfig(BaseModel):
+    """Sandbox web UI sub-config (PR #24 — sandbox console extension).
+
+    enabled=true exposes /console/{slug}/sandbox/* routes for this tenant.
+    Gated separately from console.enabled because some tenants in prod may
+    want console but NOT sandbox (e.g., Manoela once stabilized).
+
+    llm_mode default ('toggle') lets the operator choose per-Talk in the UI.
+    'real' forces Anthropic always (validates production behavior). 'fake'
+    forces FakeListChatModel (zero cost, determinístic — útil pra CI/dev).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    llm_mode: Literal["real", "fake", "toggle"] = "toggle"
+    default_mode: Literal["real", "fake"] = "fake"
+    max_concurrent_talks: int = Field(default=10, ge=1, le=100)
+
+
 class ConsoleConfig(BaseModel):
     """Operator console toggle per tenant (Plano 11).
 
@@ -159,11 +179,14 @@ class ConsoleConfig(BaseModel):
     do NOT live here — see the users table + user_tenant_access in
     migration 0009 + spec §5. Tenants that use Vialum Tasks Inbox as
     their HITL surface should set enabled=false (or omit the block).
+
+    sandbox block (PR #24) gates /console/{slug}/sandbox/* separately.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
+    sandbox: SandboxConfig | None = None
 
 
 def _require_secrets_prefix(value: str | None) -> str | None:
@@ -232,6 +255,120 @@ class StorageConfig(BaseModel):
         return _require_secrets_prefix(v)
 
 
+class ProactiveFirstMessageConfig(BaseModel):
+    """HSM template sent right after a form submission creates a new Talk.
+
+    Lead came from a web form → never spoke on WhatsApp → not in the 24h
+    window → first outbound MUST be a Meta-approved template.
+
+    `params` is a list of Jinja2 expression strings rendered against
+    `{collected, lead, tenant}` at send time. Order matches the template's
+    `{{1}}, {{2}}, ...` positional slots.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    template_ref: str = Field(min_length=1)
+    language: str = "pt_BR"
+    params: list[str] = Field(default_factory=list)
+
+
+class FormProviderConfig(BaseModel):
+    """Per-provider form ingestion config (spec 2026-06-16 §3.6).
+
+    `field_mapping` maps provider-native question IDs (e.g. Respondi
+    `xlcbkl7s88q`) to PeSDR's `collected` field names. Special destinations:
+
+      - `whatsapp_e164` → goes into LeadIdentifier (not `collected`); the
+        adapter normalizes the phone shape per provider.
+      - any other → pre-populates the Talk's TalkFlowState.collected, so
+        the first turn already has those fields filled.
+
+    `shared_secret_ref` is mandatory when enabled=true because Respondi (and
+    most form providers) don't ship HMAC — auth is a URL query param.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool
+    shared_secret_ref: str | None = None
+    start_treeflow: str = Field(min_length=1)
+    field_mapping: dict[str, str] = Field(default_factory=dict)
+    proactive_first_message: ProactiveFirstMessageConfig | None = None
+
+    @field_validator("shared_secret_ref")
+    @classmethod
+    def _check_secret_prefix(cls, v: str | None) -> str | None:
+        return _require_secrets_prefix(v)
+
+    @model_validator(mode="after")
+    def _check_secret_required_when_enabled(self) -> Self:
+        if self.enabled and not self.shared_secret_ref:
+            raise ValueError(
+                "form provider with enabled=true requires shared_secret_ref"
+            )
+        return self
+
+
+class RDStationCRMConfig(BaseModel):
+    """RD Station CRM backend config.
+
+    MVP uses the Token de Instância (single token, no OAuth refresh dance).
+    `pipeline_id` and `stage_mapping` are obtained via the RD CRM API once
+    (see docs/superpowers/notes/2026-06-23-rd-station-setup-guide.md):
+
+      curl https://crm.rdstation.com/api/v1/deal_pipelines?token=$RD_TOKEN
+
+    `stage_mapping.open` is the entry stage for new deals. `won`/`lost` are
+    informational only at MVP — won/lost transitions hit the `deals/:id/win`
+    endpoint, not a stage move.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    token_ref: str
+    pipeline_id: str = Field(min_length=1)
+    stage_mapping: dict[Literal["open", "won", "lost"], str]
+    custom_field_mapping: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("token_ref")
+    @classmethod
+    def _check_ref(cls, v: str) -> str:
+        return _require_secrets_prefix(v)  # type: ignore[return-value]
+
+    @model_validator(mode="after")
+    def _check_stage_mapping(self) -> Self:
+        if "open" not in self.stage_mapping:
+            raise ValueError("crm.rdstation.stage_mapping requires at least 'open'")
+        return self
+
+
+class CRMConfig(BaseModel):
+    """Top-level CRM config (spec 2026-06-16 §4.7, ADR 2026-06-12 Fase 1).
+
+    `provider` is free-form (registry dispatches at runtime). Each provider
+    has its own sub-block validated below.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str = Field(min_length=1)
+    rdstation: RDStationCRMConfig | None = None
+    # hubspot: HubSpotCRMConfig | None = None  # future
+    # pipedrive: PipedriveCRMConfig | None = None  # future
+
+    @model_validator(mode="after")
+    def _check_provider_block_present(self) -> Self:
+        block = getattr(self, self.provider, None)
+        if block is None:
+            raise ValueError(
+                f"crm.provider={self.provider!r} requires the "
+                f"crm.{self.provider}: {{...}} block to be present"
+            )
+        return self
+
+
 class TenantConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -248,6 +385,8 @@ class TenantConfig(BaseModel):
     humanization: HumanizationConfig = Field(default_factory=HumanizationConfig)
     voice: VoiceConfig | None = None
     storage: StorageConfig | None = None
+    forms: dict[str, FormProviderConfig] = Field(default_factory=dict)  # spec 2026-06-16
+    crm: CRMConfig | None = None  # spec 2026-06-16, ADR 2026-06-12 Fase 1
     sdr_persona: dict[str, Any] | None = (
         None  # FE-01b: pass-through slot (architecture_version stays in DB)
     )

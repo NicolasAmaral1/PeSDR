@@ -58,10 +58,14 @@ async def follow_up_scanner(ctx: dict[str, Any]) -> None:
         await db.execute(text("SET LOCAL row_security = off"))
         rows = (
             await db.execute(
+                # PR #24: filtro de cinto — sandbox NÃO cria follow_up_job na fonte,
+                # mas filtramos por garantia se algum vazar.
                 select(FollowUpJob.id, FollowUpJob.tenant_id, FollowUpJob.lead_id)
+                .join(Lead, Lead.id == FollowUpJob.lead_id)
                 .where(
                     FollowUpJob.status == "pending",
                     FollowUpJob.scheduled_at <= func.now(),
+                    Lead.is_sandbox.is_(False),
                 )
                 .order_by(FollowUpJob.scheduled_at.asc())
                 .limit(_BATCH_SIZE)

@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from ai_sdr.api.routes.console_inbox import router as console_inbox_router
 from ai_sdr.api.routes.console_me import router as console_me_router
+from ai_sdr.api.routes.forms import router as forms_router
 from ai_sdr.api.routes.health import router as health_router
 from ai_sdr.api.routes.leads import router as leads_router
 from ai_sdr.api.routes.webhooks import router as webhooks_router
@@ -27,6 +28,7 @@ from ai_sdr.tenant_loader.loader import TenantLoader
 from ai_sdr.treeflow.checkpointer import ensure_checkpointer_schema
 from ai_sdr.web.login import router as console_login_router
 from ai_sdr.web.routes import router as console_router
+from ai_sdr.web.sandbox import router as sandbox_router  # PR #24
 
 
 def _inbox_static_dir() -> Path:
@@ -125,8 +127,10 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(leads_router)
     app.include_router(webhooks_router)
+    app.include_router(forms_router)
     app.include_router(console_login_router)
     app.include_router(console_router)
+    app.include_router(sandbox_router)  # PR #24 — sandbox console extension
     app.include_router(console_inbox_router)
     app.include_router(ws_inbox_router)
     app.include_router(console_me_router)
