@@ -301,6 +301,7 @@ async def list_contacts(
         .where(
             Lead.tenant_id == tenant_id,
             Lead.inbound_channel_label == channel_label,
+            Lead.is_sandbox.is_(False),  # PR #26: sandbox leads não vazam na inbox real
         )
     )
 

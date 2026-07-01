@@ -1,0 +1,18 @@
+{% if messages %}
+  {% for m in messages %}
+  <div class="bubble {{ m.direction }}">
+    {{ m.text }}
+    <div class="time">{{ m.time }}{% if m.status == 'queued' %} · ⏳ digitando…{% elif m.status == 'error' %} · ❌ erro{% endif %}</div>
+  </div>
+  {% endfor %}
+  <script>
+    // Scroll pro fim
+    var pane = document.getElementById('messages-pane');
+    if (pane) pane.scrollTop = pane.scrollHeight;
+  </script>
+{% else %}
+  <div style="text-align: center; color: var(--text-muted); padding: 24px;">
+    Digite uma mensagem abaixo pra iniciar a conversa.<br>
+    O agente vai responder após o worker processar o turno (~2-5s no modo real, instantâneo no fake).
+  </div>
+{% endif %}

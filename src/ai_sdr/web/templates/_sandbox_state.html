@@ -1,0 +1,39 @@
+<h3>🔍 State Debugger</h3>
+
+<div style="margin-bottom: 12px;">
+  <strong>Talk:</strong>
+  <pre>{{ talk.treeflow_id }} · {{ talk.status }} · mode={{ talk.llm_mode }} · turn={{ talk.turn_count }}</pre>
+</div>
+
+{% if state %}
+<div style="margin-bottom: 12px;">
+  <strong>current_node:</strong>
+  <pre>{{ state.current_node }}</pre>
+</div>
+
+<div style="margin-bottom: 12px;">
+  <strong>collected:</strong>
+  <pre>{% if state.collected %}{{ state.collected | tojson(indent=2) }}{% else %}(empty){% endif %}</pre>
+</div>
+
+{% if state.extracted_facts %}
+<div style="margin-bottom: 12px;">
+  <strong>extracted_facts:</strong>
+  <pre>{{ state.extracted_facts | tojson(indent=2) }}</pre>
+</div>
+{% endif %}
+
+{% if state.objections_handled %}
+<div style="margin-bottom: 12px;">
+  <strong>objections_handled:</strong>
+  <pre>{{ state.objections_handled | tojson(indent=2) }}</pre>
+</div>
+{% endif %}
+{% else %}
+<p style="color: var(--text-muted);">State ainda não disponível.</p>
+{% endif %}
+
+<hr style="margin: 16px 0; border: none; border-top: 1px solid var(--border);">
+<p style="font-size: 11px; color: var(--text-faint);">
+  Atualiza a cada 2s. Adapter: <code>FakeMessagingAdapter</code>. Actions: <code>LoggingActionAdapter</code>.
+</p>

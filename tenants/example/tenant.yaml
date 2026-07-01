@@ -66,3 +66,8 @@ objections:
 
 console:
   enabled: true
+  sandbox:
+    enabled: true       # PR #24 — habilita /console/example/sandbox/*
+    llm_mode: toggle    # operador escolhe por Talk
+    default_mode: fake
+    max_concurrent_talks: 10

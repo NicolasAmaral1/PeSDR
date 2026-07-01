@@ -95,7 +95,11 @@ async def _list_pending_lead_rows(db: AsyncSession, tenant_id: uuid.UUID) -> lis
         (
             await db.execute(
                 select(Lead)
-                .where(Lead.tenant_id == tenant_id, Lead.status == "pending_assignment")
+                .where(
+                    Lead.tenant_id == tenant_id,
+                    Lead.status == "pending_assignment",
+                    Lead.is_sandbox.is_(False),  # PR #24: skip sandbox leads from inbox
+                )
                 .order_by(Lead.created_at.desc())
             )
         )

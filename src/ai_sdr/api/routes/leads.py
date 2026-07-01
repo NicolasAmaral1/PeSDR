@@ -82,7 +82,10 @@ async def list_pending_leads(
         await db.execute(
             select(Lead, queued_count_sq.c.n)
             .outerjoin(queued_count_sq, queued_count_sq.c.lead_id == Lead.id)
-            .where(Lead.status == "pending_assignment")
+            .where(
+                Lead.status == "pending_assignment",
+                Lead.is_sandbox.is_(False),  # PR #24: skip sandbox leads
+            )
             .order_by(Lead.created_at.desc())
         )
     ).all()
