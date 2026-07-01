@@ -168,6 +168,7 @@ async def _run_v2_inbox(
     lead: Lead,
     adapter,
     tenant_uuid: uuid.UUID,
+    redis=None,
 ) -> None:
     """Drain queued inbound messages through FlowEngine run_turn (FE-01b).
 
@@ -491,6 +492,30 @@ async def _run_v2_inbox(
         # Tenant context is transaction-local; re-set so the next fetch sees RLS rows.
         await set_tenant_context(db, tenant_uuid)
 
+        # Realtime: surface the AI reply live to any connected operator. The
+        # worker is a SEPARATE process from the API — it only publishes to
+        # Redis; the API's InboxHub delivers to browsers. Best-effort: a
+        # publish failure must NOT fail the job or the turn. Only a "sent"
+        # outcome produced a new outbound message worth surfacing.
+        if redis is not None and result.outcome == "sent":
+            try:
+                from ai_sdr.realtime.producers import publish_message_created
+
+                await publish_message_created(
+                    redis,
+                    db,
+                    tenant_id=tenant.id,
+                    lead=lead,
+                    body_preview=(result.response_text or "")[:120],
+                )
+            except Exception as pub_err:  # noqa: BLE001
+                log.warning(
+                    "worker.v2.realtime_publish_failed",
+                    tenant_id=str(tenant.id),
+                    lead_id=str(lead.id),
+                    err=str(pub_err),
+                )
+
 
 async def process_lead_inbox(ctx: dict[str, Any], tenant_id: str, lead_id: str) -> None:
     session_factory = ctx["session_factory"]
@@ -563,6 +588,7 @@ async def process_lead_inbox(ctx: dict[str, Any], tenant_id: str, lead_id: str) 
                     lead=lead,
                     adapter=adapter,
                     tenant_uuid=tenant_uuid,
+                    redis=ctx.get("redis"),
                 )
                 return
             # else: fall through to existing v1 path unchanged

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from langchain_core.runnables import Runnable
@@ -37,7 +37,6 @@ from ai_sdr.flowengine.preprocessing import (
 )
 from ai_sdr.flowengine.routing import validate_transition
 from ai_sdr.flowengine.sender import send_response_text
-from ai_sdr.voice.renderer import VoiceSynthesisError
 from ai_sdr.flowengine.system_prompt import (
     CorrectionContext,
     FreshLayer,
@@ -57,13 +56,14 @@ from ai_sdr.models.tenant import Tenant
 from ai_sdr.models.treeflow_version import TreeflowVersion
 from ai_sdr.repositories.talkflow_state_repository import TalkFlowStateRepository
 from ai_sdr.schemas.tenant_yaml import TenantConfig
+from ai_sdr.voice.renderer import VoiceSynthesisError
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class RunTurnResult:
-    outcome: str  # 'sent' | 'escalated' | 'opt_out' | 'lead_banned' | 'error'
+    outcome: str  # 'sent' | 'escalated' | 'opt_out' | 'lead_banned' | 'skipped_human' | 'error'
     current_node_after: str | None
     response_text: str | None
 
@@ -101,7 +101,7 @@ async def run_turn(
     storage=None,
 ) -> RunTurnResult:
     """Execute one FlowEngine v2 turn. See module docstring."""
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
 
     # [1-3] Preprocessing — resolve Lead, Talk, State; opt-out detection
     try:
@@ -139,10 +139,27 @@ async def run_turn(
         await set_tenant_context(session, tenant.id)
         await acquire_lead_lock(session, tenant.id, ctx.lead.id)
 
+        # Re-fetch the Talk row from the DB while holding the advisory lock.
+        # resolve_pipeline_context loaded ctx.talk BEFORE the lock was acquired,
+        # so a human takeover that landed between preprocessing and this point
+        # would not be visible on the cached ORM object. session.refresh() issues
+        # a SELECT under the lock, closing that race window.
+        await session.refresh(ctx.talk)
+
         # Load runtime state
         state_repo = TalkFlowStateRepository(session)
         state = await state_repo.load(ctx.talk.id)
         assert state is not None, "TalkFlowState missing after preprocessing"
+
+        # HITL gate: a human-held talk must never get an AI reply. Re-read here
+        # (under the lead lock) so a takeover that landed mid-turn is honored.
+        if ctx.talk.handling_mode == "human":
+            logger.info("run_turn.skipped_human talk=%s", ctx.talk.id)
+            return RunTurnResult(
+                outcome="skipped_human",
+                current_node_after=state.current_node,
+                response_text=None,
+            )
 
         # [6] Build layered system prompt
         cached = build_cached_layer(treeflow)

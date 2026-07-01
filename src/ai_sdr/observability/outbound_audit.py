@@ -33,6 +33,7 @@ TriggeredBy = Literal[
     "inbound",
     "follow_up_scanner",
     "window_expired_recovery",
+    "operator",
     "form_inbound",
 ]
 

@@ -283,6 +283,118 @@ docker exec ai_sdr_postgres psql -U ai_sdr_app -d ai_sdr \
 - **Cross-tenant worker**: `execute_action` faz `SET LOCAL row_security = off` pra lookup, depois `set_tenant_context` pra reads tenant-scoped (Tenant.slug → tenant.yaml + secrets via SopsLoader).
 - **Wipe pra dev fresh**: `docker exec ai_sdr_postgres psql -U ai_sdr_app -d ai_sdr -c "TRUNCATE action_executions;"`.
 
+## CRM proxy + Form ingestion (Plano 7a — revisado 2026-06-17)
+
+**Decisão central** (decision note: `docs/superpowers/notes/2026-06-17-form-ingestion-via-crm-proxy.md`; spec amendment: `docs/superpowers/specs/2026-06-17-crm-proxy-amendment.md`):
+
+A Fase 1 do ADR CRM (write-only com refs externas) NÃO usa adapter de formulário direto. Em vez disso, o CRM externo (RD Station) atua como **source of truth temporário**:
+
+```
+Respondi ──integração nativa─▶ RD Station CRM ──webhook──▶ PeSDR
+                                                              │
+                                                              ├─ cria Lead/Talk
+                                                              ├─ envia HSM proativo
+                                                              └─ on_collected: crm ──▶ atualiza MESMO contact via API
+```
+
+Quando Fase 3 do ADR entrar (CRM interno operacional), o webhook handler refatora pra delegar pro sync engine — sem mudar a borda externa.
+
+### Por que esta arquitetura
+
+- **Zero duplicação de dados**: RD Station é única superfície de criação de contact/deal
+- **Zero hard code de question_id**: mapping de campos fica no painel Respondi (integração nativa configurável)
+- **Antecipa pattern Fase 4** (bidirecional) sem custo adicional
+- **Lead.crm_refs JSONB** preserva refs externas como na Fase 1 original
+
+### Arquitetura técnica
+
+- **5ª borda nova**: `CRMInboundAdapter` (não `FormProviderAdapter`)
+- **Subsistema**: `src/ai_sdr/crm/inbound/` (não `src/ai_sdr/forms/`)
+- **Webhook URL**: `POST /webhooks/{tenant_slug}/crm/{provider}` (não `/form/`)
+- **Worker job**: `worker/jobs/crm_inbound.py` (não `worker/jobs/forms.py`)
+- **Tabela**: `inbound_crm_events` (não `inbound_form_submissions`)
+- **Tenant config**: bloco `crm.inbound.<provider>` (não `forms.<provider>`)
+
+### Tenant.yaml shape
+
+```yaml
+crm:
+  provider: rdstation
+
+  inbound:                                          # entrada via webhook CRM
+    rdstation:
+      enabled: true
+      hmac_secret_ref: secrets/rdstation_webhook_secret
+      start_treeflow: qualificacao_inicial
+      origin_filter:
+        accept_sources: ["integration"]              # só eventos via integração nativa
+        ignore_manual: true                          # ignora contacts criados manualmente
+      events:
+        - contact_created
+      proactive_first_message:
+        enabled: true
+        template_ref: "saudacao_mentoria_v1"
+        language: pt_BR
+        params:
+          - "{{ collected.nome | default('') | capitalize }}"
+
+  rdstation:                                         # saída via OAuth API
+    refresh_token_ref: secrets/rdstation_refresh_token
+    client_id_ref: secrets/rdstation_client_id
+    client_secret_ref: secrets/rdstation_client_secret
+    pipeline_id: "<id>"
+    stage_mapping:
+      open: "<stage_id_open>"
+      won: "<stage_id_won>"
+      lost: "<stage_id_lost>"
+```
+
+### Setup operacional (Manoela)
+
+1. **No painel Respondi**: Integrações → CRMs → "RD Station CRM" → Conectar → autoriza conta
+2. **No painel RD Station**:
+   - Cria pipeline + 3 stages (open/won/lost) — anota IDs
+   - Cria custom fields necessários — anota IDs
+   - Configura webhook URL: `https://sdr.luminai.ia.br/webhooks/manoela-mentora/crm/rdstation` + HMAC secret
+   - Escuta evento `contact_created` no mínimo
+   - Cria app OAuth — anota `client_id`/`client_secret`
+3. **Cifrar 4 secrets novos** em `secrets.enc.yaml`:
+   - `rdstation_webhook_secret` (gera local)
+   - `rdstation_refresh_token` (obtido via `scripts/oauth_flow_init.py`)
+   - `rdstation_client_id`
+   - `rdstation_client_secret`
+4. **Aprovar template HSM** no Meta Business Manager (`saudacao_mentoria_v1` — 24-72h de aprovação)
+5. **Atualizar TreeFlow Manoela** v0.3.0 com `on_collected: crm`
+
+### Filtro de origem (CRÍTICO)
+
+`origin_filter.accept_sources: ["integration"]` garante que contact criado **manualmente pela Lana** no painel RD Station **não dispara Talk**. Só eventos vindos da integração nativa Respondi → RD criam conversa.
+
+Open question: como exatamente o RD Station marca essa origem no payload — `source: "integration"`, tag específica, ou outro campo? Confirmar ao configurar webhook (ver decision note §14.1).
+
+### Quando Fase 3 entrar (CRM interno operacional)
+
+Refactor cirúrgico:
+
+```python
+# Hoje (Fase 1)
+async def process_crm_event(ctx, event_id):
+    event = await load(event_id)
+    lead = await find_or_create_lead_by_crm_event(event)
+    talk = await create_talk(lead, event)
+    await send_proactive_hsm(talk)
+
+# Fase 3+ (1 PR cirúrgico)
+async def process_crm_event(ctx, event_id):
+    event = await load(event_id)
+    internal_record = await sync_engine.reconcile(event)
+    if internal_record.should_open_talk:
+        talk = await create_talk(internal_record)
+        await send_proactive_hsm(talk)
+```
+
+Webhook handler, adapter, schema do `IngestedCRMEvent`, `Lead.crm_refs` — **todos preservados**.
+
 ## Multi-channel pre-paving (hedges)
 
 Hedges baratos que travam a opção de multi-channel-per-tenant sem comprometer a arquitetura atual. Implementação completa de multi-channel fica pra plano dedicado quando aparecer caso de uso real (cliente que precisa de 2+ números no mesmo tenant). Os hedges abaixo eliminam ~50% do custo de refactor futuro:

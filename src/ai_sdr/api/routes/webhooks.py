@@ -32,7 +32,9 @@ from ai_sdr.db.rls import set_tenant_context
 from ai_sdr.messaging.errors import SignatureError
 from ai_sdr.messaging.ingest import ingest_inbound_message
 from ai_sdr.messaging.registry import AdapterRegistry
+from ai_sdr.models.lead import Lead
 from ai_sdr.models.tenant import Tenant
+from ai_sdr.realtime.producers import publish_message_created
 
 log = structlog.get_logger(__name__)
 router = APIRouter()
@@ -123,15 +125,43 @@ async def _webhook_ingest_impl(
         return Response(status_code=200)
 
     await set_tenant_context(db, tenant.id)
+    # Collect (lead_id, preview_text) as we ingest each message so we can
+    # emit a realtime event per affected lead after the commit.
+    # last_preview_per_lead: lead_id → truncated text of the most recent
+    # inbound message for that lead (last write wins — fine for a preview).
+    last_preview_per_lead: dict[uuid.UUID, str] = {}
     affected_lead_ids: set[uuid.UUID] = set()
     for msg in messages:
         result = await ingest_inbound_message(db, tenant, provider, msg)
         if result.status == "queued":
             affected_lead_ids.add(result.lead_id)
+            # Truncate to 120 chars for the preview; text may be None for media.
+            last_preview_per_lead[result.lead_id] = (msg.text or "")[:120]
     await db.commit()
 
     for lead_id in affected_lead_ids:
         await pool.enqueue_job("process_lead_inbox", str(tenant.id), str(lead_id))
+
+    # Best-effort realtime publish — a failure here MUST NOT fail the webhook.
+    # We load each affected Lead and publish a message.created event so an
+    # operator's open WebSocket sees new contact messages live.
+    redis = getattr(request.app.state, "redis", None)
+    if redis is not None:
+        for lead_id in affected_lead_ids:
+            try:
+                lead = await db.get(Lead, lead_id)
+                if lead is None:
+                    continue
+                preview = last_preview_per_lead.get(lead_id, "")
+                await publish_message_created(
+                    redis, db, tenant_id=tenant.id, lead=lead, body_preview=preview
+                )
+            except Exception:
+                log.exception(
+                    "webhook.realtime_publish_error",
+                    slug=tenant_slug,
+                    lead_id=str(lead_id),
+                )
 
     log.info(
         "webhook.ingested",
